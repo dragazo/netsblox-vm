@@ -3,9 +3,61 @@ use std::collections::{BTreeMap, VecDeque};
 
 use netsblox_ast as ast;
 use embedded_time::Clock as EmbeddedClock;
-use slotmap::{SlotMap, DefaultKey};
+use slotmap::SlotMap;
 
-struct SymbolTable(BTreeMap<String, ast::Value>);
+slotmap::new_key_type! {
+    struct RefPoolKey;
+    struct EntityKey;
+}
+
+enum CopyValue {
+    Bool(bool),
+    Number(f64),
+}
+enum RefValue {
+    String(String),
+    List(Vec<Value>),
+}
+enum Value {
+    CopyValue(CopyValue),
+    RefValue(RefPoolKey),
+}
+impl Value {
+    fn from_ast(value: &ast::Value, ref_pool: &mut RefPool) -> Self {
+        match value {
+            ast::Value::Bool(x) => Value::CopyValue(CopyValue::Bool(*x)),
+            ast::Value::Number(x) => Value::CopyValue(CopyValue::Number(*x)),
+            ast::Value::Constant(ast::Constant::E) => Value::CopyValue(CopyValue::Number(std::f64::consts::E)),
+            ast::Value::Constant(ast::Constant::Pi) => Value::CopyValue(CopyValue::Number(std::f64::consts::PI)),
+            ast::Value::String(x) => {
+                for (k, v) in ref_pool.pool.iter() {
+                    match v {
+                        RefValue::String(s) if s == x => return Value::RefValue(k),
+                        _ => (),
+                    }
+                }
+                Value::RefValue(ref_pool.pool.insert(RefValue::String(x.clone())))
+            }
+            ast::Value::List(x) => {
+                let values = x.iter().map(|x| Value::from_ast(x, ref_pool)).collect();
+                Value::RefValue(ref_pool.pool.insert(RefValue::List(values)))
+            }
+        }
+    }
+}
+
+struct SymbolTable<'a>(BTreeMap<&'a str, Value>);
+impl<'a> SymbolTable<'a> {
+    fn new() -> Self {
+        Self(Default::default())
+    }
+    fn define(&mut self, var: &'a str, value: Value) -> Result<(), Value> {
+        match self.0.insert(var, value) {
+            None => Ok(()),
+            Some(x) => Err(x),
+        }
+    }
+}
 
 pub enum StepResult {
     Noop,
@@ -99,17 +151,17 @@ impl<'a> CodePosition<'a> {
 
 
 
-struct ScriptContext {
-    vars: SymbolTable,
+struct ScriptContext<'a> {
+    vars: SymbolTable<'a>,
 }
 enum ScriptState<'a> {
     Idle,
-    Running { context: ScriptContext, code_pos: CodePosition<'a> }
+    Running { context: ScriptContext<'a>, code_pos: CodePosition<'a> }
 }
 struct Script<'a> {
     script: &'a ast::Script,
     state: ScriptState<'a>,
-    exec_queue: VecDeque<ScriptContext>,
+    exec_queue: VecDeque<ScriptContext<'a>>,
 }
 impl<'a> Script<'a> {
     fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>, entity_context: &mut EntityContext) -> StepResult {
@@ -143,13 +195,13 @@ impl<'a> Script<'a> {
 
 // -----------------------------------------------------------------
 
-struct EntityContext {
+struct EntityContext<'a> {
     name: String,
-    fields: SymbolTable,
+    fields: SymbolTable<'a>,
     is_clone: bool,
 }
 struct Entity<'a> {
-    context: EntityContext,
+    context: EntityContext<'a>,
     scripts: Vec<Script<'a>>,
     script_queue_pos: usize,
 }
@@ -167,32 +219,49 @@ impl Entity<'_> {
 
 // -----------------------------------------------------------------
 
-struct GlobalContext<Clock> {
+struct RefPool {
+    pool: SlotMap<RefPoolKey, RefValue>,
+}
+impl RefPool {
+    fn new() -> Self {
+        Self { pool: Default::default() }
+    }
+}
+
+// -----------------------------------------------------------------
+
+struct GlobalContext<'a, Clock> {
     clock: Clock,
     proj_name: String,
     role_name: String,
-    globals: SymbolTable,
+    globals: SymbolTable<'a>,
+    ref_pool: RefPool,
 }
 pub struct Engine<'a, Clock> {
-    context: GlobalContext<Clock>,
-    entities: SlotMap<DefaultKey, Entity<'a>>,
-    entity_queue: VecDeque<DefaultKey>,
+    context: GlobalContext<'a, Clock>,
+    entities: SlotMap<EntityKey, Entity<'a>>,
+    entity_queue: VecDeque<EntityKey>,
 }
 impl<'a, Clock: EmbeddedClock<T = u64>> Engine<'a, Clock> {
     pub fn new(proj_name: String, role: &'a ast::Role, clock: Clock) -> Self {
-        let context = GlobalContext {
-            clock,
-            proj_name: proj_name,
-            role_name: role.name,
-            globals: SymbolTable(role.globals.into_iter().map(|x| (x.trans_name, x.value)).collect()),
-        };
+        let mut ref_pool = RefPool::new();
 
-        let mut entities = SlotMap::new();
+        let mut globals = SymbolTable::new();
+        for glob in role.globals.iter() {
+            globals.define(&glob.trans_name, Value::from_ast(&glob.value, &mut ref_pool));
+        }
+
+        let mut entities: SlotMap<EntityKey, _> = Default::default();
         let mut entity_queue = VecDeque::new();
         for sprite in role.sprites.iter() {
+            let mut fields = SymbolTable::new();
+            for field in sprite.fields {
+                fields.define(&field.trans_name, Value::from_ast(&field.value, &mut ref_pool));
+            }
+
             let context = EntityContext {
                 name: sprite.trans_name,
-                fields: SymbolTable(sprite.fields.into_iter().map(|x| (x.trans_name, x.value)).collect()),
+                fields,
                 is_clone: false,
             };
             let scripts = sprite.scripts.iter()
@@ -203,7 +272,14 @@ impl<'a, Clock: EmbeddedClock<T = u64>> Engine<'a, Clock> {
             entity_queue.push_back(entities.insert(Entity { context, scripts, script_queue_pos: 0 }));
         }
 
-        Self { context, entities, entity_queue }
+        Self {
+            context: GlobalContext {
+                clock, globals, ref_pool,
+                proj_name: proj_name,
+                role_name: role.name,
+            },
+            entities, entity_queue,
+        }
     }
     pub fn step(&mut self) -> StepResult {
         let (key, entity) = loop {
