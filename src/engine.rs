@@ -97,16 +97,15 @@ impl LookupGroup<'_> {
 
 // -----------------------------------------------------------------
 
+#[derive(PartialEq, Eq)]
 enum StepResult {
-    Noop,
     Normal,
     Yield,
-    Terminate,
 }
+#[derive(PartialEq, Eq)]
 enum ProcessState {
-    Uninitialized,
+    Idle,
     Running,
-    Terminated(Result<Value, String>),
 }
 struct Process {
     code: Rc<ByteCode>,
@@ -120,7 +119,7 @@ impl Process {
         Self {
             code,
             pos: 0,
-            state: ProcessState::Uninitialized,
+            state: ProcessState::Idle,
             value_stack: vec![],
             context_stack: vec![],
         }
@@ -144,11 +143,25 @@ struct Script {
     hat: Option<ast::Hat>,
     process: Process,
     start_pos: usize,
-    exec_queue: VecDeque<SymbolTable>,
+    context_queue: VecDeque<SymbolTable>,
 }
 impl Script {
+    fn consume_context(&mut self) {
+        if self.process.state != ProcessState::Running {
+            if let Some(context) = self.context_queue.pop_front() {
+                self.process.initialize(self.start_pos, context);
+            }
+        }
+    }
+    fn schedule(&mut self, max_queue: usize, context: SymbolTable) {
+        self.context_queue.push_back(context);
+        self.consume_context();
+        if self.context_queue.len() > max_queue {
+            self.context_queue.pop_back();
+        }
+    }
     fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>, entity_context: &mut EntityContext) -> StepResult {
-        
+        unimplemented!()
     }
 }
 
@@ -171,11 +184,11 @@ struct Entity {
 }
 impl Entity {
     fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>) -> StepResult {
-        if self.scripts.is_empty() { return StepResult::Noop }
+        if self.scripts.is_empty() { return StepResult::Yield }
         let res = self.scripts[self.script_queue_pos].step(global_context, &mut self.context);
         match res {
-            StepResult::Noop | StepResult::Normal => (), // keep executing same script
-            StepResult::Yield | StepResult::Terminate => self.script_queue_pos = (self.script_queue_pos + 1) % self.scripts.len(), // yield to next script
+            StepResult::Normal => (), // keep executing same script
+            StepResult::Yield => self.script_queue_pos = (self.script_queue_pos + 1) % self.scripts.len(), // yield to next script
         }
         res
     }
@@ -183,6 +196,9 @@ impl Entity {
 
 // -----------------------------------------------------------------
 
+pub enum UserInput {
+    ClickStart,
+}
 struct GlobalContext<Clock> {
     clock: Clock,
     ref_pool: RefPool,
@@ -218,7 +234,7 @@ impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
                     hat: script.hat.clone(),
                     process: Process::new(code.clone()),
                     start_pos: *loc,
-                    exec_queue: Default::default(),
+                    context_queue: Default::default(),
                 })
             }
 
@@ -237,11 +253,24 @@ impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
             entities, entity_queue,
         }
     }
+    pub fn input(&mut self, input: UserInput) {
+        match input {
+            UserInput::ClickStart => {
+                for (_, entity) in self.entities.iter_mut() {
+                    for script in entity.scripts.iter_mut() {
+                        if let Some(ast::Hat::OnFlag { .. }) = &script.hat {
+                            script.schedule(0, Default::default());
+                        }
+                    }
+                }
+            }
+        }
+    }
     pub fn step(&mut self) {
         let (key, entity) = loop {
             match self.entity_queue.pop_front() {
                 None => return,
-                Some(key) => match self.entities.get(key) {
+                Some(key) => match self.entities.get_mut(key) {
                     None => (), // prune invalid key due to pop
                     Some(entity) => break (key, entity),
                 },
@@ -249,9 +278,8 @@ impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
         };
 
         match entity.step(&mut self.context) {
-            StepResult::Noop | StepResult::Normal => self.entity_queue.push_front(key), // keep executing same entity
+            StepResult::Normal => self.entity_queue.push_front(key), // keep executing same entity
             StepResult::Yield => self.entity_queue.push_back(key), // yield to next entity
-            StepResult::Terminate => { self.entities.remove(key); } // delete entity to kill it and don't add back to entity queue
         }
     }
 }
