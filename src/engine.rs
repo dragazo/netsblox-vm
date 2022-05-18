@@ -1,22 +1,20 @@
 use std::prelude::v1::*;
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
+use std::iter;
 
 use netsblox_ast as ast;
 use embedded_time::Clock as EmbeddedClock;
 use slotmap::SlotMap;
+
+use crate::bytecode::*;
 
 slotmap::new_key_type! {
     struct RefPoolKey;
     struct EntityKey;
 }
 
-
-
-
-
-
-
+// -----------------------------------------------------------------
 
 struct RefPool {
     pool: SlotMap<RefPoolKey, RefValue>,
@@ -49,27 +47,27 @@ impl Value {
             ast::Value::Constant(ast::Constant::Pi) => Value::CopyValue(CopyValue::Number(std::f64::consts::PI)),
             ast::Value::String(x) => {
                 if ref_pool.intern {
-                    for (k, v) in ref_pool.0.iter() {
+                    for (k, v) in ref_pool.pool.iter() {
                         match v {
                             RefValue::String(s) if s == x => return Value::RefValue(k),
                             _ => (),
                         }
                     }
                 }
-                Value::RefValue(ref_pool.0.insert(RefValue::String(x.clone())))
+                Value::RefValue(ref_pool.pool.insert(RefValue::String(x.clone())))
             }
             ast::Value::List(x) => {
                 let values = x.iter().map(|x| Value::from_ast(x, ref_pool)).collect();
-                Value::RefValue(ref_pool.0.insert(RefValue::List(values)))
+                Value::RefValue(ref_pool.pool.insert(RefValue::List(values)))
             }
         }
     }
 }
 
 #[derive(Default)]
-pub struct SymbolTable(BTreeMap<String, Value>);
+struct SymbolTable(BTreeMap<String, Value>);
 impl SymbolTable {
-    pub fn define(&mut self, var: String, value: Value) -> Result<(), Value> {
+    fn define(&mut self, var: String, value: Value) -> Result<(), Value> {
         match self.0.insert(var, value) {
             None => Ok(()),
             Some(x) => Err(x),
@@ -77,9 +75,9 @@ impl SymbolTable {
     }
 }
 
-pub struct LookupGroup<'a>(pub &'a mut [SymbolTable]);
+struct LookupGroup<'a>(&'a mut [SymbolTable]);
 impl LookupGroup<'_> {
-    pub fn lookup(&self, var: &str) -> Option<&Value> {
+    fn lookup(&self, var: &str) -> Option<&Value> {
         for src in self.0.iter() {
             if let Some(val) = src.0.get(var) {
                 return Some(val);
@@ -87,7 +85,7 @@ impl LookupGroup<'_> {
         }
         None
     }
-    pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Value> {
+    fn lookup_mut(&mut self, var: &str) -> Option<&mut Value> {
         for src in self.0.iter_mut() {
             if let Some(val) = src.0.get_mut(var) {
                 return Some(val);
@@ -97,224 +95,62 @@ impl LookupGroup<'_> {
     }
 }
 
-enum Instruction {
-    Assign { vars: Vec<ast::VariableRef> },
-    PushValue { value: ast::Value },
+// -----------------------------------------------------------------
+
+enum StepResult {
+    Noop,
+    Normal,
+    Yield,
+    Terminate,
 }
-
-pub struct ByteCode {
-    instructions: Vec<Instruction>,
-}
-impl ByteCode {
-    fn append_expr(&mut self, expr: &ast::Expr) {
-        match expr {
-            ast::Expr::Value(v) => self.instructions.push(Instruction::PushValue { value: v.clone() }),
-            _ => unimplemented!(),
-        }
-    }
-    fn append_stmt(&mut self, stmt: &ast::Stmt) {
-        match stmt {
-            ast::Stmt::Assign { vars, value, .. } => {
-                self.append_expr(value);
-                self.instructions.push(Instruction::Assign { vars: vars.clone() })
-            }
-            _ => unimplemented!(),
-        }
-    }
-    fn append_stmts(&mut self, stmts: &[ast::Stmt]) {
-        for stmt in stmts {
-            self.append_stmt(stmt);
-        }
-    }
-    pub fn compile(role: &ast::Role) -> Self {
-        let mut res = ByteCode {
-            instructions: vec![],
-        };
-
-        for sprite in role.sprites.iter() {
-            for script in sprite.scripts.iter() {
-                res.append_stmts(&script.stmts);
-            }
-        }
-
-        res
-    }
-}
-
-pub enum ProcessState {
+enum ProcessState {
+    Uninitialized,
     Running,
-
+    Terminated(Result<Value, String>),
 }
-
-pub struct Process {
+struct Process {
     code: Rc<ByteCode>,
     pos: usize,
+    state: ProcessState,
     value_stack: Vec<Value>,
     context_stack: Vec<SymbolTable>,
 }
 impl Process {
-    pub fn new(code: Rc<ByteCode>, pos: usize) -> Self {
+    fn new(code: Rc<ByteCode>) -> Self {
         Self {
-            code, pos,
+            code,
+            pos: 0,
+            state: ProcessState::Uninitialized,
             value_stack: vec![],
-            context_stack: vec![Default::default()],
+            context_stack: vec![],
         }
     }
-    pub fn step(&mut self) {
-        let ins = &self.code.instructions[self.pos];
+    fn initialize(&mut self, start_pos: usize, context: SymbolTable) {
+        self.pos = start_pos;
+        self.state = ProcessState::Running;
+        self.value_stack.clear();
+        self.context_stack.clear();
+        self.context_stack.push(context);
+        self.context_stack.push(Default::default());
+    }
+    fn step(&mut self) {
+        unimplemented!()
     }
 }
 
+// -----------------------------------------------------------------
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-pub enum StepResult {
-    Noop,
-    Normal,
-    Yield,
-}
-
-
-
-
-
-
-
-
-enum ScriptPosStepResult {
-    Normal,
-    Terminated,
-}
-
-struct StmtsPos<'a> {
-    stmts: &'a [ast::Stmt],
-    working: Option<StmtPos<'a>>,
-}
-struct StmtPos<'a> {
-    stmt: &'a ast::Stmt,
-    working: Vec<ExprPos<'a>>,
-}
-struct ExprPos<'a> {
-    expr: &'a ast::Expr,
-    working: Vec<ExprPos<'a>>,
-}
-
-impl<'a> ExprPos<'a> {
-    fn new(expr: &'a ast::Expr) -> Self {
-        Self { expr, working: vec![] }
-    }
-    fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>, entity_context: &mut EntityContext, script_context: &mut ScriptContext) -> ScriptPosStepResult {
-        match self.expr {
-            ast::Expr::Add { left, right } => {
-
-            }
-            _ => unimplemented!(),
-        }
-        ScriptPosStepResult::Normal
-    }
-}
-
-impl<'a> StmtsPos<'a> {
-    fn new(stmts: &'a [ast::Stmt]) -> Self {
-        Self { stmts, working: None }
-    }
-    fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>, entity_context: &mut EntityContext, script_context: &mut ScriptContext) -> ScriptPosStepResult {
-        if self.stmts.is_empty() { return ScriptPosStepResult::Terminated }
-
-        if self.working.is_none() {
-            self.working = Some(StmtPos::new
-        }
-    }
-}
-
-enum CodePosition<'a> {
-    Stmts(StmtsPos<'a>),
-    Stmt(StmtPos<'a>),
-    Expr(ExprPos<'a>),
-}
-impl<'a> CodePosition<'a> {
-    fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>, entity_context: &mut EntityContext, script_context: &mut ScriptContext) -> ScriptPosStepResult {
-        match self {
-            CodePosition::Stmts(x) => x.step(),
-            CodePosition::Stmt(x) => x.step(),
-            CodePosition::Expr(x) => x.step(),
-        }
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-struct ScriptContext {
-    vars: SymbolTable,
-}
-enum ScriptState<'a> {
-    Idle,
-    Running { context: ScriptContext, code_pos: CodePosition<'a> }
-}
 struct Script {
-    script: &'a ast::Script,
-    state: ScriptState,
-    exec_queue: VecDeque<ScriptContext>,
+    hat: Option<ast::Hat>,
+    process: Process,
+    start_pos: usize,
+    exec_queue: VecDeque<SymbolTable>,
 }
 impl Script {
     fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>, entity_context: &mut EntityContext) -> StepResult {
-        if let ScriptState::Idle = &self.state {
-            match self.exec_queue.pop_front() {
-                None => return,
-                Some(context) => self.state = ScriptState::Running { context, code_pos: CodePosition::Stmts(&*self.script.stmts) },
-            }
-        }
-        if let ScriptState::Running { context, code_pos } = &mut self.state {
-            code_pos.step(global_context, entity_context, context);
-        }
+        
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // -----------------------------------------------------------------
 
@@ -323,10 +159,8 @@ enum EntityKind {
     Stage,
     Original,
     Clone,
-    Dead,
 }
 struct EntityContext {
-    name: String,
     fields: SymbolTable,
     kind: EntityKind,
 }
@@ -341,7 +175,7 @@ impl Entity {
         let res = self.scripts[self.script_queue_pos].step(global_context, &mut self.context);
         match res {
             StepResult::Noop | StepResult::Normal => (), // keep executing same script
-            StepResult::Yield => self.script_queue_pos = (self.script_queue_pos + 1) % self.scripts.len(), // yield to next script
+            StepResult::Yield | StepResult::Terminate => self.script_queue_pos = (self.script_queue_pos + 1) % self.scripts.len(), // yield to next script
         }
         res
     }
@@ -361,33 +195,41 @@ pub struct Engine<Clock> {
 }
 impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
     pub fn new(role: &ast::Role, intern: bool, clock: Clock) -> Self {
-        let code = Rc::new(ByteCode::compile(role));
         let mut ref_pool = RefPool::new(intern);
-
-        let mut globals = SymbolTable::new();
+        let mut globals = SymbolTable::default();
         for glob in role.globals.iter() {
-            globals.define(&glob.trans_name, Value::from_ast(&glob.value, &mut ref_pool));
+            globals.define(glob.trans_name.clone(), Value::from_ast(&glob.value, &mut ref_pool));
         }
 
+        let (code, locations) = ByteCode::compile(role);
+        let code = Rc::new(code);
+
         let mut entities: SlotMap<EntityKey, _> = Default::default();
-        let mut entity_queue = VecDeque::new();
-        for (i, sprite) in role.sprites.iter() {
-            let mut fields = SymbolTable::new();
-            for field in sprite.fields {
-                fields.define(&field.trans_name, Value::from_ast(&field.value, &mut ref_pool));
+        let mut entity_queue = VecDeque::with_capacity(role.sprites.len());
+        for (i, (entity, locs)) in iter::zip(&role.sprites, &locations.entities).enumerate() {
+            let mut fields = SymbolTable::default();
+            for field in entity.fields.iter() {
+                fields.define(field.trans_name.clone(), Value::from_ast(&field.value, &mut ref_pool));
             }
 
-            let context = EntityContext {
-                name: sprite.trans_name,
-                fields,
-                kind: if i == 0 { EntityKind::Stage } else { EntityKind::Original },
-            };
-            let scripts = sprite.scripts.iter()
-                .filter(|x| x.hat.is_some()) // scripts without hat blocks can never actually be invoked, so we can ignore them
-                .map(|x| Script { script: x, state: ScriptState::Idle, exec_queue: Default::default() })
-                .collect();
+            let mut scripts = Vec::with_capacity(entity.scripts.len());
+            for (script, loc) in iter::zip(&entity.scripts, &locs.scripts) {
+                scripts.push(Script {
+                    hat: script.hat.clone(),
+                    process: Process::new(code.clone()),
+                    start_pos: *loc,
+                    exec_queue: Default::default(),
+                })
+            }
 
-            entity_queue.push_back(entities.insert(Entity { context, scripts, script_queue_pos: 0 }));
+            entity_queue.push_back(entities.insert(Entity {
+                context: EntityContext {
+                    fields,
+                    kind: if i == 0 { EntityKind::Stage } else { EntityKind::Original },
+                },
+                scripts,
+                script_queue_pos: 0
+            }));
         }
 
         Self {
@@ -395,10 +237,10 @@ impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
             entities, entity_queue,
         }
     }
-    pub fn step(&mut self) -> StepResult {
+    pub fn step(&mut self) {
         let (key, entity) = loop {
             match self.entity_queue.pop_front() {
-                None => return StepResult::Noop,
+                None => return,
                 Some(key) => match self.entities.get(key) {
                     None => (), // prune invalid key due to pop
                     Some(entity) => break (key, entity),
@@ -406,11 +248,10 @@ impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
             }
         };
 
-        let res = entity.step(&mut self.context);
-        match res {
+        match entity.step(&mut self.context) {
             StepResult::Noop | StepResult::Normal => self.entity_queue.push_front(key), // keep executing same entity
             StepResult::Yield => self.entity_queue.push_back(key), // yield to next entity
+            StepResult::Terminate => { self.entities.remove(key); } // delete entity to kill it and don't add back to entity queue
         }
-        res
     }
 }
