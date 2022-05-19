@@ -4,6 +4,10 @@ use std::rc::Rc;
 use crate::bytecode::*;
 use crate::runtime::*;
 
+/// An execution error from a [`Process`] (see [`StepResult`]).
+pub enum ExecError {
+
+}
 /// Result of stepping through a [`Process`].
 pub enum StepResult {
     /// The process was not running.
@@ -12,14 +16,20 @@ pub enum StepResult {
     Normal,
     /// The process has signaled a yield point so that other code can run.
     /// Many yield results may occur back-to-back, such as while awaiting an asynchronous result.
+    /// 
+    /// Yielding is primarily needed for executing an entire semi-concurrent project so that scripts can appear to run simultaneously.
+    /// If instead you are explicitly only using a single sandboxed process, this can be treated equivalently to [`StepResult::Normal`].
     Yield,
     /// The process has terminated with the given state.
-    /// If an error was encountered during execution, return `Err(e)` where `e` is a string describing the error.
+    /// If an error was encountered during execution, returns `Err(e)` where `e` is en enum describing the error.
     /// Otherwise, `Ok(v)` is returned to denote success, where `v` is `Some(x)` for a return value of `x`,
     /// or `None` to denote that the script requested an immediate abort.
-    Terminate(Result<Option<Value>, String>),
+    Terminate(Result<Option<Value>, ExecError>),
 }
 /// A [`ByteCode`] execution primitive.
+/// 
+/// A `Process` is a self-contained thread of execution; it maintains its own state machine for executing instructions step by step.
+/// Global variables, entity fields, and several external features are hosted separately and passed into [`Process::step`].
 pub struct Process {
     code: Rc<ByteCode>,
     pos: usize,
@@ -29,7 +39,7 @@ pub struct Process {
 }
 impl Process {
     /// Creates a new process with the given code.
-    /// The new process is initialized into an idle state.
+    /// The new process is initially idle; [`Process::initialize`] can be used to begin execution at a specific location (see [`Locations`]).
     pub fn new(code: Rc<ByteCode>) -> Self {
         Self {
             code,
@@ -40,6 +50,7 @@ impl Process {
         }
     }
     /// Checks if the process is currently running.
+    /// Note that the process will not run on its own (see [`Process::step`]).
     pub fn is_running(&self) -> bool {
         self.running
     }
@@ -55,6 +66,8 @@ impl Process {
         self.context_stack.push(Default::default());
     }
     /// Executes a single instruction with the given execution context.
+    /// The return value can be used to determine what additional effects the script has requested,
+    /// as well as retrieving the return value or execution error in the event that the process terminates (see [`StepResult`]).
     pub fn step(&mut self, ref_pool: &mut RefPool, globals: &mut SymbolTable, fields: &mut SymbolTable) -> StepResult {
         if !self.running { return StepResult::Idle; }
         let locals = self.context_stack.last_mut().unwrap();

@@ -5,6 +5,7 @@
         "consts",
         "funcs",
         "netsblox",
+        "sandboxed",
         "slotmap"
     ]
 }

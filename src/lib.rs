@@ -18,5 +18,6 @@ mod process;
 // mod engine;
 
 pub use bytecode::*;
+pub use runtime::*;
 pub use process::*;
 // pub use engine::*;

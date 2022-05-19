@@ -8,21 +8,36 @@ slotmap::new_key_type! {
     pub struct RefPoolKey;
 }
 
+/// Any value type primitive.
+/// 
+/// `CopyValue` variables are held directly by a [`crate::Process`] and are copied when a new reference is needed.
 #[derive(Clone, Copy)]
 pub enum CopyValue {
     Bool(bool),
     Number(f64),
 }
+/// Any reference type primitive.
+/// 
+/// `RefValue` variables are held indirectly by a [`RefPoolKey`], which is an index into an external [`RefPool`]
+/// which is provided from outside of a [`crate::Process`].
+/// 
+/// This type itself is owning. [`Value::RefValue`] is the mechanism for actually sharing references to this type.
 pub enum RefValue {
     String(String),
     List(Vec<Value>),
 }
+/// Any primitive type.
+/// 
+/// Values are always copyable, which is how new references are created.
+/// [`CopyValue`] variables receive a direct copy, while [`RefValue`] variables simply copy the reference.
 #[derive(Clone, Copy)]
 pub enum Value {
     CopyValue(CopyValue),
     RefValue(RefPoolKey),
 }
 impl Value {
+    /// Creates a new value from an abstract syntax tree value.
+    /// In the event that `value` is a reference type, it is allocated in the provided [`RefPool`].
     pub fn from_ast(value: &ast::Value, ref_pool: &mut RefPool) -> Self {
         match value {
             ast::Value::Bool(x) => Value::CopyValue(CopyValue::Bool(*x)),
@@ -91,7 +106,7 @@ impl<'a, 'b> LookupGroup<'a, 'b> {
         }
         None
     }
-    pub fn set_or_define_last_context(&mut self, var: &str, value: Value) {
+    pub(crate) fn set_or_define_last_context(&mut self, var: &str, value: Value) {
         self.0.last_mut().unwrap().set_or_define(var, value)
     }
 }
