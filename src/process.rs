@@ -7,8 +7,15 @@ use crate::bytecode::*;
 use crate::runtime::*;
 
 /// An execution error from a [`Process`] (see [`StepResult`]).
+/// 
+/// Each error variant contains a field called `pos` which is the [`ByteCode`] index at the time of the error.
+/// By using the [`Locations`] information from [`ByteCode::compile`], it is possible to determine which
+/// script/function generated the error.
+#[derive(Debug)]
 pub enum ExecError {
-
+    /// A variable lookup operation failed.
+    /// `name` holds the name of the variable that was expected.
+    UndefinedVariable { name: String, pos: usize },
 }
 /// Result of stepping through a [`Process`].
 pub enum StepResult {
@@ -36,17 +43,21 @@ pub struct Process {
     code: Rc<ByteCode>,
     pos: usize,
     running: bool,
+    max_call_depth: usize,
+    call_stack: Vec<usize>,
     value_stack: Vec<Value>,
     context_stack: Vec<SymbolTable>,
 }
 impl Process {
     /// Creates a new process with the given code.
     /// The new process is initially idle; [`Process::initialize`] can be used to begin execution at a specific location (see [`Locations`]).
-    pub fn new(code: Rc<ByteCode>) -> Self {
+    pub fn new(code: Rc<ByteCode>, max_call_depth: usize) -> Self {
         Self {
             code,
             pos: 0,
             running: false,
+            max_call_depth,
+            call_stack: vec![],
             value_stack: vec![],
             context_stack: vec![],
         }
@@ -56,12 +67,17 @@ impl Process {
     pub fn is_running(&self) -> bool {
         self.running
     }
+    /// Gets a reference to the [`ByteCode`] object that the process was built from.
+    pub fn get_code(&self) -> &Rc<ByteCode> {
+        &self.code
+    }
     /// Prepares the process to execute code at the given [`ByteCode`] position
     /// and with the given context of local variables.
     /// Any previous process state is wiped when performing this action.
     pub fn initialize(&mut self, start_pos: usize, context: SymbolTable) {
         self.pos = start_pos;
         self.running = true;
+        self.call_stack.clear();
         self.value_stack.clear();
         self.context_stack.clear();
         self.context_stack.push(context);
@@ -80,21 +96,32 @@ impl Process {
             Instruction::Assign { vars } => {
                 let value = self.value_stack.pop().unwrap();
                 for var in vars {
-                    *context.lookup_mut(var).unwrap() = value;
+                    match context.lookup_mut(&var) {
+                        Some(x) => *x = value,
+                        None => context.set_or_define_last_context(&var, value),
+                    }
                 }
+                self.pos += 1;
             }
             Instruction::Return => {
-                debug_assert!(self.context_stack.len() >= 2);
-                self.context_stack.pop();
-                if self.context_stack.len() == 1 {
-                    debug_assert_eq!(self.value_stack.len(), 1);
-                    self.running = false;
-                    return StepResult::Terminate(Ok(Some(self.value_stack.pop().unwrap())));
+                match self.call_stack.pop() {
+                    Some(v) => self.pos = v,
+                    None => {
+                        debug_assert_eq!(self.value_stack.len(), 1);
+                        self.running = false;
+                        return StepResult::Terminate(Ok(Some(self.value_stack.pop().unwrap())));
+                    }
                 }
             }
 
-            Instruction::PushValue { value } => self.value_stack.push(Value::from_ast(value, ref_pool)),
-            Instruction::PopValue => { self.value_stack.pop().unwrap(); }
+            Instruction::PushValue { value } => {
+                self.value_stack.push(Value::from_ast(value, ref_pool));
+                self.pos += 1;
+            }
+            Instruction::PopValue => {
+                self.value_stack.pop().unwrap();
+                self.pos += 1;
+            }
         }
 
         StepResult::Normal

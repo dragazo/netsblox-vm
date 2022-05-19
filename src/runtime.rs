@@ -13,7 +13,7 @@ slotmap::new_key_type! {
 /// Any value type primitive.
 /// 
 /// `CopyValue` variables are held directly by a [`Process`](crate::process::Process) and are copied when a new reference is needed.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum CopyValue {
     Bool(bool),
     Number(f64),
@@ -24,6 +24,7 @@ pub enum CopyValue {
 /// which is provided from outside of a [`Process`](crate::process::Process).
 /// 
 /// This type itself is owning. [`Value::RefValue`] is the mechanism for actually sharing references to this type.
+#[derive(Debug)]
 pub enum RefValue {
     String(String),
     List(Vec<Value>),
@@ -32,7 +33,7 @@ pub enum RefValue {
 /// 
 /// Values are always copyable, which is how new references are created.
 /// [`CopyValue`] variables receive a direct copy, while [`RefValue`] variables simply copy the reference.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Value {
     CopyValue(CopyValue),
     RefValue(RefPoolKey),
@@ -73,11 +74,27 @@ impl RefPool {
     pub fn new(intern: bool) -> Self {
         Self { pool: Default::default(), intern }
     }
+    pub fn get(&self, key: RefPoolKey) -> Option<&RefValue> {
+        self.pool.get(key)
+    }
 }
 
+/// Holds a collection of variables in an execution context.
 #[derive(Default)]
 pub struct SymbolTable(BTreeMap<String, Value>);
 impl SymbolTable {
+    fn from_var_defs(var_defs: &[ast::VariableDef], ref_pool: &mut RefPool) -> Self {
+        Self(var_defs.iter().map(|x| (x.trans_name.clone(), Value::from_ast(&x.value, ref_pool))).collect())
+    }
+    /// Extracts a symbol table containing all the global variables in the project.
+    pub fn from_globals(role: &ast::Role, ref_pool: &mut RefPool) -> Self {
+        Self::from_var_defs(&role.globals, ref_pool)
+    }
+    /// Extracts a symbol table containing all the fields in a given entity.
+    pub fn from_fields(entity: &ast::Sprite, ref_pool: &mut RefPool) -> Self {
+        Self::from_var_defs(&entity.fields, ref_pool)
+    }
+    /// Sets the value of an existing variable or defines it if it does not exist.
     pub fn set_or_define(&mut self, var: &str, value: Value) {
         match self.0.get_mut(var) {
             Some(x) => *x = value,

@@ -4,6 +4,7 @@ use std::prelude::v1::*;
 
 use netsblox_ast as ast;
 
+#[derive(Debug)]
 pub(crate) enum Instruction {
     Assign { vars: Vec<String> }, // consumes 1 value from stack
     Return, // return value on top of stack
@@ -15,13 +16,16 @@ pub(crate) enum Instruction {
 /// A interpreter-ready sequence of instructions.
 /// 
 /// [`Process`](crate::process::Process) is an execution primitive that can be used to execute generated `ByteCode`.
+#[derive(Debug)]
 pub struct ByteCode(pub(crate) Vec<Instruction>);
 /// Location info for a [`ByteCode`] object.
+#[derive(Debug)]
 pub struct EntityLocations<'a> {
     pub funcs: Vec<(&'a ast::Function, usize)>,
     pub scripts: Vec<(&'a ast::Script, usize)>,
 }
 /// Location info for a [`ByteCode`] object.
+#[derive(Debug)]
 pub struct Locations<'a> {
     pub funcs: Vec<(&'a ast::Function, usize)>,
     pub entities: Vec<(&'a ast::Sprite, EntityLocations<'a>)>,

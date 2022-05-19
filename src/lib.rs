@@ -15,3 +15,5 @@ extern crate no_std_compat as std;
 pub mod bytecode;
 pub mod runtime;
 pub mod process;
+
+#[cfg(test)] mod test;
