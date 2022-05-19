@@ -2,22 +2,27 @@ use std::prelude::v1::*;
 
 use netsblox_ast as ast;
 
-pub enum Instruction {
+pub(crate) enum Instruction {
     Assign { vars: Vec<String> }, // consumes 1 value from stack
     Return, // return value on top of stack
 
-    PushValue { value: ast::Value }, // adds 1 expr to stack
-    PopValue, // consumes 1 expr from stack
+    PushValue { value: ast::Value }, // adds 1 value to stack
+    PopValue, // consumes 1 value from stack
 }
 
-pub struct ByteCode(Vec<Instruction>);
-pub struct EntityLocations {
-    pub funcs: Vec<usize>,
-    pub scripts: Vec<usize>,
+/// A interpreter-ready sequence of instructions.
+/// 
+/// [`crate::Process`] is an execution primitive that can be used to execute generated `ByteCode`.
+pub struct ByteCode(pub(crate) Vec<Instruction>);
+/// Location info for a [`ByteCode`] object.
+pub struct EntityLocations<'a> {
+    pub funcs: Vec<(&'a ast::Function, usize)>,
+    pub scripts: Vec<(&'a ast::Script, usize)>,
 }
-pub struct Locations {
-    pub funcs: Vec<usize>,
-    pub entities: Vec<EntityLocations>,
+/// Location info for a [`ByteCode`] object.
+pub struct Locations<'a> {
+    pub funcs: Vec<(&'a ast::Function, usize)>,
+    pub entities: Vec<(&'a ast::Sprite, EntityLocations<'a>)>,
 }
 impl ByteCode {
     fn append_expr(&mut self, expr: &ast::Expr) {
@@ -42,30 +47,33 @@ impl ByteCode {
         self.0.push(Instruction::PushValue { value: "".into() });
         self.0.push(Instruction::Return);
     }
-    pub fn compile(script: &ast::Role) -> (ByteCode, Locations) {
+    /// Compiles a single project role into an executable form.
+    /// Also emits the symbol table of functions and scripts,
+    /// which is needed to execute a specific segment of code.
+    pub fn compile(role: &ast::Role) -> (ByteCode, Locations) {
         let mut code = ByteCode(vec![]);
 
-        let mut funcs = Vec::with_capacity(script.funcs.len());
-        for func in script.funcs.iter() {
-            funcs.push(code.0.len());
+        let mut funcs = Vec::with_capacity(role.funcs.len());
+        for func in role.funcs.iter() {
+            funcs.push((func, code.0.len()));
             code.append_stmts_ret(&func.stmts)
         }
 
-        let mut entities = Vec::with_capacity(script.sprites.len());
-        for entity in script.sprites.iter() {
+        let mut entities = Vec::with_capacity(role.sprites.len());
+        for entity in role.sprites.iter() {
             let mut funcs = Vec::with_capacity(entity.funcs.len());
             for func in entity.funcs.iter() {
-                funcs.push(code.0.len());
+                funcs.push((func, code.0.len()));
                 code.append_stmts_ret(&func.stmts);
             }
 
             let mut scripts = Vec::with_capacity(entity.scripts.len());
             for script in entity.scripts.iter() {
-                scripts.push(code.0.len());
+                scripts.push((script, code.0.len()));
                 code.append_stmts_ret(&script.stmts);
             }
 
-            entities.push(EntityLocations { funcs, scripts });
+            entities.push((entity, EntityLocations { funcs, scripts }));
         }
 
         (code, Locations { funcs, entities })
