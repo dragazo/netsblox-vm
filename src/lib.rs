@@ -12,12 +12,6 @@
 
 extern crate no_std_compat as std;
 
-mod bytecode;
-mod runtime;
-mod process;
-// mod engine;
-
-pub use bytecode::*;
-pub use runtime::*;
-pub use process::*;
-// pub use engine::*;
+pub mod bytecode;
+pub mod runtime;
+pub mod process;

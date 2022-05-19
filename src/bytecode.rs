@@ -1,3 +1,5 @@
+//! Tools for generating executable [`ByteCode`] from a project's abstract syntax tree.
+
 use std::prelude::v1::*;
 
 use netsblox_ast as ast;
@@ -12,7 +14,7 @@ pub(crate) enum Instruction {
 
 /// A interpreter-ready sequence of instructions.
 /// 
-/// [`crate::Process`] is an execution primitive that can be used to execute generated `ByteCode`.
+/// [`Process`](crate::process::Process) is an execution primitive that can be used to execute generated `ByteCode`.
 pub struct ByteCode(pub(crate) Vec<Instruction>);
 /// Location info for a [`ByteCode`] object.
 pub struct EntityLocations<'a> {

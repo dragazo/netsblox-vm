@@ -1,3 +1,5 @@
+//! Common types used for execution.
+
 use std::prelude::v1::*;
 use std::collections::BTreeMap;
 
@@ -10,7 +12,7 @@ slotmap::new_key_type! {
 
 /// Any value type primitive.
 /// 
-/// `CopyValue` variables are held directly by a [`crate::Process`] and are copied when a new reference is needed.
+/// `CopyValue` variables are held directly by a [`Process`](crate::process::Process) and are copied when a new reference is needed.
 #[derive(Clone, Copy)]
 pub enum CopyValue {
     Bool(bool),
@@ -19,7 +21,7 @@ pub enum CopyValue {
 /// Any reference type primitive.
 /// 
 /// `RefValue` variables are held indirectly by a [`RefPoolKey`], which is an index into an external [`RefPool`]
-/// which is provided from outside of a [`crate::Process`].
+/// which is provided from outside of a [`Process`](crate::process::Process).
 /// 
 /// This type itself is owning. [`Value::RefValue`] is the mechanism for actually sharing references to this type.
 pub enum RefValue {

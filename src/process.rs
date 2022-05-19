@@ -1,3 +1,5 @@
+//! Utilities for executing generated [`ByteCode`](crate::bytecode::ByteCode).
+
 use std::prelude::v1::*;
 use std::rc::Rc;
 
