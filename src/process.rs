@@ -106,7 +106,7 @@ impl Process {
         }
 
         match &self.code.0[self.pos] {
-            Instruction::Noop => self.pos += 1,
+            Instruction::Illegal => panic!(),
 
             Instruction::PushValue { value } => {
                 self.value_stack.push(Value::from_ast(value, ref_pool));
@@ -148,14 +148,14 @@ impl Process {
                 self.pos = if value.is_truthy(&ref_pool).unwrap() == *when { *pos } else { self.pos + 1 };
             }
 
-            Instruction::Call { pos, args } => {
+            Instruction::Call { pos, params } => {
                 if self.call_stack.len() >= self.max_call_depth {
                     self.running = false;
                     return StepResult::Terminate(Err(ExecError::CallDepthLimit { limit: self.max_call_depth }));
                 }
 
                 let mut context = SymbolTable::default();
-                for var in args.iter().rev() {
+                for var in params.iter().rev() {
                     context.set_or_define(var, self.value_stack.pop().unwrap());
                 }
                 self.call_stack.push((self.pos + 1, context));
@@ -227,7 +227,10 @@ mod ops {
         match op {
             BinaryOp::Add => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) + ops::scalar_numerify(b, ref_pool)).into(), true),
             BinaryOp::Sub => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) - ops::scalar_numerify(b, ref_pool)).into(), true),
+            BinaryOp::Mul => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) * ops::scalar_numerify(b, ref_pool)).into(), true),
+            BinaryOp::Div => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) / ops::scalar_numerify(b, ref_pool)).into(), true),
             BinaryOp::Greater => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) > ops::scalar_numerify(b, ref_pool)).into(), true),
+            BinaryOp::Less => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) < ops::scalar_numerify(b, ref_pool)).into(), true),
         }
     }
 }

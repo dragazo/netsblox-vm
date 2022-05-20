@@ -1,19 +1,22 @@
 //! Tools for generating executable [`ByteCode`] from a project's abstract syntax tree.
 
 use std::prelude::v1::*;
+use std::collections::BTreeMap;
 
 use netsblox_ast as ast;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BinaryOp {
-    Add, Sub,
-    Greater,
+    Add, Sub, Mul, Div,
+    Greater, Less,
 }
 
 #[derive(Debug)]
 pub(crate) enum Instruction {
-    /// Do nothing for one cycle.
-    Noop,
+    /// Triggers an error when encountered.
+    /// This is an internal value that is only used to denote incomplete linking results for better testing.
+    /// Properly-linked byte code should not contain this value.
+    Illegal,
 
     /// Pushes 1 value to the value stack.
     PushValue { value: ast::Value },
@@ -35,11 +38,9 @@ pub(crate) enum Instruction {
     /// Pops a value from the value stack and jumps to the given location if its truthyness value is equal to `when`
     ConditionalJump { pos: usize, when: bool },
 
-    /// Consumes `args.len()` arguments from the value stack to assign to a new context (in reverse order).
-    /// Pushes the new context onto the context stack.
-    /// Pushes the return address onto the call stack.
-    /// Jumps to the given location.
-    Call { pos: usize, args: Vec<String> },
+    /// Consumes `params.len()` arguments from the value stack (in reverse order of the listed params) to assign to a new symbol table.
+    /// Pushes the symbol table and return address to the call stack, and finally jumps to the given location.
+    Call { pos: usize, params: Vec<String> },
     /// Pops a return address from the call stack and jumps to it.
     /// The return value is left on the top of the value stack.
     /// If the call stack is empty, this instead terminates the process
@@ -64,92 +65,165 @@ pub struct Locations<'a> {
     pub funcs: Vec<(&'a ast::Function, usize)>,
     pub entities: Vec<(&'a ast::Sprite, EntityLocations<'a>)>,
 }
-impl ByteCode {
-    fn append_expr_binary_op(&mut self, left: &ast::Expr, right: &ast::Expr, op: BinaryOp) {
-        self.append_expr(left);
-        self.append_expr(right);
-        self.0.push(Instruction::BinaryOp { op });
+
+#[derive(Default)]
+struct ByteCodeBuilder<'a> {
+    ins: Vec<Instruction>,
+    call_holes: Vec<(usize, &'a ast::FnRef, Option<&'a ast::Sprite>)>,
+}
+impl<'a> ByteCodeBuilder<'a> {
+    fn append_expr_binary_op(&mut self, left: &'a ast::Expr, right: &'a ast::Expr, op: BinaryOp, entity: Option<&'a ast::Sprite>) {
+        self.append_expr(left, entity);
+        self.append_expr(right, entity);
+        self.ins.push(Instruction::BinaryOp { op });
     }
-    fn append_expr(&mut self, expr: &ast::Expr) {
+    fn append_expr(&mut self, expr: &'a ast::Expr, entity: Option<&'a ast::Sprite>) {
         match expr {
-            ast::Expr::Value(v) => self.0.push(Instruction::PushValue { value: v.clone() }),
-            ast::Expr::Variable { var, .. } => self.0.push(Instruction::PushVariable { var: var.trans_name.clone() }),
-            ast::Expr::Add { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Add),
-            ast::Expr::Sub { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Sub),
-            ast::Expr::Greater { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Greater),
+            ast::Expr::Value(v) => self.ins.push(Instruction::PushValue { value: v.clone() }),
+            ast::Expr::Variable { var, .. } => self.ins.push(Instruction::PushVariable { var: var.trans_name.clone() }),
+            ast::Expr::Add { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Add, entity),
+            ast::Expr::Sub { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Sub, entity),
+            ast::Expr::Mul { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Mul, entity),
+            ast::Expr::Div { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Div, entity),
+            ast::Expr::Greater { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Greater, entity),
+            ast::Expr::Less { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Less, entity),
+            ast::Expr::Conditional { condition, then, otherwise, .. } => {
+                self.append_expr(condition, entity);
+                let test_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+
+                self.append_expr(then, entity);
+                let jump_aft_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+
+                let test_false_pos = self.ins.len();
+                self.append_expr(otherwise, entity);
+                let aft_pos = self.ins.len();
+
+                self.ins[test_pos] = Instruction::ConditionalJump { pos: test_false_pos, when: false };
+                self.ins[jump_aft_pos] = Instruction::Jump { pos: aft_pos };
+            }
+            ast::Expr::CallFn { function, args, .. } => {
+                for arg in args {
+                    self.append_expr(arg, entity);
+                }
+                let call_hole_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+
+                self.call_holes.push((call_hole_pos, function, entity));
+            }
             x => unimplemented!("{:?}", x),
         }
     }
-    fn append_stmt(&mut self, stmt: &ast::Stmt) {
+    fn append_stmt(&mut self, stmt: &'a ast::Stmt, entity: Option<&'a ast::Sprite>) {
         match stmt {
             ast::Stmt::Assign { vars, value, .. } => {
-                self.append_expr(value);
-                self.0.push(Instruction::Assign { vars: vars.iter().map(|x| x.trans_name.clone()).collect() })
+                self.append_expr(value, entity);
+                self.ins.push(Instruction::Assign { vars: vars.iter().map(|x| x.trans_name.clone()).collect() })
             }
             ast::Stmt::AddAssign { var, value, .. } => {
-                self.append_expr(value);
-                self.0.push(Instruction::BinaryOpAssign { var: var.trans_name.clone(), op: BinaryOp::Add })
+                self.append_expr(value, entity);
+                self.ins.push(Instruction::BinaryOpAssign { var: var.trans_name.clone(), op: BinaryOp::Add })
             }
             ast::Stmt::Return { value, .. } => {
-                self.append_expr(value);
-                self.0.push(Instruction::Return);
+                self.append_expr(value, entity);
+                self.ins.push(Instruction::Return);
             }
             ast::Stmt::InfLoop { stmts, .. } => {
-                let top = self.0.len();
+                let top = self.ins.len();
                 for stmt in stmts {
-                    self.append_stmt(stmt);
+                    self.append_stmt(stmt, entity);
                 }
-                self.0.push(Instruction::Jump { pos: top });
+                self.ins.push(Instruction::Jump { pos: top });
             }
             ast::Stmt::If { condition, then, .. } => {
-                self.append_expr(condition);
-                let patch_pos = self.0.len();
-                self.0.push(Instruction::Noop);
+                self.append_expr(condition, entity);
+                let patch_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
                 for stmt in then {
-                    self.append_stmt(stmt);
+                    self.append_stmt(stmt, entity);
                 }
-                let else_pos = self.0.len();
-                self.0[patch_pos] = Instruction::ConditionalJump { pos: else_pos, when: false };
+                let else_pos = self.ins.len();
+                self.ins[patch_pos] = Instruction::ConditionalJump { pos: else_pos, when: false };
             }
             x => unimplemented!("{:?}", x),
         }
     }
-    fn append_stmts_ret(&mut self, stmts: &[ast::Stmt]) {
+    fn append_stmts_ret(&mut self, stmts: &'a [ast::Stmt], entity: Option<&'a ast::Sprite>) {
         for stmt in stmts {
-            self.append_stmt(stmt);
+            self.append_stmt(stmt, entity);
         }
-        self.0.push(Instruction::PushValue { value: "".into() });
-        self.0.push(Instruction::Return);
+        self.ins.push(Instruction::PushValue { value: "".into() });
+        self.ins.push(Instruction::Return);
     }
+    fn link(mut self, locations: Locations<'a>) -> (ByteCode, Locations<'a>) {
+        let global_fn_to_info = {
+            let mut res = BTreeMap::new();
+            for (func, pos) in locations.funcs.iter() {
+                res.insert(&*func.trans_name, (*pos, &*func.params));
+            }
+            res
+        };
+        let entity_fn_to_info = {
+            let mut res = BTreeMap::new();
+            for (entity, entity_locs) in locations.entities.iter() {
+                let mut inner = BTreeMap::new();
+                for (func, pos) in entity_locs.funcs.iter() {
+                    inner.insert(&*func.trans_name, (*pos, &*func.params));
+                }
+                res.insert(*entity as *const ast::Sprite, inner);
+            }
+            res
+        };
+
+        let get_ptr = |x: Option<&ast::Sprite>| x.map(|x| x as *const ast::Sprite).unwrap_or(std::ptr::null());
+        for (hole_pos, hole_fn, hole_ent) in self.call_holes {
+            let sym = &*hole_fn.trans_name;
+            let &(pos, params) = entity_fn_to_info.get(&get_ptr(hole_ent)).and_then(|tab| tab.get(sym)).or_else(|| global_fn_to_info.get(sym)).unwrap();
+            self.ins[hole_pos] = Instruction::Call { pos: pos, params: params.iter().map(|x| x.trans_name.clone()).collect() };
+        }
+
+        #[cfg(debug_assertions)]
+        for ins in self.ins.iter() {
+            if let Instruction::Illegal = ins {
+                panic!();
+            }
+        }
+
+        (ByteCode(self.ins), locations)
+    }
+}
+
+impl ByteCode {
     /// Compiles a single project role into an executable form.
     /// Also emits the symbol table of functions and scripts,
     /// which is needed to execute a specific segment of code.
     pub fn compile(role: &ast::Role) -> (ByteCode, Locations) {
-        let mut code = ByteCode(vec![]);
+        let mut code = ByteCodeBuilder::default();
 
         let mut funcs = Vec::with_capacity(role.funcs.len());
         for func in role.funcs.iter() {
-            funcs.push((func, code.0.len()));
-            code.append_stmts_ret(&func.stmts)
+            funcs.push((func, code.ins.len()));
+            code.append_stmts_ret(&func.stmts, None)
         }
 
         let mut entities = Vec::with_capacity(role.sprites.len());
         for entity in role.sprites.iter() {
             let mut funcs = Vec::with_capacity(entity.funcs.len());
             for func in entity.funcs.iter() {
-                funcs.push((func, code.0.len()));
-                code.append_stmts_ret(&func.stmts);
+                funcs.push((func, code.ins.len()));
+                code.append_stmts_ret(&func.stmts, Some(entity));
             }
 
             let mut scripts = Vec::with_capacity(entity.scripts.len());
             for script in entity.scripts.iter() {
-                scripts.push((script, code.0.len()));
-                code.append_stmts_ret(&script.stmts);
+                scripts.push((script, code.ins.len()));
+                code.append_stmts_ret(&script.stmts, Some(entity));
             }
 
             entities.push((entity, EntityLocations { funcs, scripts }));
         }
 
-        (code, Locations { funcs, entities })
+        code.link(Locations { funcs, entities })
     }
 }
