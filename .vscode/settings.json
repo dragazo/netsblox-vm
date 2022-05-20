@@ -5,7 +5,10 @@
         "consts",
         "funcs",
         "netsblox",
+        "numerify",
         "sandboxed",
-        "slotmap"
+        "slotmap",
+        "truthyness",
+        "vals"
     ]
 }
