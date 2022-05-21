@@ -20,22 +20,44 @@ pub enum ExecError {
     /// A variable lookup operation failed.
     /// `name` holds the name of the variable that was expected.
     UndefinedVariable { name: String, pos: usize },
-    /// An upgrade operation on an [`Rc`] handle failed.
+    /// An upgrade operation on a [`Weak`](std::rc::Weak) handle failed.
     /// Proper usage of this crate should never generate this error.
     /// The most likely cause is that a [`RefPool`] instance was improperly used.
-    RcUpgradeError,
+    RcUpgradeError { pos: usize },
     /// The result of a failed type conversion.
-    ConversionError { got: Type, expected: Type },
+    ConversionError { got: Type, expected: Type, pos: usize },
     /// Exceeded the maximum call depth.
     /// This can be configured by [`Process::new`].
-    CallDepthLimit { limit: usize },
+    CallDepthLimit { limit: usize, pos: usize },
 }
-impl From<ConversionError> for ExecError {
-    fn from(err: ConversionError) -> Self {
-        Self::ConversionError { got: err.got, expected: err.expected }
+
+trait ErrAt {
+    fn err_at(self, pos: usize) -> ExecError;
+}
+impl ErrAt for ConversionError {
+    fn err_at(self, pos: usize) -> ExecError {
+        ExecError::ConversionError { got: self.got, expected: self.expected, pos }
     }
 }
-impl From<RcUpgradeError> for ExecError {
+impl ErrAt for ArithmeticError {
+    fn err_at(self, pos: usize) -> ExecError {
+        match self {
+            ArithmeticError::ConversionError(e) => e.err_at(pos),
+            ArithmeticError::RcUpgradeError => ExecError::RcUpgradeError { pos },
+        }
+    }
+}
+
+enum ArithmeticError {
+    ConversionError(ConversionError),
+    RcUpgradeError,
+}
+impl From<ConversionError> for ArithmeticError {
+    fn from(e: ConversionError) -> Self {
+        Self::ConversionError(e)
+    }
+}
+impl From<RcUpgradeError> for ArithmeticError {
     fn from(_: RcUpgradeError) -> Self {
         Self::RcUpgradeError
     }
@@ -53,7 +75,7 @@ pub enum StepType {
     /// Yielding is primarily needed for executing an entire semi-concurrent project so that scripts can appear to run simultaneously.
     /// If instead you are explicitly only using a single sandboxed process, this can be treated equivalently to [`StepType::Normal`].
     Yield,
-    /// The process has terminated with the given return value, or `None` if terminated by an (error-less) abort
+    /// The process has successfully terminated with the given return value, or `None` if terminated by an (error-less) abort
     Terminate(Option<Value>),
 }
 
@@ -134,7 +156,7 @@ impl Process {
             Instruction::Illegal => panic!(),
 
             Instruction::PushValue { value } => {
-                self.value_stack.push(Value::from_ast(value, ref_pool));
+                self.value_stack.push(Value::from_ast(value, ref_pool, true));
                 self.pos += 1;
             }
             Instruction::PushVariable { var } => {
@@ -149,7 +171,7 @@ impl Process {
             Instruction::BinaryOp { op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::binary_op(&a, &b, ref_pool, *op)?);
+                self.value_stack.push(ops::binary_op(&a, &b, ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
 
@@ -163,19 +185,19 @@ impl Process {
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = lookup_var!(var).clone();
-                context.set_or_define(var, ops::binary_op(&a, &b, ref_pool, *op)?);
+                context.set_or_define(var, ops::binary_op(&a, &b, ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
 
             Instruction::Jump { pos } => self.pos = *pos,
             Instruction::ConditionalJump { pos, when } => {
                 let value = self.value_stack.pop().unwrap();
-                self.pos = if value.to_bool()? == *when { *pos } else { self.pos + 1 };
+                self.pos = if value.to_bool().map_err(|e| e.err_at(self.pos))? == *when { *pos } else { self.pos + 1 };
             }
 
             Instruction::Call { pos, params } => {
                 if self.call_stack.len() >= self.max_call_depth {
-                    return Err(ExecError::CallDepthLimit { limit: self.max_call_depth });
+                    return Err(ExecError::CallDepthLimit { limit: self.max_call_depth, pos: self.pos });
                 }
 
                 let mut context = SymbolTable::default();
@@ -226,7 +248,7 @@ mod ops {
         })
     }
 
-    fn binary_op_impl(a: &Value, b: &Value, ref_pool: &mut RefPool, scalar_op: fn(&Value, &Value, &mut RefPool) -> Result<Value, ExecError>, matrix_mode: bool) -> Result<Value, ExecError> {
+    fn binary_op_impl(a: &Value, b: &Value, ref_pool: &mut RefPool, scalar_op: fn(&Value, &Value, &mut RefPool) -> Result<Value, ArithmeticError>, matrix_mode: bool) -> Result<Value, ArithmeticError> {
         let checker = if matrix_mode { as_matrix } else { as_list };
         Ok(match (checker(a)?, checker(b)?) {
             (Some(a), Some(b)) => Value::from_vec(iter::zip(&*a.borrow(), &*b.borrow()).map(|(a, b)| binary_op_impl(a, b, ref_pool, scalar_op, matrix_mode)).collect::<Result<_,_>>()?, ref_pool),
@@ -235,7 +257,7 @@ mod ops {
             (None, None) => if matrix_mode { binary_op_impl(a, b, ref_pool, scalar_op, false)? } else { scalar_op(a, b, ref_pool)? }
         })
     }
-    pub(super) fn binary_op(a: &Value, b: &Value, ref_pool: &mut RefPool, op: BinaryOp) -> Result<Value, ExecError> {
+    pub(super) fn binary_op(a: &Value, b: &Value, ref_pool: &mut RefPool, op: BinaryOp) -> Result<Value, ArithmeticError> {
         match op {
             BinaryOp::Add     => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? + b.to_number()?).into()), true),
             BinaryOp::Sub     => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? - b.to_number()?).into()), true),

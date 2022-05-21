@@ -42,7 +42,7 @@ fn run_till_term(proc: &mut Process, ref_pool: &mut RefPool, globals: &mut Symbo
 
 #[test]
 fn test_proc_ret() {
-    let mut ref_pool = RefPool::new(true);
+    let mut ref_pool = RefPool::default();
     let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -58,7 +58,7 @@ fn test_proc_ret() {
 
 #[test]
 fn test_proc_sum_123n() {
-    let mut ref_pool = RefPool::new(true);
+    let mut ref_pool = RefPool::default();
     let (mut proc, mut globals, mut fields, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -79,7 +79,7 @@ fn test_proc_sum_123n() {
 
 #[test]
 fn test_proc_recursive_factorial() {
-    let mut ref_pool = RefPool::new(true);
+    let mut ref_pool = RefPool::default();
     let (mut proc, mut globals, mut fields, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -100,7 +100,7 @@ fn test_proc_recursive_factorial() {
 
 // #[test]
 fn test_proc_loops_lists_basic() {
-    let mut ref_pool = RefPool::new(true);
+    let mut ref_pool = RefPool::default();
     let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",

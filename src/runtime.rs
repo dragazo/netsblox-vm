@@ -7,11 +7,7 @@ use std::rc::{Rc, Weak};
 
 use netsblox_ast as ast;
 
-slotmap::new_key_type! {
-    pub struct RefPoolListKey;
-}
-
-/// The type of a variable.
+/// The type of a [`Value`].
 #[derive(Clone, Copy, Debug)]
 pub enum Type {
     Bool,
@@ -26,25 +22,36 @@ pub struct ConversionError {
     pub expected: Type,
 }
 
-/// Any primitive type.
+/// Any primitive value.
 #[derive(Clone, Debug)]
 pub enum Value {
+    /// A primitive boolean value.
     Bool(bool),
+    /// A primitive numeric value.
+    /// Snap! and NetsBlox use 64-bit floating point values for all numbers.
     Number(f64),
+    /// A primitive string value, which is an immutable reference type.
+    /// Each string is weakly-linked to a [`RefPool`] to facilitate string interning if requested.
     String(Rc<String>),
+    /// A primitive list type, which is a mutable reference type.
+    /// `Value` holds lists by weak reference so that containment cycles do not cause memory leaks.
+    /// The (only) owning reference to a list is allocated in a [`RefPool`],
+    /// which can perform garbage collection logic upon request.
     List(Weak<RefCell<Vec<Value>>>),
 }
 impl Value {
     /// Creates a new value from an abstract syntax tree value.
-    /// In the event that `value` is a reference type, it is allocated in the provided [`RefPool`].
-    pub fn from_ast(value: &ast::Value, ref_pool: &mut RefPool) -> Self {
+    /// In the event that `value` is a reference type, it is tied to the provided [`RefPool`].
+    /// 
+    /// The `intern` flag controls whether to perform interning for string values.
+    pub fn from_ast(value: &ast::Value, ref_pool: &mut RefPool, intern: bool) -> Self {
         match value {
             ast::Value::Bool(x) => Value::Bool(*x),
             ast::Value::Number(x) => Value::Number(*x),
             ast::Value::Constant(ast::Constant::E) => Value::Number(std::f64::consts::E),
             ast::Value::Constant(ast::Constant::Pi) => Value::Number(std::f64::consts::PI),
-            ast::Value::String(x) => Self::from_string(x.clone(), ref_pool),
-            ast::Value::List(x) => Self::from_vec(x.iter().map(|x| Value::from_ast(x, ref_pool)).collect(), ref_pool),
+            ast::Value::String(x) => Self::from_string(x.clone(), ref_pool, intern),
+            ast::Value::List(x) => Self::from_vec(x.iter().map(|x| Value::from_ast(x, ref_pool, intern)).collect(), ref_pool),
         }
     }
     /// Creates a new [`Value::List`] object with the given values.
@@ -55,8 +62,10 @@ impl Value {
         Value::List(weak)
     }
     /// Creates a new [`Value::String`] object with the given value.
-    pub fn from_string(value: String, ref_pool: &mut RefPool) -> Self {
-        if ref_pool.intern {
+    /// 
+    /// The `intern` flag controls whether to perform interning.
+    pub fn from_string(value: String, ref_pool: &mut RefPool, intern: bool) -> Self {
+        if intern {
             for v in ref_pool.string_pool.iter() {
                 if let Some(rc) = v.upgrade() {
                     if *rc == value { return Value::String(rc); }
@@ -109,27 +118,23 @@ impl From<f64> for Value {
     }
 }
 
+/// An allocation arena for reference-type values (see [`Value`]).
+#[derive(Default)]
 pub struct RefPool {
     string_pool: Vec<Weak<String>>,
     list_pool: Vec<Rc<RefCell<Vec<Value>>>>,
-    intern: bool,
-}
-impl RefPool {
-    pub fn new(intern: bool) -> Self {
-        Self {
-            string_pool: Default::default(),
-            list_pool: Default::default(),
-            intern,
-        }
-    }
 }
 
 /// Holds a collection of variables in an execution context.
+/// 
+/// `SymbolTable` has utilities to extract variables from an abstract syntax tree,
+/// or to explicitly define variables.
+/// To perform value lookups, use the higher-level utility [`LookupGroup`].
 #[derive(Default, Debug)]
 pub struct SymbolTable(BTreeMap<String, Value>);
 impl SymbolTable {
     fn from_var_defs(var_defs: &[ast::VariableDef], ref_pool: &mut RefPool) -> Self {
-        Self(var_defs.iter().map(|x| (x.trans_name.clone(), Value::from_ast(&x.value, ref_pool))).collect())
+        Self(var_defs.iter().map(|x| (x.trans_name.clone(), Value::from_ast(&x.value, ref_pool, true))).collect())
     }
     /// Extracts a symbol table containing all the global variables in the project.
     pub fn from_globals(role: &ast::Role, ref_pool: &mut RefPool) -> Self {
