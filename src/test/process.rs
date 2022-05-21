@@ -28,14 +28,14 @@ fn get_running_proc(xml: &str, locals: SymbolTable, ref_pool: &mut RefPool) -> (
 fn run_till_term(proc: &mut Process, ref_pool: &mut RefPool, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<Option<Value>, ExecError> {
     assert!(proc.is_running());
     let ret = loop {
-        match proc.step(ref_pool, globals, fields) {
-            StepResult::Idle => panic!(),
-            StepResult::Normal | StepResult::Yield => (),
-            StepResult::Terminate(e) => break e,
+        match proc.step(ref_pool, globals, fields)? {
+            StepType::Idle => panic!(),
+            StepType::Normal | StepType::Yield => (),
+            StepType::Terminate(e) => break e,
         }
     };
     assert!(!proc.is_running());
-    ret
+    Ok(ret)
 }
 
 //<variable name="field"><l>0</l></variable>
@@ -50,8 +50,8 @@ fn test_proc_ret() {
         methods = "",
     ), SymbolTable::default(), &mut ref_pool);
 
-    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap().flatten(&ref_pool).unwrap() {
-        FlatValue::String(x) => assert_eq!(x, ""),
+    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
+        Value::String(x) => assert_eq!(&*x, ""),
         x => panic!("{:?}", x),
     }
 }
@@ -71,7 +71,7 @@ fn test_proc_sum_123n() {
         locals.set_or_define("n", n.into());
         proc.initialize(main, locals);
         match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
-            Value::CopyValue(CopyValue::Number(ret)) => assert_eq!(ret, expect),
+            Value::Number(ret) => assert_eq!(ret, expect),
             x => panic!("{:?}", x),
         }
     }
@@ -92,7 +92,7 @@ fn test_proc_recursive_factorial() {
         locals.set_or_define("n", n.into());
         proc.initialize(main, locals);
         match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
-            Value::CopyValue(CopyValue::Number(ret)) => assert_eq!(ret, expect),
+            Value::Number(ret) => assert_eq!(ret, expect),
             x => panic!("{:?}", x),
         }
     }
@@ -108,8 +108,8 @@ fn test_proc_loops_lists_basic() {
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap().flatten(&ref_pool).unwrap() {
-        FlatValue::List(x) => {
+    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
+        Value::List(x) => {
             let expected = [
                 vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
                 vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
@@ -134,14 +134,18 @@ fn test_proc_loops_lists_basic() {
                 vec![6.5,5.5,4.5,3.5,2.5],
                 vec![6.5,5.5,4.5,3.5,2.5,1.5],
             ];
+            let x = x.upgrade().unwrap();
+            let x = x.borrow();
             assert_eq!(x.len(), expected.len());
-            for (i, (got, expected)) in iter::zip(x, expected).enumerate() {
-                match got.flatten(&ref_pool).unwrap() {
-                    FlatValue::List(x) => {
+            for (i, (got, expected)) in iter::zip(&*x, expected).enumerate() {
+                match got {
+                    Value::List(x) => {
+                        let x = x.upgrade().unwrap();
+                        let x = x.borrow();
                         assert_eq!(x.len(), expected.len());
-                        for (j, (got, expected)) in iter::zip(x, expected).enumerate() {
+                        for (j, (got, expected)) in iter::zip(&*x, expected).enumerate() {
                             match got {
-                                Value::CopyValue(CopyValue::Number(x)) => if *x != expected {
+                                Value::Number(x) => if *x != expected {
                                     panic!("res[{}][{}] = {}, expected {}", i, j, x, expected);
                                 }
                                 x => panic!("{:?}", x),
