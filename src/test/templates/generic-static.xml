@@ -8,9 +8,7 @@
                 <variables>
                     {fields}
                 </variables>
-                <blocks>
-                    {methods}
-                </blocks>
+                {methods}
                 <messageTypes></messageTypes>
                 <scripts></scripts>
                 <sprites></sprites>
@@ -18,9 +16,7 @@
             <hidden></hidden>
             <headers></headers>
             <code></code>
-            <blocks>
-                {funcs}
-            </blocks>
+            {funcs}
             <variables>
                 {globals}
             </variables>

@@ -1,0 +1,1 @@
+<blocks><block-definition s="main" type="command" category="motion"><header></header><code></code><translations></translations><inputs></inputs><script><block s="doDeclareVariables"><list><l>local</l></list></block></script></block-definition></blocks>

@@ -10,6 +10,67 @@ slotmap::new_key_type! {
     pub struct RefPoolKey;
 }
 
+/// The type of a variable.
+#[derive(Clone, Copy, Debug)]
+pub enum Type {
+    Bool,
+    Number,
+    String,
+    List,
+}
+
+/// A type conversion error.
+pub struct ConversionError {
+    pub got: Type,
+    pub expected: Type,
+}
+
+/// A flattened, reference-holding version of the owning type [`Value`].
+/// 
+/// [`Value`] is needed because it is an owning type, and so can be stored in the
+/// execution state machine using keys that index into a [`RefPool`].
+/// However, it is often more convenient to flatten the structure and have reference types,
+/// which is where `FlatValue` comes into play.
+#[derive(Clone, Copy, Debug)]
+pub enum FlatValue<'a> {
+    Bool(bool),
+    Number(f64),
+    String(&'a str),
+    List(&'a [Value]),
+}
+impl FlatValue<'_> {
+    /// Gets the type of value that is stored.
+    pub fn get_type(self) -> Type {
+        match self {
+            FlatValue::Bool(_) => Type::Bool,
+            FlatValue::Number(_) => Type::Number,
+            FlatValue::String(_) => Type::String,
+            FlatValue::List(_) => Type::List,
+        }
+    }
+    /// Checks if this value is truthy.
+    pub fn is_truthy(self) -> bool {
+        match self {
+            FlatValue::Bool(x) => x,
+            FlatValue::Number(x) => x != 0.0 && !x.is_nan(),
+            FlatValue::List(_) => true,
+            FlatValue::String(x) => !x.is_empty(),
+        }
+    }
+    /// Attempts to interpret this value as a number.
+    pub fn to_number(self) -> Result<f64, ConversionError> {
+        Ok(match self {
+            FlatValue::Bool(_) => return Err(ConversionError { got: Type::Bool, expected: Type::Number }),
+            FlatValue::Number(x) => x,
+            FlatValue::String(x) => match x.parse() {
+                Ok(x) => x,
+                Err(_) => return Err(ConversionError { got: Type::String, expected: Type::Number }),
+            }
+            FlatValue::List(_) => return Err(ConversionError { got: Type::List, expected: Type::Number }),
+        })
+    }
+}
+
 /// Any value type primitive.
 /// 
 /// `CopyValue` variables are held directly by a [`Process`](crate::process::Process) and are copied when a new reference is needed.
@@ -67,18 +128,18 @@ impl Value {
         }
         Value::RefValue(ref_pool.pool.insert(RefValue::String(value)))
     }
-    /// Checks if this value is truthy, using the provided [`RefPool`] in the event that this value is of reference type.
-    /// If the value is a reference type but is not found in `ref_pool`, returns `Err` with the offending key.
-    pub fn is_truthy(&self, ref_pool: &RefPool) -> Result<bool, RefPoolKey> {
+    /// Flattens the (owning) `Value` enum into a [`FlatValue`] which contains references
+    /// to values in the [`RefPool`] rather than keys.
+    /// If this value is of reference type and the key is not found in the [`RefPool`],
+    /// returns `Err` with the offending key.
+    pub fn flatten<'a>(&self, ref_pool: &'a RefPool) -> Result<FlatValue<'a>, RefPoolKey> {
         Ok(match self {
-            Value::CopyValue(CopyValue::Bool(x)) => *x,
-            Value::CopyValue(CopyValue::Number(x)) => *x != 0.0 && !x.is_nan(),
+            Value::CopyValue(CopyValue::Bool(x)) => FlatValue::Bool(*x),
+            Value::CopyValue(CopyValue::Number(x)) => FlatValue::Number(*x),
             Value::RefValue(key) => match ref_pool.get(*key) {
                 None => return Err(*key),
-                Some(x) => match x {
-                    RefValue::List(_) => true,
-                    RefValue::String(x) => !x.is_empty(),
-                }
+                Some(RefValue::String(x)) => FlatValue::String(x),
+                Some(RefValue::List(x)) => FlatValue::List(x),
             }
         })
     }

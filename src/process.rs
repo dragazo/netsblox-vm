@@ -17,10 +17,27 @@ pub enum ExecError {
     /// A variable lookup operation failed.
     /// `name` holds the name of the variable that was expected.
     UndefinedVariable { name: String, pos: usize },
+    /// An operation on [`Value::RefValue`] attempted to use an invalid key.
+    /// Proper usage of this crate should never generate this error.
+    /// The most likely cause is that you are using multiple instances of [`RefPool`] and used the wrong one for some operation.
+    RefPoolKeyError { key: RefPoolKey },
+    /// The result of a failed type conversion.
+    ConversionError { got: Type, expected: Type },
     /// Exceeded the maximum call depth.
     /// This can be configured by [`Process::new`].
     CallDepthLimit { limit: usize },
 }
+impl From<RefPoolKey> for ExecError {
+    fn from(key: RefPoolKey) -> Self {
+        Self::RefPoolKeyError { key }
+    }
+}
+impl From<ConversionError> for ExecError {
+    fn from(err: ConversionError) -> Self {
+        Self::ConversionError { got: err.got, expected: err.expected }
+    }
+}
+
 /// Result of stepping through a [`Process`].
 pub enum StepResult {
     /// The process was not running.
@@ -92,15 +109,18 @@ impl Process {
         let mut context = [globals, fields, locals];
         let mut context = LookupGroup::new(&mut context);
 
+        macro_rules! terminate_err {
+            ($err:expr) => {{
+                self.running = false;
+                return StepResult::Terminate(Err($err));
+            }}
+        }
         macro_rules! lookup_var {
             ($var:expr) => {{
                 let var = $var;
                 match context.lookup(var) {
                     Some(x) => x,
-                    None => {
-                        self.running = false;
-                        return StepResult::Terminate(Err(ExecError::UndefinedVariable { name: var.into(), pos: self.pos }));
-                    }
+                    None => terminate_err!(ExecError::UndefinedVariable { name: var.into(), pos: self.pos }),
                 }
             }}
         }
@@ -124,7 +144,10 @@ impl Process {
             Instruction::BinaryOp { op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::binary_op(a, b, ref_pool, *op));
+                self.value_stack.push(match ops::binary_op(a, b, ref_pool, *op) {
+                    Ok(x) => x,
+                    Err(e) => terminate_err!(e),
+                });
                 self.pos += 1;
             }
 
@@ -138,14 +161,17 @@ impl Process {
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = lookup_var!(var);
-                context.set_or_define(var, ops::binary_op(a, b, ref_pool, *op));
+                context.set_or_define(var, match ops::binary_op(a, b, ref_pool, *op) {
+                    Ok(x) => x,
+                    Err(e) => terminate_err!(e),
+                });
                 self.pos += 1;
             }
 
             Instruction::Jump { pos } => self.pos = *pos,
             Instruction::ConditionalJump { pos, when } => {
                 let value = self.value_stack.pop().unwrap();
-                self.pos = if value.is_truthy(&ref_pool).unwrap() == *when { *pos } else { self.pos + 1 };
+                self.pos = if value.flatten(&ref_pool).unwrap().is_truthy() == *when { *pos } else { self.pos + 1 };
             }
 
             Instruction::Call { pos, params } => {
@@ -182,11 +208,8 @@ mod ops {
     use super::*;
 
     fn as_list(v: Value, ref_pool: &RefPool) -> Option<&[Value]> {
-        match v {
-            Value::RefValue(key) => match ref_pool.get(key).unwrap() {
-                RefValue::List(v) => Some(&*v),
-                _ => None,
-            }
+        match v.flatten(ref_pool).unwrap() {
+            FlatValue::List(v) => Some(&*v),
             _ => None,
         }
     }
@@ -200,37 +223,23 @@ mod ops {
         }
     }
 
-    /// Panics if `v` is a list.
-    fn scalar_numerify(v: Value, ref_pool: &RefPool) -> f64 {
-        match v {
-            Value::CopyValue(x) => match x {
-                CopyValue::Bool(x) => if x { 1.0 } else { 0.0 },
-                CopyValue::Number(x) => x,
-            }
-            Value::RefValue(key) => match ref_pool.get(key).unwrap() {
-                RefValue::String(x) => x.parse().unwrap_or(f64::NAN),
-                RefValue::List(_) => unreachable!(),
-            }
-        }
-    }
-
-    fn binary_op_impl(a: Value, b: Value, ref_pool: &mut RefPool, scalar_op: fn(Value, Value, &mut RefPool) -> Value, matrix_mode: bool) -> Value {
+    fn binary_op_impl(a: Value, b: Value, ref_pool: &mut RefPool, scalar_op: fn(Value, Value, &mut RefPool) -> Result<Value, ExecError>, matrix_mode: bool) -> Result<Value, ExecError> {
         let checker = if matrix_mode { as_matrix } else { as_list };
-        match (checker(a, ref_pool).map(ToOwned::to_owned), checker(b, ref_pool).map(ToOwned::to_owned)) {
-            (Some(a), Some(b)) => Value::from_vec(iter::zip(a, b).map(|(a, b)| binary_op_impl(a, b, ref_pool, scalar_op, matrix_mode)).collect(), ref_pool),
-            (Some(a), None) => Value::from_vec(a.into_iter().map(|a| binary_op_impl(a, b, ref_pool, scalar_op, matrix_mode)).collect(), ref_pool),
-            (None, Some(b)) => Value::from_vec(b.into_iter().map(|b| binary_op_impl(a, b, ref_pool, scalar_op, matrix_mode)).collect(), ref_pool),
-            (None, None) => if matrix_mode { binary_op_impl(a, b, ref_pool, scalar_op, false) } else { scalar_op(a, b, ref_pool) }
-        }
+        Ok(match (checker(a, ref_pool).map(ToOwned::to_owned), checker(b, ref_pool).map(ToOwned::to_owned)) {
+            (Some(a), Some(b)) => Value::from_vec(iter::zip(a, b).map(|(a, b)| binary_op_impl(a, b, ref_pool, scalar_op, matrix_mode)).collect::<Result<_,_>>()?, ref_pool),
+            (Some(a), None) => Value::from_vec(a.into_iter().map(|a| binary_op_impl(a, b, ref_pool, scalar_op, matrix_mode)).collect::<Result<_,_>>()?, ref_pool),
+            (None, Some(b)) => Value::from_vec(b.into_iter().map(|b| binary_op_impl(a, b, ref_pool, scalar_op, matrix_mode)).collect::<Result<_,_>>()?, ref_pool),
+            (None, None) => if matrix_mode { binary_op_impl(a, b, ref_pool, scalar_op, false)? } else { scalar_op(a, b, ref_pool)? }
+        })
     }
-    pub(super) fn binary_op(a: Value, b: Value, ref_pool: &mut RefPool, op: BinaryOp) -> Value {
+    pub(super) fn binary_op(a: Value, b: Value, ref_pool: &mut RefPool, op: BinaryOp) -> Result<Value, ExecError> {
         match op {
-            BinaryOp::Add => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) + ops::scalar_numerify(b, ref_pool)).into(), true),
-            BinaryOp::Sub => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) - ops::scalar_numerify(b, ref_pool)).into(), true),
-            BinaryOp::Mul => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) * ops::scalar_numerify(b, ref_pool)).into(), true),
-            BinaryOp::Div => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) / ops::scalar_numerify(b, ref_pool)).into(), true),
-            BinaryOp::Greater => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) > ops::scalar_numerify(b, ref_pool)).into(), true),
-            BinaryOp::Less => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| (ops::scalar_numerify(a, ref_pool) < ops::scalar_numerify(b, ref_pool)).into(), true),
+            BinaryOp::Add     => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.flatten(ref_pool)?.to_number()? + b.flatten(ref_pool).unwrap().to_number()?).into()), true),
+            BinaryOp::Sub     => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.flatten(ref_pool)?.to_number()? - b.flatten(ref_pool).unwrap().to_number()?).into()), true),
+            BinaryOp::Mul     => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.flatten(ref_pool)?.to_number()? * b.flatten(ref_pool).unwrap().to_number()?).into()), true),
+            BinaryOp::Div     => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.flatten(ref_pool)?.to_number()? / b.flatten(ref_pool).unwrap().to_number()?).into()), true),
+            BinaryOp::Greater => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.flatten(ref_pool)?.to_number()? > b.flatten(ref_pool).unwrap().to_number()?).into()), true),
+            BinaryOp::Less    => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.flatten(ref_pool)?.to_number()? < b.flatten(ref_pool).unwrap().to_number()?).into()), true),
         }
     }
 }

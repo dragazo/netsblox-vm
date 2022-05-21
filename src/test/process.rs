@@ -1,5 +1,6 @@
 use std::prelude::v1::*;
 use std::rc::Rc;
+use std::iter;
 
 use netsblox_ast as ast;
 
@@ -42,18 +43,15 @@ fn run_till_term(proc: &mut Process, ref_pool: &mut RefPool, globals: &mut Symbo
 #[test]
 fn test_proc_ret() {
     let mut ref_pool = RefPool::new(true);
-    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/single-func.xml"),
+    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = r#"<block-definition s="main" type="command" category="motion"><header></header><code></code><translations></translations><inputs></inputs><script><block s="doDeclareVariables"><list><l>local</l></list></block></script></block-definition>"#,
+        funcs = include_str!("blocks/proc_ret.xml"),
         methods = "",
     ), SymbolTable::default(), &mut ref_pool);
 
-    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
-        Value::RefValue(key) => match ref_pool.get(key).unwrap() {
-            RefValue::String(x) => assert_eq!(x, ""),
-            x => panic!("{:?}", x),
-        }
+    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap().flatten(&ref_pool).unwrap() {
+        FlatValue::String(x) => assert_eq!(x, ""),
         x => panic!("{:?}", x),
     }
 }
@@ -61,10 +59,10 @@ fn test_proc_ret() {
 #[test]
 fn test_proc_sum_123n() {
     let mut ref_pool = RefPool::new(true);
-    let (mut proc, mut globals, mut fields, main) = get_running_proc(&format!(include_str!("templates/single-func.xml"),
+    let (mut proc, mut globals, mut fields, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = r#"<block-definition s="main %&apos;n&apos;" type="reporter" category="custom"><header></header><code></code><translations></translations><inputs><input type="%n"></input></inputs><script><block s="doDeclareVariables"><list><l>sum</l><l>i</l></list></block><block s="doSetVar"><l>sum</l><l>0</l></block><block s="doSetVar"><l>i</l><l>1</l></block><block s="doForever"><script><block s="doIf"><block s="reportGreaterThan"><block var="i"/><block var="n"/></block><script><block s="doReport"><block var="sum"/></block></script></block><block s="doChangeVar"><l>sum</l><block var="i"/></block><block s="doChangeVar"><l>i</l><l>1</l></block></script></block></script></block-definition>"#,
+        funcs = include_str!("blocks/proc_sum_123n.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
@@ -82,10 +80,10 @@ fn test_proc_sum_123n() {
 #[test]
 fn test_proc_recursive_factorial() {
     let mut ref_pool = RefPool::new(true);
-    let (mut proc, mut globals, mut fields, main) = get_running_proc(&format!(include_str!("templates/single-func.xml"),
+    let (mut proc, mut globals, mut fields, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = r#"<block-definition s="main %&apos;n&apos;" type="reporter" category="custom"><header></header><code></code><translations></translations><inputs><input type="%s"></input></inputs><script><block s="doReport"><block s="reportIfElse"><block s="reportLessThan"><block var="n"/><l>2</l></block><l>1</l><block s="reportProduct"><block var="n"/><custom-block s="main %s"><block s="reportDifference"><block var="n"/><l>1</l></block></custom-block></block></block></block></script></block-definition>"#,
+        funcs = include_str!("blocks/proc_recursive_factorial.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
@@ -97,5 +95,63 @@ fn test_proc_recursive_factorial() {
             Value::CopyValue(CopyValue::Number(ret)) => assert_eq!(ret, expect),
             x => panic!("{:?}", x),
         }
+    }
+}
+
+// #[test]
+fn test_proc_loops_lists_basic() {
+    let mut ref_pool = RefPool::new(true);
+    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/proc_loops_lists_basic.xml"),
+        methods = "",
+    ), Default::default(), &mut ref_pool);
+
+    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap().flatten(&ref_pool).unwrap() {
+        FlatValue::List(x) => {
+            let expected = [
+                vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
+                vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
+                vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0],
+                vec![2.0,3.0,4.0,5.0,6.0,7.0],
+                vec![3.0,4.0,5.0,6.0,7.0],
+                vec![4.0,5.0,6.0,7.0],
+                vec![5.0,6.0,7.0],
+                vec![6.0,7.0],
+                vec![7.0],
+                vec![8.0],
+                vec![9.0,8.0],
+                vec![10.0,9.0,8.0],
+                vec![6.5,7.5,8.5,9.5],
+                vec![6.5,7.5,8.5],
+                vec![6.5,7.5],
+                vec![6.5],
+                vec![6.5],
+                vec![6.5,5.5],
+                vec![6.5,5.5,4.5],
+                vec![6.5,5.5,4.5,3.5],
+                vec![6.5,5.5,4.5,3.5,2.5],
+                vec![6.5,5.5,4.5,3.5,2.5,1.5],
+            ];
+            assert_eq!(x.len(), expected.len());
+            for (i, (got, expected)) in iter::zip(x, expected).enumerate() {
+                match got.flatten(&ref_pool).unwrap() {
+                    FlatValue::List(x) => {
+                        assert_eq!(x.len(), expected.len());
+                        for (j, (got, expected)) in iter::zip(x, expected).enumerate() {
+                            match got {
+                                Value::CopyValue(CopyValue::Number(x)) => if *x != expected {
+                                    panic!("res[{}][{}] = {}, expected {}", i, j, x, expected);
+                                }
+                                x => panic!("{:?}", x),
+                            }
+                        }
+                    }
+                    x => panic!("{:?}", x),
+                }
+            }
+        }
+        x => panic!("{:?}", x),
     }
 }
