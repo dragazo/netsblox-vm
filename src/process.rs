@@ -237,12 +237,12 @@ mod ops {
     }
     pub(super) fn binary_op(a: &Value, b: &Value, ref_pool: &mut RefPool, op: BinaryOp) -> Result<Value, ExecError> {
         match op {
-            BinaryOp::Add     => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.to_number()? + b.to_number()?).into()), true),
-            BinaryOp::Sub     => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.to_number()? - b.to_number()?).into()), true),
-            BinaryOp::Mul     => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.to_number()? * b.to_number()?).into()), true),
-            BinaryOp::Div     => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.to_number()? / b.to_number()?).into()), true),
-            BinaryOp::Greater => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.to_number()? > b.to_number()?).into()), true),
-            BinaryOp::Less    => ops::binary_op_impl(a, b, ref_pool, |a, b, ref_pool| Ok((a.to_number()? < b.to_number()?).into()), true),
+            BinaryOp::Add     => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? + b.to_number()?).into()), true),
+            BinaryOp::Sub     => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? - b.to_number()?).into()), true),
+            BinaryOp::Mul     => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? * b.to_number()?).into()), true),
+            BinaryOp::Div     => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? / b.to_number()?).into()), true),
+            BinaryOp::Greater => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? > b.to_number()?).into()), true),
+            BinaryOp::Less    => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? < b.to_number()?).into()), true),
         }
     }
 }

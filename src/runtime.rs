@@ -6,7 +6,6 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 use netsblox_ast as ast;
-use slotmap::SlotMap;
 
 slotmap::new_key_type! {
     pub struct RefPoolListKey;

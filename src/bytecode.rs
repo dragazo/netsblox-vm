@@ -11,7 +11,6 @@ pub(crate) enum BinaryOp {
     Greater, Less,
 }
 
-#[derive(Debug)]
 pub(crate) enum Instruction {
     /// Triggers an error when encountered.
     /// This is an internal value that is only used to denote incomplete linking results for better testing.
@@ -51,7 +50,6 @@ pub(crate) enum Instruction {
 /// A interpreter-ready sequence of instructions.
 /// 
 /// [`Process`](crate::process::Process) is an execution primitive that can be used to execute generated `ByteCode`.
-#[derive(Debug)]
 pub struct ByteCode(pub(crate) Vec<Instruction>);
 /// Location info for a [`ByteCode`] object.
 #[derive(Debug)]
