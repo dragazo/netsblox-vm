@@ -1,6 +1,7 @@
 //! Utilities for executing generated [`ByteCode`](crate::bytecode::ByteCode).
 
 use std::prelude::v1::*;
+use std::collections::BTreeMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::iter;
@@ -319,39 +320,92 @@ mod ops {
         })
     }
 
-    fn binary_op_impl(a: &Value, b: &Value, ref_pool: &mut RefPool, scalar_op: fn(&Value, &Value, &mut RefPool) -> Result<Value, ArithmeticError>, matrix_mode: bool) -> Result<Value, ArithmeticError> {
-        let checker = if matrix_mode { as_matrix } else { as_list };
-        Ok(match (checker(a)?, checker(b)?) {
-            (Some(a), Some(b)) => Value::from_vec(iter::zip(&*a.borrow(), &*b.borrow()).map(|(a, b)| binary_op_impl(a, b, ref_pool, scalar_op, matrix_mode)).collect::<Result<_,_>>()?, ref_pool),
-            (Some(a), None) => Value::from_vec(a.borrow().iter().map(|a| binary_op_impl(a, b, ref_pool, scalar_op, matrix_mode)).collect::<Result<_,_>>()?, ref_pool),
-            (None, Some(b)) => Value::from_vec(b.borrow().iter().map(|b| binary_op_impl(a, b, ref_pool, scalar_op, matrix_mode)).collect::<Result<_,_>>()?, ref_pool),
-            (None, None) => if matrix_mode { binary_op_impl(a, b, ref_pool, scalar_op, false)? } else { scalar_op(a, b, ref_pool)? }
+    const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
+
+    fn binary_op_impl(a: &Value, b: &Value, matrix_mode: bool, cache: &mut BTreeMap<(*const (), *const (), bool), Value>, ref_pool: &mut RefPool, scalar_op: fn(&Value, &Value, &mut RefPool) -> Result<Value, ArithmeticError>) -> Result<Value, ArithmeticError> {
+        let cache_key = (a.alloc_ptr(), b.alloc_ptr(), matrix_mode);
+        Ok(match cache.get(&cache_key) {
+            Some(x) => x.clone(),
+            None => {
+                let checker = if matrix_mode { as_matrix } else { as_list };
+                match (checker(a)?, checker(b)?) {
+                    (Some(a), Some(b)) => {
+                        let (a, b) = (a.borrow(), b.borrow());
+                        let real_res = Value::from_vec(Vec::with_capacity(a.len().min(b.len())), ref_pool);
+                        cache.insert(cache_key, real_res.clone());
+                        let res = as_list(&real_res)?.unwrap();
+                        let mut res = res.borrow_mut();
+                        for (a, b) in iter::zip(&*a, &*b) {
+                            res.push(binary_op_impl(a, b, matrix_mode, cache, ref_pool, scalar_op)?);
+                        }
+                        real_res
+                    }
+                    (Some(a), None) => {
+                        let a = a.borrow();
+                        let real_res = Value::from_vec(Vec::with_capacity(a.len()), ref_pool);
+                        cache.insert(cache_key, real_res.clone());
+                        let res = as_list(&real_res)?.unwrap();
+                        let mut res = res.borrow_mut();
+                        for a in &*a {
+                            res.push(binary_op_impl(a, b, matrix_mode, cache, ref_pool, scalar_op)?);
+                        }
+                        real_res
+                    }
+                    (None, Some(b)) => {
+                        let b = b.borrow();
+                        let real_res = Value::from_vec(Vec::with_capacity(b.len()), ref_pool);
+                        cache.insert(cache_key, real_res.clone());
+                        let res = as_list(&real_res)?.unwrap();
+                        let mut res = res.borrow_mut();
+                        for b in &*b {
+                            res.push(binary_op_impl(a, b, matrix_mode, cache, ref_pool, scalar_op)?);
+                        }
+                        real_res
+                    }
+                    (None, None) => if matrix_mode { binary_op_impl(a, b, false, cache, ref_pool, scalar_op)? } else { scalar_op(a, b, ref_pool)? }
+                }
+            }
         })
     }
     pub(super) fn binary_op(a: &Value, b: &Value, ref_pool: &mut RefPool, op: BinaryOp) -> Result<Value, ArithmeticError> {
         match op {
-            BinaryOp::Add     => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? + b.to_number()?).into()), true),
-            BinaryOp::Sub     => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? - b.to_number()?).into()), true),
-            BinaryOp::Mul     => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? * b.to_number()?).into()), true),
-            BinaryOp::Div     => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? / b.to_number()?).into()), true),
-            BinaryOp::Greater => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? > b.to_number()?).into()), true),
-            BinaryOp::Less    => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? < b.to_number()?).into()), true),
+            BinaryOp::Add     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? + b.to_number()?).into())),
+            BinaryOp::Sub     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? - b.to_number()?).into())),
+            BinaryOp::Mul     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? * b.to_number()?).into())),
+            BinaryOp::Div     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? / b.to_number()?).into())),
+            BinaryOp::Pow     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
+            BinaryOp::Greater => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? > b.to_number()?).into())),
+            BinaryOp::Less    => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? < b.to_number()?).into())),
         }
     }
 
-    fn unary_op_impl(x: &Value, ref_pool: &mut RefPool, scalar_op: fn(&Value, &mut RefPool) -> Result<Value, ArithmeticError>) -> Result<Value, ArithmeticError> {
-        Ok(match as_list(x)? {
-            Some(x) => Value::from_vec(x.borrow().iter().map(|x| unary_op_impl(x, ref_pool, scalar_op)).collect::<Result<_,_>>()?, ref_pool),
-            None => scalar_op(x, ref_pool)?,
+    fn unary_op_impl(x: &Value, cache: &mut BTreeMap<*const (), Value>, ref_pool: &mut RefPool, scalar_op: fn(&Value, &mut RefPool) -> Result<Value, ArithmeticError>) -> Result<Value, ArithmeticError> {
+        let cache_key = x.alloc_ptr();
+        Ok(match cache.get(&cache_key) {
+            Some(x) => x.clone(),
+            None => match as_list(x)? {
+                Some(x) => {
+                    let x = x.borrow();
+                    let real_res = Value::from_vec(Vec::with_capacity(x.len()), ref_pool);
+                    cache.insert(cache_key, real_res.clone());
+                    let res = as_list(&real_res)?.unwrap();
+                    let mut res = res.borrow_mut();
+                    for x in &*x {
+                        res.push(unary_op_impl(x, cache, ref_pool, scalar_op)?);
+                    }
+                    real_res
+                }
+                None => scalar_op(x, ref_pool)?,
+            }
         })
     }
     pub(super) fn unary_op(x: &Value, ref_pool: &mut RefPool, op: UnaryOp) -> Result<Value, ArithmeticError> {
         match op {
-            UnaryOp::Abs => unary_op_impl(x, ref_pool, |x, _| Ok(libm::fabs(x.to_number()?).into())),
-            UnaryOp::Neg => unary_op_impl(x, ref_pool, |x, _| Ok((-x.to_number()?).into())),
-            UnaryOp::Sin => unary_op_impl(x, ref_pool, |x, _| Ok(libm::sin(x.to_number()?).into())),
-            UnaryOp::Cos => unary_op_impl(x, ref_pool, |x, _| Ok(libm::cos(x.to_number()?).into())),
-            UnaryOp::Tan => unary_op_impl(x, ref_pool, |x, _| Ok(libm::tan(x.to_number()?).into())),
+            UnaryOp::Abs => unary_op_impl(x, &mut Default::default(), ref_pool, |x, _| Ok(libm::fabs(x.to_number()?).into())),
+            UnaryOp::Neg => unary_op_impl(x, &mut Default::default(), ref_pool, |x, _| Ok((-x.to_number()?).into())),
+            UnaryOp::Sin => unary_op_impl(x, &mut Default::default(), ref_pool, |x, _| Ok(libm::sin(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::Cos => unary_op_impl(x, &mut Default::default(), ref_pool, |x, _| Ok(libm::cos(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::Tan => unary_op_impl(x, &mut Default::default(), ref_pool, |x, _| Ok(libm::tan(x.to_number()? * DEG_TO_RAD).into())),
         }
     }
 }

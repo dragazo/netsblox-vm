@@ -38,6 +38,38 @@ fn run_till_term(proc: &mut Process, ref_pool: &mut RefPool, globals: &mut Symbo
     Ok(ret)
 }
 
+fn assert_values_eq(got: &Value, expected: &Value, epsilon: f64, path: &str) {
+    if got.get_type() != expected.get_type() {
+        panic!("{} - type error - got {:?} expected {:?}", path, got.get_type(), expected.get_type());
+    }
+    match (got, expected) {
+        (Value::Bool(got), Value::Bool(expected)) => {
+            if got != expected { panic!("{} - bool error - got {} expected {}", path, got, expected) }
+        }
+        (Value::Number(got), Value::Number(expected)) => {
+            let good = if got.is_finite() && expected.is_finite() { (got - expected).abs() <= epsilon } else { got == expected };
+            if !good { panic!("{} - number error - got {} expected {}", path, got, expected) }
+        }
+        (Value::String(got), Value::String(expected)) => {
+            if got != expected { panic!("{} - string error - got {} expected {}", path, got, expected) }
+        }
+        (Value::List(got), Value::List(expected)) => {
+            let got = got.upgrade().unwrap();
+            let got = got.borrow();
+
+            let expected = expected.upgrade().unwrap();
+            let expected = expected.borrow();
+
+            if got.len() != expected.len() { panic!("{} - list len error - got {} expected {}", path, got.len(), expected.len()) }
+
+            for (i, (got, expected)) in iter::zip(got.iter(), expected.iter()).enumerate() {
+                assert_values_eq(got, expected, epsilon, &format!("{}[{}]", path, i));
+            }
+        }
+        (x, y) => unimplemented!("types: {:?} {:?}", x.get_type(), y.get_type()),
+    }
+}
+
 //<variable name="field"><l>0</l></variable>
 
 #[test]
@@ -108,54 +140,75 @@ fn test_proc_loops_lists_basic() {
         methods = "",
     ), Default::default(), &mut ref_pool);
 
+    let got = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let expected = Value::from_vec(vec![
+        Value::from_vec([1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([1.0,2.0,3.0,4.0,5.0,6.0,7.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([2.0,3.0,4.0,5.0,6.0,7.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([3.0,4.0,5.0,6.0,7.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([4.0,5.0,6.0,7.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([5.0,6.0,7.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.0,7.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([7.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([8.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([9.0,8.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([10.0,9.0,8.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.5,7.5,8.5,9.5].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.5,7.5,8.5].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.5,7.5].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.5].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.5].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.5,5.5].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.5,5.5,4.5].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.5,5.5,4.5,3.5].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.5,5.5,4.5,3.5,2.5].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([6.5,5.5,4.5,3.5,2.5,1.5].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+        Value::from_vec([56.0,44.0,176.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
+    ], &mut ref_pool);
+    assert_values_eq(&got, &expected, 1e-10, "");
+}
+
+#[test]
+fn test_proc_recursively_self_containing_lists() {
+    let mut ref_pool = RefPool::default();
+    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/proc_recursively_self_containing_lists.xml"),
+        methods = "",
+    ), Default::default(), &mut ref_pool);
+
     match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
-        Value::List(x) => {
-            let expected = [
-                vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
-                vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
-                vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0],
-                vec![2.0,3.0,4.0,5.0,6.0,7.0],
-                vec![3.0,4.0,5.0,6.0,7.0],
-                vec![4.0,5.0,6.0,7.0],
-                vec![5.0,6.0,7.0],
-                vec![6.0,7.0],
-                vec![7.0],
-                vec![8.0],
-                vec![9.0,8.0],
-                vec![10.0,9.0,8.0],
-                vec![6.5,7.5,8.5,9.5],
-                vec![6.5,7.5,8.5],
-                vec![6.5,7.5],
-                vec![6.5],
-                vec![6.5],
-                vec![6.5,5.5],
-                vec![6.5,5.5,4.5],
-                vec![6.5,5.5,4.5,3.5],
-                vec![6.5,5.5,4.5,3.5,2.5],
-                vec![6.5,5.5,4.5,3.5,2.5,1.5],
-                vec![56.0,44.0,176.0],
-            ];
-            let x = x.upgrade().unwrap();
-            let x = x.borrow();
-            assert_eq!(x.len(), expected.len());
-            for (i, (got, expected)) in iter::zip(&*x, expected).enumerate() {
+        Value::List(res) => {
+            let res = res.upgrade().unwrap();
+            let res = res.borrow();
+            assert_eq!(res.len(), 4);
+
+            fn check(name: &str, got: &Value, expected_basic: &Value, ref_pool: &mut RefPool) {
                 match got {
-                    Value::List(x) => {
-                        let x = x.upgrade().unwrap();
-                        let x = x.borrow();
-                        assert_eq!(x.len(), expected.len());
-                        for (j, (got, expected)) in iter::zip(&*x, expected).enumerate() {
-                            match got {
-                                Value::Number(x) => if *x != expected {
-                                    panic!("res[{}][{}] = {}, expected {}", i, j, x, expected);
-                                }
-                                x => panic!("{:?}", x),
+                    Value::List(got) => {
+                        let top_weak = got;
+                        let got = got.upgrade().unwrap();
+                        let got = got.borrow();
+                        if got.len() != 11 { panic!("{} - len error - got {} expected 11", name, got.len()) }
+                        let basic = Value::from_vec(got[..10].iter().cloned().collect(), ref_pool);
+                        assert_values_eq(&basic, expected_basic, 1e-10, name);
+                        match &got[10] {
+                            Value::List(nested) => if !top_weak.ptr_eq(nested) {
+                                panic!("{} - self-containment not ref-eq - got {:?}", name, nested.upgrade().unwrap().borrow());
                             }
+                            x => panic!("{} - not a list - got {:?}", name, x.get_type()),
                         }
                     }
-                    x => panic!("{:?}", x),
+                    x => panic!("{} - not a list - got {:?}", name, x.get_type()),
                 }
             }
+
+            check("left mode", &res[0], &Value::from_vec([1.0,4.0,9.0,16.0,25.0,36.0,49.0,64.0,81.0,100.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool), &mut ref_pool);
+            check("right mode", &res[1], &Value::from_vec([2.0,4.0,8.0,16.0,32.0,64.0,128.0,256.0,512.0,1024.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool), &mut ref_pool);
+            check("both mode", &res[2], &Value::from_vec([1.0,4.0,27.0,256.0,3125.0,46656.0,823543.0,16777216.0,387420489.0,10000000000.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool), &mut ref_pool);
+            check("unary mode", &res[3], &Value::from_vec([-1.0,-2.0,-3.0,-4.0,-5.0,-6.0,-7.0,-8.0,-9.0,-10.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool), &mut ref_pool);
         }
         x => panic!("{:?}", x),
     }

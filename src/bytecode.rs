@@ -7,7 +7,7 @@ use netsblox_ast as ast;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BinaryOp {
-    Add, Sub, Mul, Div,
+    Add, Sub, Mul, Div, Pow,
     Greater, Less,
 }
 #[derive(Clone, Copy, Debug)]
@@ -101,6 +101,10 @@ impl<'a> ByteCodeBuilder<'a> {
         self.append_expr(right, entity);
         self.ins.push(Instruction::BinaryOp { op });
     }
+    fn append_expr_unary_op(&mut self, value: &'a ast::Expr, op: UnaryOp, entity: Option<&'a ast::Entity>) {
+        self.append_expr(value, entity);
+        self.ins.push(Instruction::UnaryOp { op });
+    }
     fn append_expr(&mut self, expr: &'a ast::Expr, entity: Option<&'a ast::Entity>) {
         match expr {
             ast::Expr::Value(v) => self.ins.push(Instruction::PushValue { value: v.clone() }),
@@ -109,8 +113,10 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Sub { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Sub, entity),
             ast::Expr::Mul { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Mul, entity),
             ast::Expr::Div { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Div, entity),
+            ast::Expr::Pow { base, power, .. } => self.append_expr_binary_op(&*base, &*power, BinaryOp::Pow, entity),
             ast::Expr::Greater { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Greater, entity),
             ast::Expr::Less { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Less, entity),
+            ast::Expr::Neg { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Neg, entity),
             ast::Expr::MakeList { values, .. } => {
                 for value in values {
                     self.append_expr(value, entity);

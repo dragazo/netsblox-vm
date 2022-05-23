@@ -8,7 +8,7 @@ use std::rc::{Rc, Weak};
 use netsblox_ast as ast;
 
 /// The type of a [`Value`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Type {
     Bool,
     Number,
@@ -105,6 +105,16 @@ impl Value {
             Value::List(_) => return Err(ConversionError { got: Type::List, expected: Type::Bool }),
             Value::String(x) => !x.is_empty(),
         })
+    }
+    /// Returns a pointer to the underlying allocated memory for this value.
+    /// If this is a (self-contained) value-type value, returns a pointer to `self`.
+    /// Notably, this can be used to check if two reference type values (e.g., lists) point to the same location.
+    pub fn alloc_ptr(&self) -> *const () {
+        match self {
+            Value::Bool(_) | Value::Number(_) => self as *const Value as *const (),
+            Value::String(x) => &**x as *const String as *const (),
+            Value::List(x) => x.as_ptr() as *const Vec<Value> as *const (),
+        }
     }
 }
 impl From<bool> for Value {
