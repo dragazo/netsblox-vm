@@ -305,7 +305,7 @@ impl<'a> ByteCodeBuilder<'a> {
         for (hole_pos, hole_fn, hole_ent) in self.call_holes {
             let sym = &*hole_fn.trans_name;
             let &(pos, params) = entity_fn_to_info.get(&get_ptr(hole_ent)).and_then(|tab| tab.get(sym)).or_else(|| global_fn_to_info.get(sym)).unwrap();
-            self.ins[hole_pos] = Instruction::Call { pos: pos, params: params.iter().map(|x| x.trans_name.clone()).collect() };
+            self.ins[hole_pos] = Instruction::Call { pos, params: params.iter().map(|x| x.trans_name.clone()).collect() };
         }
 
         #[cfg(debug_assertions)]

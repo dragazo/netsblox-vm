@@ -186,6 +186,7 @@ fn test_proc_recursively_self_containing_lists() {
             assert_eq!(res.len(), 4);
 
             fn check(name: &str, got: &Value, expected_basic: &Value, ref_pool: &mut RefPool) {
+                let orig_got = got;
                 match got {
                     Value::List(got) => {
                         let top_weak = got;
@@ -200,6 +201,7 @@ fn test_proc_recursively_self_containing_lists() {
                             }
                             x => panic!("{} - not a list - got {:?}", name, x.get_type()),
                         }
+                        assert_eq!(orig_got.alloc_ptr(), got[10].alloc_ptr());
                     }
                     x => panic!("{} - not a list - got {:?}", name, x.get_type()),
                 }

@@ -107,11 +107,11 @@ impl Value {
         })
     }
     /// Returns a pointer to the underlying allocated memory for this value.
-    /// If this is a (self-contained) value-type value, returns a pointer to `self`.
-    /// Notably, this can be used to check if two reference type values (e.g., lists) point to the same location.
+    /// This is meant only for checking reference equality of values (e.g., of lists/strings), and the result should never be dereferenced.
     pub fn alloc_ptr(&self) -> *const () {
         match self {
-            Value::Bool(_) | Value::Number(_) => self as *const Value as *const (),
+            Value::Bool(x) => &*x as *const bool as *const (),
+            Value::Number(x) => &*x as *const f64 as *const (),
             Value::String(x) => &**x as *const String as *const (),
             Value::List(x) => x.as_ptr() as *const Vec<Value> as *const (),
         }
