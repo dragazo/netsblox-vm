@@ -191,9 +191,9 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.append_stmt(stmt, entity);
                 }
 
-                self.ins.push(Instruction::Yield);
                 self.ins.push(Instruction::PushValue { value: 1.0.into() });
                 self.ins.push(Instruction::BinaryOp { op: BinaryOp::Sub });
+                self.ins.push(Instruction::Yield);
                 self.ins.push(Instruction::Jump { to: top });
                 let aft = self.ins.len();
 
@@ -247,6 +247,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::BinaryOp { op: BinaryOp::Add });
                 self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 });
                 self.ins.push(Instruction::PopValues { count: 1 });
+                self.ins.push(Instruction::Yield);
                 self.ins.push(Instruction::Jump { to: top });
                 let aft = self.ins.len();
 
