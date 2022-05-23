@@ -39,11 +39,16 @@ impl ErrAt for ConversionError {
         ExecError::ConversionError { got: self.got, expected: self.expected, pos }
     }
 }
+impl ErrAt for RcUpgradeError {
+    fn err_at(self, pos: usize) -> ExecError {
+        ExecError::RcUpgradeError { pos }
+    }
+}
 impl ErrAt for ArithmeticError {
     fn err_at(self, pos: usize) -> ExecError {
         match self {
             ArithmeticError::ConversionError(e) => e.err_at(pos),
-            ArithmeticError::RcUpgradeError => ExecError::RcUpgradeError { pos },
+            ArithmeticError::RcUpgradeError => RcUpgradeError.err_at(pos),
         }
     }
 }
@@ -155,6 +160,11 @@ impl Process {
         match &self.code.0[self.pos] {
             Instruction::Illegal => panic!(),
 
+            Instruction::Yield => {
+                self.pos += 1;
+                return Ok(StepType::Yield);
+            }
+
             Instruction::PushValue { value } => {
                 self.value_stack.push(Value::from_ast(value, ref_pool, true));
                 self.pos += 1;
@@ -163,8 +173,64 @@ impl Process {
                 self.value_stack.push(lookup_var!(var).clone());
                 self.pos += 1;
             }
-            Instruction::PopValue => {
-                self.value_stack.pop().unwrap();
+            Instruction::DupeValue { top_index } => {
+                let val = self.value_stack[self.value_stack.len() - 1 - top_index].clone();
+                self.value_stack.push(val);
+                self.pos += 1;
+            }
+            Instruction::SwapValues { top_index_1, top_index_2 } => {
+                let len = self.value_stack.len();
+                self.value_stack.swap(len - 1 - top_index_1, len - 1 - top_index_2);
+                self.pos += 1;
+            }
+            Instruction::PopValues { count } => {
+                let len = self.value_stack.len();
+                self.value_stack.drain(len - count..);
+                debug_assert_eq!(self.value_stack.len(), len - count);
+                self.pos += 1;
+            }
+
+            Instruction::MakeList { len } => {
+                let mut vals = Vec::with_capacity(*len);
+                for _ in 0..*len {
+                    vals.push(self.value_stack.pop().unwrap());
+                }
+                vals.reverse();
+                self.value_stack.push(Value::from_vec(vals, ref_pool));
+                self.pos += 1;
+            }
+            Instruction::MakeListRange => {
+                let b = self.value_stack.pop().unwrap().to_number().map_err(|e| e.err_at(self.pos))?;
+                let mut a = self.value_stack.pop().unwrap().to_number().map_err(|e| e.err_at(self.pos))?;
+
+                let mut res = vec![];
+                if a.is_finite() && b.is_finite() {
+                    if a <= b {
+                        while a <= b {
+                            res.push(a.into());
+                            a += 1.0;
+                        }
+                    } else {
+                        while a >= b {
+                            res.push(a.into());
+                            a -= 1.0;
+                        }
+                    }
+                }
+
+                self.value_stack.push(Value::from_vec(res, ref_pool));
+                self.pos += 1;
+            }
+            Instruction::ListPush => {
+                let val = self.value_stack.pop().unwrap();
+                let list = self.value_stack.pop().unwrap();
+                match list {
+                    Value::List(x) => match x.upgrade() {
+                        Some(x) => x.borrow_mut().push(val),
+                        None => return Err(RcUpgradeError.err_at(self.pos)),
+                    }
+                    x => return Err(ConversionError { got: x.get_type(), expected: Type::List }.err_at(self.pos)),
+                }
                 self.pos += 1;
             }
 
@@ -172,6 +238,11 @@ impl Process {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
                 self.value_stack.push(ops::binary_op(&a, &b, ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
+                self.pos += 1;
+            }
+            Instruction::UnaryOp { op } => {
+                let x = self.value_stack.pop().unwrap();
+                self.value_stack.push(ops::unary_op(&x, ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
 
@@ -189,10 +260,10 @@ impl Process {
                 self.pos += 1;
             }
 
-            Instruction::Jump { pos } => self.pos = *pos,
-            Instruction::ConditionalJump { pos, when } => {
+            Instruction::Jump { to } => self.pos = *to,
+            Instruction::ConditionalJump { to, when } => {
                 let value = self.value_stack.pop().unwrap();
-                self.pos = if value.to_bool().map_err(|e| e.err_at(self.pos))? == *when { *pos } else { self.pos + 1 };
+                self.pos = if value.to_bool().map_err(|e| e.err_at(self.pos))? == *when { *to } else { self.pos + 1 };
             }
 
             Instruction::Call { pos, params } => {
@@ -259,12 +330,28 @@ mod ops {
     }
     pub(super) fn binary_op(a: &Value, b: &Value, ref_pool: &mut RefPool, op: BinaryOp) -> Result<Value, ArithmeticError> {
         match op {
-            BinaryOp::Add     => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? + b.to_number()?).into()), true),
-            BinaryOp::Sub     => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? - b.to_number()?).into()), true),
-            BinaryOp::Mul     => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? * b.to_number()?).into()), true),
-            BinaryOp::Div     => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? / b.to_number()?).into()), true),
-            BinaryOp::Greater => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? > b.to_number()?).into()), true),
-            BinaryOp::Less    => ops::binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? < b.to_number()?).into()), true),
+            BinaryOp::Add     => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? + b.to_number()?).into()), true),
+            BinaryOp::Sub     => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? - b.to_number()?).into()), true),
+            BinaryOp::Mul     => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? * b.to_number()?).into()), true),
+            BinaryOp::Div     => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? / b.to_number()?).into()), true),
+            BinaryOp::Greater => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? > b.to_number()?).into()), true),
+            BinaryOp::Less    => binary_op_impl(a, b, ref_pool, |a, b, _| Ok((a.to_number()? < b.to_number()?).into()), true),
+        }
+    }
+
+    fn unary_op_impl(x: &Value, ref_pool: &mut RefPool, scalar_op: fn(&Value, &mut RefPool) -> Result<Value, ArithmeticError>) -> Result<Value, ArithmeticError> {
+        Ok(match as_list(x)? {
+            Some(x) => Value::from_vec(x.borrow().iter().map(|x| unary_op_impl(x, ref_pool, scalar_op)).collect::<Result<_,_>>()?, ref_pool),
+            None => scalar_op(x, ref_pool)?,
+        })
+    }
+    pub(super) fn unary_op(x: &Value, ref_pool: &mut RefPool, op: UnaryOp) -> Result<Value, ArithmeticError> {
+        match op {
+            UnaryOp::Abs => unary_op_impl(x, ref_pool, |x, _| Ok(libm::fabs(x.to_number()?).into())),
+            UnaryOp::Neg => unary_op_impl(x, ref_pool, |x, _| Ok((-x.to_number()?).into())),
+            UnaryOp::Sin => unary_op_impl(x, ref_pool, |x, _| Ok(libm::sin(x.to_number()?).into())),
+            UnaryOp::Cos => unary_op_impl(x, ref_pool, |x, _| Ok(libm::cos(x.to_number()?).into())),
+            UnaryOp::Tan => unary_op_impl(x, ref_pool, |x, _| Ok(libm::tan(x.to_number()?).into())),
         }
     }
 }

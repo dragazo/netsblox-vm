@@ -20,7 +20,7 @@ fn get_running_proc(xml: &str, locals: SymbolTable, ref_pool: &mut RefPool) -> (
     assert!(proc.is_running());
 
     let globals = SymbolTable::from_globals(&ast.roles[0], ref_pool);
-    let fields = SymbolTable::from_fields(&ast.roles[0].sprites[0], ref_pool);
+    let fields = SymbolTable::from_fields(&ast.roles[0].entities[0], ref_pool);
 
     (proc, globals, fields, main.1)
 }
@@ -98,7 +98,7 @@ fn test_proc_recursive_factorial() {
     }
 }
 
-// #[test]
+#[test]
 fn test_proc_loops_lists_basic() {
     let mut ref_pool = RefPool::default();
     let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
@@ -133,6 +133,7 @@ fn test_proc_loops_lists_basic() {
                 vec![6.5,5.5,4.5,3.5],
                 vec![6.5,5.5,4.5,3.5,2.5],
                 vec![6.5,5.5,4.5,3.5,2.5,1.5],
+                vec![56.0,44.0,176.0],
             ];
             let x = x.upgrade().unwrap();
             let x = x.borrow();

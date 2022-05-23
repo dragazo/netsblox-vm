@@ -141,7 +141,7 @@ impl SymbolTable {
         Self::from_var_defs(&role.globals, ref_pool)
     }
     /// Extracts a symbol table containing all the fields in a given entity.
-    pub fn from_fields(entity: &ast::Sprite, ref_pool: &mut RefPool) -> Self {
+    pub fn from_fields(entity: &ast::Entity, ref_pool: &mut RefPool) -> Self {
         Self::from_var_defs(&entity.fields, ref_pool)
     }
     /// Sets the value of an existing variable or defines it if it does not exist.
