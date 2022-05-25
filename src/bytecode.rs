@@ -12,7 +12,9 @@ pub(crate) enum BinaryOp {
 }
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum UnaryOp {
+    ToBool,
     Abs, Neg,
+    Sqrt,
     Sin, Cos, Tan,
 }
 
@@ -37,9 +39,16 @@ pub(crate) enum Instruction {
     /// Consumes `count` values from the value stack and discards them.
     PopValues { count: usize },
 
+    /// Consumes 1 value, `val`, from the value stack and pushes a shallow copy of `val` into the value stack.
+    ShallowCopy,
+
     /// Consumes `len` values from the value stack and creates a new list with those values in reverse order.
     /// Pushes the new list back onto the value stack.
     MakeList { len: usize },
+    /// Consumes 1 value, `list`, from the value stack and pushes the the length of the list onto the value stack.
+    ListLen,
+    /// Consumes two values, `index` and `list`, from the value stack and pushes the value `list[index]` onto the value stack.
+    ListIndex,
     /// Consumes two values, `b` and `a`, from the value stack and constructs a new list containing the values
     /// starting at `a` and ending at `b` (inclusive), stepping by either `+1.0` or `-1.0` depending
     /// on whether `a < b` or `b < a`. If `a == b`, then the result is `[a]`.
@@ -47,6 +56,8 @@ pub(crate) enum Instruction {
     MakeListRange,
     /// Pops a value, `x`, and a list, `list`, from the value stack and adds `x` to the end of `list`.
     ListPush,
+    /// Pops three values, `value`, `index`, and `list`, from the value stack and assigns `list[index] = value`.
+    ListIndexAssign,
 
     /// Consumes 2 values, `b` and `a`, from the value stack, and pushes the value `f(a, b)` onto the value stack.
     BinaryOp { op: BinaryOp },
@@ -117,11 +128,21 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Greater { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Greater, entity),
             ast::Expr::Less { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Less, entity),
             ast::Expr::Neg { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Neg, entity),
+            ast::Expr::Sqrt { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Sqrt, entity),
             ast::Expr::MakeList { values, .. } => {
                 for value in values {
                     self.append_expr(value, entity);
                 }
                 self.ins.push(Instruction::MakeList { len: values.len() });
+            }
+            ast::Expr::ListIndex { list, index, .. } => {
+                self.append_expr(list, entity);
+                self.append_expr(index, entity);
+                self.ins.push(Instruction::ListIndex);
+            }
+            ast::Expr::Listlen { value, .. } => {
+                self.append_expr(value, entity);
+                self.ins.push(Instruction::ListLen);
             }
             ast::Expr::RangeInclusive { start, stop, .. } => {
                 self.append_expr(start, entity);
@@ -143,6 +164,19 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins[test_pos] = Instruction::ConditionalJump { to: test_false_pos, when: false };
                 self.ins[jump_aft_pos] = Instruction::Jump { to: aft_pos };
+            }
+            ast::Expr::Or { left, right, .. } => {
+                self.append_expr(left, entity);
+                self.ins.push(Instruction::DupeValue { top_index: 0 });
+                let check_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+                self.ins.push(Instruction::PopValues { count: 1 });
+                self.append_expr(right, entity);
+                let aft = self.ins.len();
+
+                self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: true };
+
+                self.ins.push(Instruction::UnaryOp { op: UnaryOp::ToBool })
             }
             ast::Expr::CallFn { function, args, .. } => {
                 for arg in args {
@@ -171,6 +205,22 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.append_expr(value, entity);
                 self.ins.push(Instruction::ListPush);
             }
+            ast::Stmt::IndexAssign { list, index, value, .. } => {
+                self.append_expr(list, entity);
+                self.append_expr(index, entity);
+                self.append_expr(value, entity);
+                self.ins.push(Instruction::ListIndexAssign);
+            }
+            ast::Stmt::RunFn { function, args, .. } => {
+                for arg in args {
+                    self.append_expr(arg, entity);
+                }
+                let call_hole_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+                self.ins.push(Instruction::PopValues { count: 1 });
+
+                self.call_holes.push((call_hole_pos, function, entity));
+            }
             ast::Stmt::Return { value, .. } => {
                 self.append_expr(value, entity);
                 self.ins.push(Instruction::Return);
@@ -182,6 +232,20 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
                 self.ins.push(Instruction::Yield);
                 self.ins.push(Instruction::Jump { to: top });
+            }
+            ast::Stmt::UntilLoop { condition, stmts, .. } => {
+                let top = self.ins.len();
+                self.append_expr(condition, entity);
+                let exit_jump_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+
+                for stmt in stmts {
+                    self.append_stmt(stmt, entity);
+                }
+                self.ins.push(Instruction::Jump { to: top });
+                let aft = self.ins.len();
+
+                self.ins[exit_jump_pos] = Instruction::ConditionalJump { to: aft, when: true };
             }
             ast::Stmt::Repeat { times, stmts, .. } => {
                 self.append_expr(times, entity);
@@ -260,6 +324,36 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins[exit_jump_pos] = Instruction::ConditionalJump { to: aft, when: true };
 
                 self.ins.push(Instruction::PopValues { count: 3 });
+            }
+            ast::Stmt::ForeachLoop { var, items, stmts, .. } => {
+                self.append_expr(items, entity);
+                self.ins.push(Instruction::ShallowCopy);
+                self.ins.push(Instruction::PushValue { value: 1.0.into() });
+
+                let top = self.ins.len();
+                self.ins.push(Instruction::DupeValue { top_index: 0 });
+                self.ins.push(Instruction::DupeValue { top_index: 2 });
+                self.ins.push(Instruction::ListLen);
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Greater });
+                let exit_jump_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+
+                self.ins.push(Instruction::DupeValue { top_index: 1 });
+                self.ins.push(Instruction::DupeValue { top_index: 1 });
+                self.ins.push(Instruction::ListIndex);
+                self.ins.push(Instruction::Assign { vars: vec![var.trans_name.clone()] });
+                for stmt in stmts {
+                    self.append_stmt(stmt, entity);
+                }
+                self.ins.push(Instruction::PushValue { value: 1.0.into() });
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Add });
+                self.ins.push(Instruction::Yield);
+                self.ins.push(Instruction::Jump { to: top });
+                let aft = self.ins.len();
+
+                self.ins[exit_jump_pos] = Instruction::ConditionalJump { to: aft, when: true };
+
+                self.ins.push(Instruction::PopValues { count: 2 });
             }
             ast::Stmt::If { condition, then, .. } => {
                 self.append_expr(condition, entity);

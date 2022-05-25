@@ -3,13 +3,11 @@
 use std::prelude::v1::*;
 use std::collections::BTreeMap;
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::iter;
 
 use crate::bytecode::*;
 use crate::runtime::*;
-
-struct RcUpgradeError;
 
 /// An execution error from a [`Process`] (see [`Process::step`]).
 /// 
@@ -21,12 +19,17 @@ pub enum ExecError {
     /// A variable lookup operation failed.
     /// `name` holds the name of the variable that was expected.
     UndefinedVariable { name: String, pos: usize },
-    /// An upgrade operation on a [`Weak`](std::rc::Weak) handle failed.
+    /// An upgrade operation on a [`Weak`] handle failed.
     /// Proper usage of this crate should never generate this error.
     /// The most likely cause is that a [`RefPool`] instance was improperly used.
-    RcUpgradeError { pos: usize },
+    ListUpgradeError { weak: Weak<RefCell<Vec<Value>>>, pos: usize },
     /// The result of a failed type conversion.
     ConversionError { got: Type, expected: Type, pos: usize },
+    /// Attempt to index a list with a non-integer numeric value, `index`.
+    IndexNotInteger { index: f64, pos: usize },
+    /// An indexing operation on a list had an out of bounds index, `index`, on a list of size `list_len`.
+    /// Note that Snap!/NetsBlox use 1-based indexing.
+    IndexOutOfBounds { index: f64, list_len: usize, pos: usize },
     /// Exceeded the maximum call depth.
     /// This can be configured by [`Process::new`].
     CallDepthLimit { limit: usize, pos: usize },
@@ -40,34 +43,48 @@ impl ErrAt for ConversionError {
         ExecError::ConversionError { got: self.got, expected: self.expected, pos }
     }
 }
-impl ErrAt for RcUpgradeError {
+impl ErrAt for ListUpgradeError {
     fn err_at(self, pos: usize) -> ExecError {
-        ExecError::RcUpgradeError { pos }
+        ExecError::ListUpgradeError { weak: self.weak, pos }
+    }
+}
+impl ErrAt for ListConversionError {
+    fn err_at(self, pos: usize) -> ExecError {
+        match self {
+            ListConversionError::ConversionError(e) => e.err_at(pos),
+            ListConversionError::ListUpgradeError(e) => e.err_at(pos),
+        }
     }
 }
 impl ErrAt for ArithmeticError {
     fn err_at(self, pos: usize) -> ExecError {
         match self {
             ArithmeticError::ConversionError(e) => e.err_at(pos),
-            ArithmeticError::RcUpgradeError => RcUpgradeError.err_at(pos),
+            ArithmeticError::ListUpgradeError(e) => e.err_at(pos),
+            ArithmeticError::IndexError(e) => e.err_at(pos),
+        }
+    }
+}
+
+enum IndexError {
+    NotInteger { index: f64 },
+    OutOfBounds { index: f64, list_len: usize },
+}
+impl ErrAt for IndexError {
+    fn err_at(self, pos: usize) -> ExecError {
+        match self {
+            IndexError::NotInteger { index } => ExecError::IndexNotInteger { index, pos },
+            IndexError::OutOfBounds { index, list_len } => ExecError::IndexOutOfBounds { index, list_len, pos },
         }
     }
 }
 
 enum ArithmeticError {
     ConversionError(ConversionError),
-    RcUpgradeError,
+    ListUpgradeError(ListUpgradeError),
+    IndexError(IndexError),
 }
-impl From<ConversionError> for ArithmeticError {
-    fn from(e: ConversionError) -> Self {
-        Self::ConversionError(e)
-    }
-}
-impl From<RcUpgradeError> for ArithmeticError {
-    fn from(_: RcUpgradeError) -> Self {
-        Self::RcUpgradeError
-    }
-}
+trivial_from_impl! { ArithmeticError: ConversionError, IndexError, ListUpgradeError }
 
 /// Result of stepping through a [`Process`].
 pub enum StepType {
@@ -191,6 +208,12 @@ impl Process {
                 self.pos += 1;
             }
 
+            Instruction::ShallowCopy => {
+                let val = self.value_stack.pop().unwrap();
+                self.value_stack.push(val.shallow_copy(ref_pool).map_err(|e| e.err_at(self.pos))?);
+                self.pos += 1;
+            }
+
             Instruction::MakeList { len } => {
                 let mut vals = Vec::with_capacity(*len);
                 for _ in 0..*len {
@@ -198,6 +221,17 @@ impl Process {
                 }
                 vals.reverse();
                 self.value_stack.push(Value::from_vec(vals, ref_pool));
+                self.pos += 1;
+            }
+            Instruction::ListLen => {
+                let list = self.value_stack.pop().unwrap().to_list().map_err(|e| e.err_at(self.pos))?;
+                self.value_stack.push((list.borrow().len() as f64).into());
+                self.pos += 1;
+            }
+            Instruction::ListIndex => {
+                let index = self.value_stack.pop().unwrap();
+                let list = self.value_stack.pop().unwrap();
+                self.value_stack.push(ops::index_list(&list, &index, ref_pool).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
             Instruction::MakeListRange => {
@@ -224,14 +258,17 @@ impl Process {
             }
             Instruction::ListPush => {
                 let val = self.value_stack.pop().unwrap();
-                let list = self.value_stack.pop().unwrap();
-                match list {
-                    Value::List(x) => match x.upgrade() {
-                        Some(x) => x.borrow_mut().push(val),
-                        None => return Err(RcUpgradeError.err_at(self.pos)),
-                    }
-                    x => return Err(ConversionError { got: x.get_type(), expected: Type::List }.err_at(self.pos)),
-                }
+                let list = self.value_stack.pop().unwrap().to_list().map_err(|e| e.err_at(self.pos))?;
+                list.borrow_mut().push(val);
+                self.pos += 1;
+            }
+            Instruction::ListIndexAssign => {
+                let value = self.value_stack.pop().unwrap();
+                let index = self.value_stack.pop().unwrap();
+                let list = self.value_stack.pop().unwrap().to_list().map_err(|e| e.err_at(self.pos))?;
+                let mut list = list.borrow_mut();
+                let index = ops::prep_list_index(&index, list.len()).map_err(|e| e.err_at(self.pos))?;
+                list[index] = value;
                 self.pos += 1;
             }
 
@@ -298,16 +335,16 @@ impl Process {
 mod ops {
     use super::*;
 
-    fn as_list(v: &Value) -> Result<Option<Rc<RefCell<Vec<Value>>>>, RcUpgradeError> {
+    fn as_list(v: &Value) -> Result<Option<Rc<RefCell<Vec<Value>>>>, ListUpgradeError> {
         Ok(match v {
             Value::List(v) => match v.upgrade() {
                 Some(rc) => Some(rc),
-                None => return Err(RcUpgradeError),
+                None => return Err(ListUpgradeError { weak: v.clone() }),
             }
             _ => None,
         })
     }
-    fn as_matrix(v: &Value) -> Result<Option<Rc<RefCell<Vec<Value>>>>, RcUpgradeError> {
+    fn as_matrix(v: &Value) -> Result<Option<Rc<RefCell<Vec<Value>>>>, ListUpgradeError> {
         Ok(match as_list(v)? {
             Some(vals) => {
                 let good = match vals.borrow().as_slice() {
@@ -320,9 +357,17 @@ mod ops {
         })
     }
 
+    pub(super) fn prep_list_index(index: &Value, list_len: usize) -> Result<usize, ArithmeticError> {
+        let raw_index = index.to_number()?;
+        if raw_index < 1.0 || raw_index > list_len as f64 { return Err(IndexError::OutOfBounds { index: raw_index, list_len }.into()) }
+        let index = raw_index as u64;
+        if index as f64 != raw_index { return Err(IndexError::NotInteger { index: raw_index }.into()) }
+        Ok(index as usize - 1)
+    }
+
     const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 
-    fn binary_op_impl(a: &Value, b: &Value, matrix_mode: bool, cache: &mut BTreeMap<(*const (), *const (), bool), Value>, ref_pool: &mut RefPool, scalar_op: fn(&Value, &Value, &mut RefPool) -> Result<Value, ArithmeticError>) -> Result<Value, ArithmeticError> {
+    fn binary_op_impl(a: &Value, b: &Value, matrix_mode: bool, cache: &mut BTreeMap<(*const (), *const (), bool), Value>, ref_pool: &mut RefPool, scalar_op: fn(&Value, &Value) -> Result<Value, ArithmeticError>) -> Result<Value, ArithmeticError> {
         let cache_key = (a.alloc_ptr(), b.alloc_ptr(), matrix_mode);
         Ok(match cache.get(&cache_key) {
             Some(x) => x.clone(),
@@ -362,24 +407,24 @@ mod ops {
                         }
                         real_res
                     }
-                    (None, None) => if matrix_mode { binary_op_impl(a, b, false, cache, ref_pool, scalar_op)? } else { scalar_op(a, b, ref_pool)? }
+                    (None, None) => if matrix_mode { binary_op_impl(a, b, false, cache, ref_pool, scalar_op)? } else { scalar_op(a, b)? }
                 }
             }
         })
     }
     pub(super) fn binary_op(a: &Value, b: &Value, ref_pool: &mut RefPool, op: BinaryOp) -> Result<Value, ArithmeticError> {
         match op {
-            BinaryOp::Add     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? + b.to_number()?).into())),
-            BinaryOp::Sub     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? - b.to_number()?).into())),
-            BinaryOp::Mul     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? * b.to_number()?).into())),
-            BinaryOp::Div     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? / b.to_number()?).into())),
-            BinaryOp::Pow     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
-            BinaryOp::Greater => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? > b.to_number()?).into())),
-            BinaryOp::Less    => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, _| Ok((a.to_number()? < b.to_number()?).into())),
+            BinaryOp::Add     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? + b.to_number()?).into())),
+            BinaryOp::Sub     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? - b.to_number()?).into())),
+            BinaryOp::Mul     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? * b.to_number()?).into())),
+            BinaryOp::Div     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? / b.to_number()?).into())),
+            BinaryOp::Pow     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
+            BinaryOp::Greater => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? > b.to_number()?).into())),
+            BinaryOp::Less    => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? < b.to_number()?).into())),
         }
     }
 
-    fn unary_op_impl(x: &Value, cache: &mut BTreeMap<*const (), Value>, ref_pool: &mut RefPool, scalar_op: fn(&Value, &mut RefPool) -> Result<Value, ArithmeticError>) -> Result<Value, ArithmeticError> {
+    fn unary_op_impl(x: &Value, cache: &mut BTreeMap<*const (), Value>, ref_pool: &mut RefPool, scalar_op: &dyn Fn(&Value, &mut RefPool) -> Result<Value, ArithmeticError>) -> Result<Value, ArithmeticError> {
         let cache_key = x.alloc_ptr();
         Ok(match cache.get(&cache_key) {
             Some(x) => x.clone(),
@@ -401,11 +446,21 @@ mod ops {
     }
     pub(super) fn unary_op(x: &Value, ref_pool: &mut RefPool, op: UnaryOp) -> Result<Value, ArithmeticError> {
         match op {
-            UnaryOp::Abs => unary_op_impl(x, &mut Default::default(), ref_pool, |x, _| Ok(libm::fabs(x.to_number()?).into())),
-            UnaryOp::Neg => unary_op_impl(x, &mut Default::default(), ref_pool, |x, _| Ok((-x.to_number()?).into())),
-            UnaryOp::Sin => unary_op_impl(x, &mut Default::default(), ref_pool, |x, _| Ok(libm::sin(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Cos => unary_op_impl(x, &mut Default::default(), ref_pool, |x, _| Ok(libm::cos(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Tan => unary_op_impl(x, &mut Default::default(), ref_pool, |x, _| Ok(libm::tan(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::ToBool  => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(x.to_bool()?.into())),
+            UnaryOp::Abs     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::fabs(x.to_number()?).into())),
+            UnaryOp::Neg     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok((-x.to_number()?).into())),
+            UnaryOp::Sqrt    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::sqrt(x.to_number()?).into())),
+            UnaryOp::Sin     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::sin(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::Cos     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::cos(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::Tan     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::tan(x.to_number()? * DEG_TO_RAD).into())),
         }
+    }
+    pub(super) fn index_list(list: &Value, index: &Value, ref_pool: &mut RefPool) -> Result<Value, ArithmeticError> {
+        let list = match as_list(list)? {
+            Some(x) => x,
+            None => return Err(ConversionError { got: list.get_type(), expected: Type::List }.into()),
+        };
+        let list = list.borrow();
+        unary_op_impl(index, &mut Default::default(), ref_pool, &|x, _| Ok(list[prep_list_index(x, list.len())?].clone()))
     }
 }

@@ -40,7 +40,7 @@ fn run_till_term(proc: &mut Process, ref_pool: &mut RefPool, globals: &mut Symbo
 
 fn assert_values_eq(got: &Value, expected: &Value, epsilon: f64, path: &str) {
     if got.get_type() != expected.get_type() {
-        panic!("{} - type error - got {:?} expected {:?}", path, got.get_type(), expected.get_type());
+        panic!("{} - type error - got {:?} expected {:?} - {:?}", path, got.get_type(), expected.get_type(), got);
     }
     match (got, expected) {
         (Value::Bool(got), Value::Bool(expected)) => {
@@ -60,7 +60,7 @@ fn assert_values_eq(got: &Value, expected: &Value, epsilon: f64, path: &str) {
             let expected = expected.upgrade().unwrap();
             let expected = expected.borrow();
 
-            if got.len() != expected.len() { panic!("{} - list len error - got {} expected {}", path, got.len(), expected.len()) }
+            if got.len() != expected.len() { panic!("{} - list len error - got {} expected {}\ngot:      {:?}\nexpected: {:?}", path, got.len(), expected.len(), got, expected) }
 
             for (i, (got, expected)) in iter::zip(got.iter(), expected.iter()).enumerate() {
                 assert_values_eq(got, expected, epsilon, &format!("{}[{}]", path, i));
@@ -214,4 +214,21 @@ fn test_proc_recursively_self_containing_lists() {
         }
         x => panic!("{:?}", x),
     }
+}
+
+#[test]
+fn test_proc_sieve_of_eratosthenes() {
+    let mut ref_pool = RefPool::default();
+    let mut locals = SymbolTable::default();
+    locals.set_or_define("n", 100.0.into());
+    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/proc_sieve_of_eratosthenes.xml"),
+        methods = "",
+    ), locals, &mut ref_pool);
+
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let expect = Value::from_vec([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
+    assert_values_eq(&res, &expect, 1e-100, "primes");
 }

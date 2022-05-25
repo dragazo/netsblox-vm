@@ -16,11 +16,23 @@ pub enum Type {
     List,
 }
 
-/// A type conversion error.
+/// A type conversion error on a [`Value`].
 pub struct ConversionError {
     pub got: Type,
     pub expected: Type,
 }
+
+/// A failed [`Weak`] upgrade operation on a [`Value::List`]
+pub struct ListUpgradeError {
+    pub weak: Weak<RefCell<Vec<Value>>>,
+}
+
+/// A failed conversion of a [`Value`] to a list.
+pub enum ListConversionError {
+    ConversionError(ConversionError),
+    ListUpgradeError(ListUpgradeError),
+}
+trivial_from_impl! { ListConversionError: ConversionError, ListUpgradeError }
 
 /// Any primitive value.
 #[derive(Clone, Debug)]
@@ -76,6 +88,16 @@ impl Value {
         ref_pool.string_pool.push(Rc::downgrade(&rc));
         Value::String(rc)
     }
+    /// Returns a pointer to the underlying allocated memory for this value.
+    /// This is meant only for checking reference equality of values (e.g., of lists/strings), and the result should never be dereferenced.
+    pub fn alloc_ptr(&self) -> *const () {
+        match self {
+            Value::Bool(x) => &*x as *const bool as *const (),
+            Value::Number(x) => &*x as *const f64 as *const (),
+            Value::String(x) => &**x as *const String as *const (),
+            Value::List(x) => x.as_ptr() as *const Vec<Value> as *const (),
+        }
+    }
     /// Gets the type of value that is stored.
     pub fn get_type(&self) -> Type {
         match self {
@@ -106,15 +128,26 @@ impl Value {
             Value::String(x) => !x.is_empty(),
         })
     }
-    /// Returns a pointer to the underlying allocated memory for this value.
-    /// This is meant only for checking reference equality of values (e.g., of lists/strings), and the result should never be dereferenced.
-    pub fn alloc_ptr(&self) -> *const () {
+    pub fn to_list(&self) -> Result<Rc<RefCell<Vec<Value>>>, ListConversionError> {
         match self {
-            Value::Bool(x) => &*x as *const bool as *const (),
-            Value::Number(x) => &*x as *const f64 as *const (),
-            Value::String(x) => &**x as *const String as *const (),
-            Value::List(x) => x.as_ptr() as *const Vec<Value> as *const (),
+            Value::List(x) => match x.upgrade() {
+                Some(x) => Ok(x),
+                None => Err(ListUpgradeError { weak: x.clone() }.into()),
+            }
+            x => Err(ConversionError { got: x.get_type(), expected: Type::List }.into()),
         }
+    }
+    /// Creates a shallow copy of this value, using the designated [`RefPool`] in the event that this value is a reference type.
+    pub fn shallow_copy(&self, ref_pool: &mut RefPool) -> Result<Value, ListUpgradeError> {
+        Ok(match self {
+            Value::Bool(x) => Value::Bool(*x),
+            Value::Number(x) => Value::Number(*x),
+            Value::String(x) => Value::String(x.clone()),
+            Value::List(x) => match x.upgrade() {
+                Some(x) => Value::from_vec(x.borrow().to_owned(), ref_pool),
+                None => return Err(ListUpgradeError { weak: x.clone() }),
+            }
+        })
     }
 }
 impl From<bool> for Value {
