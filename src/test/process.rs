@@ -232,3 +232,18 @@ fn test_proc_sieve_of_eratosthenes() {
     let expect = Value::from_vec([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-100, "primes");
 }
+
+#[test]
+fn test_proc_early_return() {
+    let mut ref_pool = RefPool::default();
+    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/proc_early_return.xml"),
+        methods = "",
+    ), Default::default(), &mut ref_pool);
+
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let expect = Value::from_vec([1,3].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
+    assert_values_eq(&res, &expect, 1e-100, "res");
+}

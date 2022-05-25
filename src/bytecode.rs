@@ -7,7 +7,7 @@ use netsblox_ast as ast;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BinaryOp {
-    Add, Sub, Mul, Div, Pow,
+    Add, Sub, Mul, Div, Mod, Pow,
     Greater, Less,
 }
 #[derive(Clone, Copy, Debug)]
@@ -15,9 +15,11 @@ pub(crate) enum UnaryOp {
     ToBool,
     Abs, Neg,
     Sqrt,
+    Floor, Ceil,
     Sin, Cos, Tan,
 }
 
+#[derive(Debug)]
 pub(crate) enum Instruction {
     /// Triggers an error when encountered.
     /// This is an internal value that is only used to denote incomplete linking results for better testing.
@@ -64,6 +66,10 @@ pub(crate) enum Instruction {
 
     /// Consumes 2 values, `b` and `a`, from the value stack, and pushes the value `f(a, b)` onto the value stack.
     BinaryOp { op: BinaryOp },
+    /// Consumes 2 values, `b` and `a`, from the value stack, and pushes the (boolean) value `a == b` onto the value stack,
+    /// where `==` is a deep comparison allowing type conversions.
+    /// This is similar to [`Instruction::BinaryOp`] except that it is not vectorized and always returns a single (scalar) boolean value.
+    Eq,
     /// Consumes 1 value, `x`, from the value stack, and pushes the value `f(x)` onto the value stack.
     UnaryOp { op: UnaryOp },
 
@@ -90,6 +96,7 @@ pub(crate) enum Instruction {
 /// An interpreter-ready sequence of instructions.
 /// 
 /// [`Process`](crate::process::Process) is an execution primitive that can be used to execute generated `ByteCode`.
+#[derive(Debug)]
 pub struct ByteCode(pub(crate) Vec<Instruction>);
 /// Location info in a [`ByteCode`] object for a particular entity.
 #[derive(Debug)]
@@ -130,8 +137,16 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Pow { base, power, .. } => self.append_expr_binary_op(&*base, &*power, BinaryOp::Pow, entity),
             ast::Expr::Greater { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Greater, entity),
             ast::Expr::Less { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Less, entity),
+            ast::Expr::Mod { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Mod, entity),
             ast::Expr::Neg { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Neg, entity),
             ast::Expr::Sqrt { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Sqrt, entity),
+            ast::Expr::Floor { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Floor, entity),
+            ast::Expr::Ceil { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Ceil, entity),
+            ast::Expr::Eq { left, right, .. } => {
+                self.append_expr(left, entity);
+                self.append_expr(right, entity);
+                self.ins.push(Instruction::Eq);
+            }
             ast::Expr::MakeList { values, .. } => {
                 for value in values {
                     self.append_expr(value, entity);

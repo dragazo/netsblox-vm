@@ -17,22 +17,38 @@ pub enum Type {
 }
 
 /// A type conversion error on a [`Value`].
+#[derive(Debug)]
 pub struct ConversionError {
     pub got: Type,
     pub expected: Type,
 }
 
 /// A failed [`Weak`] upgrade operation on a [`Value::List`]
+#[derive(Debug)]
 pub struct ListUpgradeError {
     pub weak: Weak<RefCell<Vec<Value>>>,
 }
 
 /// A failed conversion of a [`Value`] to a list.
+#[derive(Debug)]
 pub enum ListConversionError {
     ConversionError(ConversionError),
     ListUpgradeError(ListUpgradeError),
 }
 trivial_from_impl! { ListConversionError: ConversionError, ListUpgradeError }
+
+/// A convenience trait for working with [`Value::List`] handles.
+pub trait ListUpgrade {
+    fn list_upgrade(&self) -> Result<Rc<RefCell<Vec<Value>>>, ListUpgradeError>;
+}
+impl ListUpgrade for Weak<RefCell<Vec<Value>>> {
+    fn list_upgrade(&self) -> Result<Rc<RefCell<Vec<Value>>>, ListUpgradeError> {
+        match self.upgrade() {
+            Some(x) => Ok(x),
+            None => Err(ListUpgradeError { weak: self.clone() }),
+        }
+    }
+}
 
 /// Any primitive value.
 #[derive(Clone, Debug)]
@@ -133,10 +149,7 @@ impl Value {
     /// as opposed to the [`Weak`] handle normally stored by a [`Value::List`] object.
     pub fn to_list(&self) -> Result<Rc<RefCell<Vec<Value>>>, ListConversionError> {
         match self {
-            Value::List(x) => match x.upgrade() {
-                Some(x) => Ok(x),
-                None => Err(ListUpgradeError { weak: x.clone() }.into()),
-            }
+            Value::List(x) => Ok(x.list_upgrade()?),
             x => Err(ConversionError { got: x.get_type(), expected: Type::List }.into()),
         }
     }
@@ -146,10 +159,7 @@ impl Value {
             Value::Bool(x) => Value::Bool(*x),
             Value::Number(x) => Value::Number(*x),
             Value::String(x) => Value::String(x.clone()),
-            Value::List(x) => match x.upgrade() {
-                Some(x) => Value::from_vec(x.borrow().to_owned(), ref_pool),
-                None => return Err(ListUpgradeError { weak: x.clone() }),
-            }
+            Value::List(x) => Value::from_vec(x.list_upgrade()?.borrow().to_owned(), ref_pool),
         })
     }
 }

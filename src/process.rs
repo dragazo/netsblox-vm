@@ -1,7 +1,7 @@
 //! Utilities for executing generated [`ByteCode`](crate::bytecode::ByteCode).
 
 use std::prelude::v1::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::iter;
@@ -91,6 +91,11 @@ pub enum StepType {
     Terminate(Option<Value>),
 }
 
+struct ReturnPoint {
+    pos: usize,
+    value_stack_size: usize,
+}
+
 /// A [`ByteCode`] execution primitive.
 /// 
 /// A `Process` is a self-contained thread of execution; it maintains its own state machine for executing instructions step by step.
@@ -100,7 +105,7 @@ pub struct Process {
     pos: usize,
     running: bool,
     max_call_depth: usize,
-    call_stack: Vec<(usize, SymbolTable)>, // tuples of (ret pos, locals)
+    call_stack: Vec<(ReturnPoint, SymbolTable)>, // tuples of (ret pos, locals)
     value_stack: Vec<Value>,
 }
 impl Process {
@@ -132,7 +137,7 @@ impl Process {
         self.pos = start_pos;
         self.running = true;
         self.call_stack.clear();
-        self.call_stack.push((usize::MAX, context));
+        self.call_stack.push((ReturnPoint { pos: usize::MAX, value_stack_size: 0 }, context));
         self.value_stack.clear();
     }
     /// Executes a single instruction with the given execution context.
@@ -267,6 +272,12 @@ impl Process {
                 self.value_stack.push(ops::binary_op(&a, &b, ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
+            Instruction::Eq => {
+                let b = self.value_stack.pop().unwrap();
+                let a = self.value_stack.pop().unwrap();
+                self.value_stack.push(ops::check_eq(&a, &b).map_err(|e| e.err_at(self.pos))?.into());
+                self.pos += 1;
+            }
             Instruction::UnaryOp { op } => {
                 let x = self.value_stack.pop().unwrap();
                 self.value_stack.push(ops::unary_op(&x, ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
@@ -302,17 +313,23 @@ impl Process {
                 for var in params.iter().rev() {
                     context.set_or_define(var, self.value_stack.pop().unwrap());
                 }
-                self.call_stack.push((self.pos + 1, context));
+                self.call_stack.push((ReturnPoint { pos: self.pos + 1, value_stack_size: self.value_stack.len() }, context));
                 self.pos = *pos;
             }
             Instruction::Return => {
-                let (pos, _) = self.call_stack.pop().unwrap();
+                let (return_point, _) = self.call_stack.pop().unwrap();
+                let return_value = self.value_stack.pop().unwrap();
+                self.value_stack.drain(return_point.value_stack_size..);
+                debug_assert_eq!(self.value_stack.len(), return_point.value_stack_size);
+                self.value_stack.push(return_value);
+
                 if self.call_stack.is_empty() {
                     debug_assert_eq!(self.value_stack.len(), 1);
-                    debug_assert_eq!(pos, usize::MAX);
+                    debug_assert_eq!(return_point.pos, usize::MAX);
+                    debug_assert_eq!(return_point.value_stack_size, 0);
                     return Ok(StepType::Terminate(Some(self.value_stack.pop().unwrap())));
                 } else {
-                    self.pos = pos;
+                    self.pos = return_point.pos;
                 }
             }
         }
@@ -326,10 +343,7 @@ mod ops {
 
     fn as_list(v: &Value) -> Result<Option<Rc<RefCell<Vec<Value>>>>, ListUpgradeError> {
         Ok(match v {
-            Value::List(v) => match v.upgrade() {
-                Some(rc) => Some(rc),
-                None => return Err(ListUpgradeError { weak: v.clone() }),
-            }
+            Value::List(v) => Some(v.list_upgrade()?),
             _ => None,
         })
     }
@@ -407,6 +421,7 @@ mod ops {
             BinaryOp::Sub     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? - b.to_number()?).into())),
             BinaryOp::Mul     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? * b.to_number()?).into())),
             BinaryOp::Div     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? / b.to_number()?).into())),
+            BinaryOp::Mod     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? % b.to_number()?).into())),
             BinaryOp::Pow     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
             BinaryOp::Greater => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? > b.to_number()?).into())),
             BinaryOp::Less    => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? < b.to_number()?).into())),
@@ -439,6 +454,8 @@ mod ops {
             UnaryOp::Abs     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::fabs(x.to_number()?).into())),
             UnaryOp::Neg     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok((-x.to_number()?).into())),
             UnaryOp::Sqrt    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::sqrt(x.to_number()?).into())),
+            UnaryOp::Floor   => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::floor(x.to_number()?).into())),
+            UnaryOp::Ceil    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::ceil(x.to_number()?).into())),
             UnaryOp::Sin     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::sin(x.to_number()? * DEG_TO_RAD).into())),
             UnaryOp::Cos     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::cos(x.to_number()? * DEG_TO_RAD).into())),
             UnaryOp::Tan     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::tan(x.to_number()? * DEG_TO_RAD).into())),
@@ -451,5 +468,38 @@ mod ops {
         };
         let list = list.borrow();
         unary_op_impl(index, &mut Default::default(), ref_pool, &|x, _| Ok(list[prep_list_index(x, list.len())?].clone()))
+    }
+
+    fn check_eq_impl(a: &Value, b: &Value, cache: &mut BTreeSet<(*const (), *const ())>) -> Result<bool, ListUpgradeError> {
+        // if already cached, that cmp handles overall check, so no-op with true (if we ever get a false, the whole thing is false)
+        if !cache.insert((a.alloc_ptr(), b.alloc_ptr())) { return Ok(true) }
+
+        Ok(match (a, b) {
+            (Value::Bool(a), Value::Bool(b)) => *a == *b,
+            (Value::Bool(_), _) => false,
+            (_, Value::Bool(_)) => false,
+
+            (Value::Number(a), Value::Number(b)) => *a == *b,
+            (Value::String(a), Value::String(b)) => *a == *b,
+            (Value::Number(n), Value::String(s)) | (Value::String(s), Value::Number(n)) => match s.parse::<f64>() {
+                Ok(s) => s == *n,
+                Err(_) => **s == n.to_string(),
+            }
+
+            (Value::List(a), Value::List(b)) => {
+                let (a, b) = (a.list_upgrade()?, b.list_upgrade()?);
+                let (a, b) = (a.borrow(), b.borrow());
+                if a.len() != b.len() { return Ok(false) }
+                for (a, b) in iter::zip(&*a, &*b) {
+                    if !check_eq_impl(a, b, cache)? { return Ok(false) }
+                }
+                true
+            }
+            (Value::List(_), _) => false,
+            (_, Value::List(_)) => false,
+        })
+    }
+    pub(super) fn check_eq(a: &Value, b: &Value) -> Result<bool, ListUpgradeError> {
+        check_eq_impl(a, b, &mut Default::default())
     }
 }
