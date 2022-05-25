@@ -228,6 +228,14 @@ impl Process {
                 self.value_stack.push(ops::index_list(&list, &index, ref_pool).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
+            Instruction::ListLastIndex => {
+                let list = self.value_stack.pop().unwrap().to_list().map_err(|e| e.err_at(self.pos))?;
+                self.value_stack.push(match list.borrow().last() {
+                    Some(x) => x.clone(),
+                    None => return Err(IndexError::OutOfBounds { index: 0.0, list_len: 0 }.err_at(self.pos)),
+                });
+                self.pos += 1;
+            }
             Instruction::MakeListRange => {
                 let b = self.value_stack.pop().unwrap().to_number().map_err(|e| e.err_at(self.pos))?;
                 let mut a = self.value_stack.pop().unwrap().to_number().map_err(|e| e.err_at(self.pos))?;

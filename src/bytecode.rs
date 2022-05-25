@@ -61,6 +61,8 @@ pub(crate) enum Instruction {
     ListLen,
     /// Consumes two values, `index` and `list`, from the value stack and pushes the value `list[index]` onto the value stack.
     ListIndex,
+    /// Consumes 1 value, `list`, from the value stack and pushes the last item in the list onto the value stack.
+    ListLastIndex,
     /// Pops three values, `value`, `index`, and `list`, from the value stack and assigns `list[index] = value`.
     ListIndexAssign,
 
@@ -158,6 +160,10 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.append_expr(index, entity);
                 self.ins.push(Instruction::ListIndex);
             }
+            ast::Expr::ListLastIndex { list, .. } => {
+                self.append_expr(list, entity);
+                self.ins.push(Instruction::ListLastIndex);
+            }
             ast::Expr::Listlen { value, .. } => {
                 self.append_expr(value, entity);
                 self.ins.push(Instruction::ListLen);
@@ -194,7 +200,20 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: true };
 
-                self.ins.push(Instruction::UnaryOp { op: UnaryOp::ToBool })
+                self.ins.push(Instruction::UnaryOp { op: UnaryOp::ToBool });
+            }
+            ast::Expr::And { left, right, .. } => {
+                self.append_expr(left, entity);
+                self.ins.push(Instruction::DupeValue { top_index: 0 });
+                let check_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+                self.ins.push(Instruction::PopValues { count: 1 });
+                self.append_expr(right, entity);
+                let aft = self.ins.len();
+
+                self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: false };
+
+                self.ins.push(Instruction::UnaryOp { op: UnaryOp::ToBool });
             }
             ast::Expr::CallFn { function, args, .. } => {
                 for arg in args {
