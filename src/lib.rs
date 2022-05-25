@@ -14,11 +14,7 @@ extern crate no_std_compat as std;
 
 macro_rules! trivial_from_impl {
     ($t:ident : $($f:ident),*$(,)?) => {$(
-        impl From<$f> for $t {
-            fn from(e: $f) -> $t {
-                $t::$f(e)
-            }
-        }
+        impl From<$f> for $t { fn from(e: $f) -> $t { $t::$f(e) } }
     )*}
 }
 

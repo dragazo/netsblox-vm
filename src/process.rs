@@ -35,40 +35,26 @@ pub enum ExecError {
     CallDepthLimit { limit: usize, pos: usize },
 }
 
+enum IndexError {
+    NotInteger { index: f64 },
+    OutOfBounds { index: f64, list_len: usize },
+}
+
+enum ArithmeticError {
+    ConversionError(ConversionError),
+    ListUpgradeError(ListUpgradeError),
+    IndexError(IndexError),
+}
+trivial_from_impl! { ArithmeticError: ConversionError, IndexError, ListUpgradeError }
+
 trait ErrAt {
     fn err_at(self, pos: usize) -> ExecError;
 }
 impl ErrAt for ConversionError {
-    fn err_at(self, pos: usize) -> ExecError {
-        ExecError::ConversionError { got: self.got, expected: self.expected, pos }
-    }
+    fn err_at(self, pos: usize) -> ExecError { ExecError::ConversionError { got: self.got, expected: self.expected, pos } }
 }
 impl ErrAt for ListUpgradeError {
-    fn err_at(self, pos: usize) -> ExecError {
-        ExecError::ListUpgradeError { weak: self.weak, pos }
-    }
-}
-impl ErrAt for ListConversionError {
-    fn err_at(self, pos: usize) -> ExecError {
-        match self {
-            ListConversionError::ConversionError(e) => e.err_at(pos),
-            ListConversionError::ListUpgradeError(e) => e.err_at(pos),
-        }
-    }
-}
-impl ErrAt for ArithmeticError {
-    fn err_at(self, pos: usize) -> ExecError {
-        match self {
-            ArithmeticError::ConversionError(e) => e.err_at(pos),
-            ArithmeticError::ListUpgradeError(e) => e.err_at(pos),
-            ArithmeticError::IndexError(e) => e.err_at(pos),
-        }
-    }
-}
-
-enum IndexError {
-    NotInteger { index: f64 },
-    OutOfBounds { index: f64, list_len: usize },
+    fn err_at(self, pos: usize) -> ExecError { ExecError::ListUpgradeError { weak: self.weak, pos } }
 }
 impl ErrAt for IndexError {
     fn err_at(self, pos: usize) -> ExecError {
@@ -79,12 +65,15 @@ impl ErrAt for IndexError {
     }
 }
 
-enum ArithmeticError {
-    ConversionError(ConversionError),
-    ListUpgradeError(ListUpgradeError),
-    IndexError(IndexError),
+macro_rules! trivial_err_at_impl {
+    ($t:ident : $($f:ident),*$(,)?) => {
+        impl ErrAt for $t {
+            fn err_at(self, pos: usize) -> ExecError { match self { $($t::$f(e) => e.err_at(pos)),* } }
+        }
+    }
 }
-trivial_from_impl! { ArithmeticError: ConversionError, IndexError, ListUpgradeError }
+trivial_err_at_impl! { ListConversionError: ConversionError, ListUpgradeError }
+trivial_err_at_impl! { ArithmeticError: ConversionError, ListUpgradeError, IndexError }
 
 /// Result of stepping through a [`Process`].
 pub enum StepType {

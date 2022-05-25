@@ -31,13 +31,14 @@ pub(crate) enum Instruction {
     PushValue { value: ast::Value },
     /// Pushes 1 value to the value stack, as looked up from the current execution context.
     PushVariable { var: String },
+    /// Consumes `count` values from the value stack and discards them.
+    PopValues { count: usize },
+
     /// Pushes 1 value onto the value stack, which is a copy of item `top_index` from the value stack.
     /// The top of the stack has `top_index == 0`, the item below it has `top_index == 1`, and so on.
     DupeValue { top_index: usize },
     /// Swaps two values in the value stack, as determined by the specified top index values (see [`Instruction::DupeValue`].
     SwapValues { top_index_1: usize, top_index_2: usize },
-    /// Consumes `count` values from the value stack and discards them.
-    PopValues { count: usize },
 
     /// Consumes 1 value, `val`, from the value stack and pushes a shallow copy of `val` into the value stack.
     ShallowCopy,
@@ -45,17 +46,19 @@ pub(crate) enum Instruction {
     /// Consumes `len` values from the value stack and creates a new list with those values in reverse order.
     /// Pushes the new list back onto the value stack.
     MakeList { len: usize },
-    /// Consumes 1 value, `list`, from the value stack and pushes the the length of the list onto the value stack.
-    ListLen,
-    /// Consumes two values, `index` and `list`, from the value stack and pushes the value `list[index]` onto the value stack.
-    ListIndex,
     /// Consumes two values, `b` and `a`, from the value stack and constructs a new list containing the values
     /// starting at `a` and ending at `b` (inclusive), stepping by either `+1.0` or `-1.0` depending
     /// on whether `a < b` or `b < a`. If `a == b`, then the result is `[a]`.
     /// The new list is placed back onto the value stack.
     MakeListRange,
+
     /// Pops a value, `x`, and a list, `list`, from the value stack and adds `x` to the end of `list`.
     ListPush,
+
+    /// Consumes 1 value, `list`, from the value stack and pushes the the length of the list onto the value stack.
+    ListLen,
+    /// Consumes two values, `index` and `list`, from the value stack and pushes the value `list[index]` onto the value stack.
+    ListIndex,
     /// Pops three values, `value`, `index`, and `list`, from the value stack and assigns `list[index] = value`.
     ListIndexAssign,
 

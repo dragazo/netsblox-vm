@@ -128,6 +128,9 @@ impl Value {
             Value::String(x) => !x.is_empty(),
         })
     }
+    /// Attempts to interpret this value as a list.
+    /// On success, yields an owning [`Rc`] handle to the allocated vector,
+    /// as opposed to the [`Weak`] handle normally stored by a [`Value::List`] object.
     pub fn to_list(&self) -> Result<Rc<RefCell<Vec<Value>>>, ListConversionError> {
         match self {
             Value::List(x) => match x.upgrade() {
@@ -151,14 +154,10 @@ impl Value {
     }
 }
 impl From<bool> for Value {
-    fn from(val: bool) -> Self {
-        Self::Bool(val)
-    }
+    fn from(val: bool) -> Self { Self::Bool(val) }
 }
 impl From<f64> for Value {
-    fn from(val: f64) -> Self {
-        Self::Number(val)
-    }
+    fn from(val: f64) -> Self { Self::Number(val) }
 }
 
 /// An allocation arena for reference-type values (see [`Value`]).
