@@ -7,7 +7,7 @@ use netsblox_ast as ast;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BinaryOp {
-    Add, Sub, Mul, Div, Mod, Pow,
+    Add, Sub, Mul, Div, Mod, Pow, Log,
     Greater, Less,
 }
 #[derive(Clone, Copy, Debug)]
@@ -15,8 +15,9 @@ pub(crate) enum UnaryOp {
     ToBool,
     Abs, Neg,
     Sqrt,
-    Floor, Ceil,
+    Round, Floor, Ceil,
     Sin, Cos, Tan,
+    Asin, Acos, Atan,
 }
 
 #[derive(Debug)]
@@ -140,8 +141,17 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Greater { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Greater, entity),
             ast::Expr::Less { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Less, entity),
             ast::Expr::Mod { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Mod, entity),
+            ast::Expr::Log { base, value, .. } => self.append_expr_binary_op(&*base, &*value, BinaryOp::Log, entity),
             ast::Expr::Neg { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Neg, entity),
+            ast::Expr::Abs { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Abs, entity),
             ast::Expr::Sqrt { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Sqrt, entity),
+            ast::Expr::Sin { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Sin, entity),
+            ast::Expr::Cos { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Cos, entity),
+            ast::Expr::Tan { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Tan, entity),
+            ast::Expr::Asin { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Asin, entity),
+            ast::Expr::Acos { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Acos, entity),
+            ast::Expr::Atan { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Atan, entity),
+            ast::Expr::Round { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Round, entity),
             ast::Expr::Floor { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Floor, entity),
             ast::Expr::Ceil { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Ceil, entity),
             ast::Expr::Eq { left, right, .. } => {

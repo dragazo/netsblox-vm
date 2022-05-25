@@ -278,3 +278,46 @@ fn test_proc_short_circuit() {
     ], &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-100, "short circuit test");
 }
+
+#[test]
+fn test_proc_all_arithmetic() {
+    let mut ref_pool = RefPool::default();
+    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/proc_all_arithmetic.xml"),
+        methods = "",
+    ), Default::default(), &mut ref_pool);
+
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let inf = std::f64::INFINITY;
+    let expect = Value::from_vec(vec![
+        Value::from_vec([8.5, 2.9, -2.9, -8.5].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([2.9, 8.5, -8.5, -2.9].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([15.96, -15.96, -15.96, 15.96].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([2.035714285714286, -2.035714285714286, -2.035714285714286, 2.035714285714286].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([inf, -inf, -inf, inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([130.75237792066878, 0.007648044463151016].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([0.1, -2.7, 2.7, -0.1, 5.8, -1.3, 1.3, -5.8].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([7.0, 8.0, -7.0, -8.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([56.8, 6.3, inf, inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([-56.8, 6.3, -inf, inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([8.0, 8.0, -7.0, -7.0, inf, -inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([7.0, 7.0, -8.0, -8.0, inf, -inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([2.701851217221259, inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([0.12706460860135046, 0.7071067811865475].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([0.9918944425900297, 0.7071067811865476].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([0.12810295445305653, 1.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([0.0, 30.0, -30.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([90.0, 60.0, 120.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([0.0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([-0.6931471805599453, 0.0, 2.186051276738094, inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([-0.3010299956639812, 0.0, 0.9493900066449128, inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([-1.0, 0.0, 3.1538053360790355, inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([1.0, 3.3201169227365472, 0.0001363889264820114, inf, 0.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([1.0, 15.848931924611133, 1.2589254117941663e-9, inf, 0.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([1.0, 2.2973967099940698, 0.002093307544016197, inf, 0.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+        Value::from_vec([0.0, 1.2, -8.9, inf, -inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
+    ], &mut ref_pool);
+    assert_values_eq(&res, &expect, 1e-7, "short circuit test");
+}

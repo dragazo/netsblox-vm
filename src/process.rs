@@ -429,10 +429,14 @@ mod ops {
             BinaryOp::Sub     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? - b.to_number()?).into())),
             BinaryOp::Mul     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? * b.to_number()?).into())),
             BinaryOp::Div     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? / b.to_number()?).into())),
-            BinaryOp::Mod     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? % b.to_number()?).into())),
             BinaryOp::Pow     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
+            BinaryOp::Log     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((libm::log2(b.to_number()?) / libm::log2(a.to_number()?)).into())),
             BinaryOp::Greater => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? > b.to_number()?).into())),
             BinaryOp::Less    => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| Ok((a.to_number()? < b.to_number()?).into())),
+            BinaryOp::Mod     => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b| {
+                let (a, b) = (a.to_number()?, b.to_number()?);
+                Ok(if a.is_sign_positive() == b.is_sign_positive() { a % b } else { b + (a % -b) }.into())
+            }),
         }
     }
 
@@ -458,15 +462,19 @@ mod ops {
     }
     pub(super) fn unary_op(x: &Value, ref_pool: &mut RefPool, op: UnaryOp) -> Result<Value, ArithmeticError> {
         match op {
-            UnaryOp::ToBool  => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(x.to_bool()?.into())),
-            UnaryOp::Abs     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::fabs(x.to_number()?).into())),
-            UnaryOp::Neg     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok((-x.to_number()?).into())),
-            UnaryOp::Sqrt    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::sqrt(x.to_number()?).into())),
-            UnaryOp::Floor   => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::floor(x.to_number()?).into())),
-            UnaryOp::Ceil    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::ceil(x.to_number()?).into())),
-            UnaryOp::Sin     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::sin(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Cos     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::cos(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Tan     => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::tan(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::ToBool => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(x.to_bool()?.into())),
+            UnaryOp::Abs    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::fabs(x.to_number()?).into())),
+            UnaryOp::Neg    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok((-x.to_number()?).into())),
+            UnaryOp::Sqrt   => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::sqrt(x.to_number()?).into())),
+            UnaryOp::Round  => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::round(x.to_number()?).into())),
+            UnaryOp::Floor  => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::floor(x.to_number()?).into())),
+            UnaryOp::Ceil   => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::ceil(x.to_number()?).into())),
+            UnaryOp::Sin    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::sin(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::Cos    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::cos(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::Tan    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::tan(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::Asin   => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok((libm::asin(x.to_number()?) / DEG_TO_RAD).into())),
+            UnaryOp::Acos   => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok((libm::acos(x.to_number()?) / DEG_TO_RAD).into())),
+            UnaryOp::Atan   => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok((libm::atan(x.to_number()?) / DEG_TO_RAD).into())),
         }
     }
     pub(super) fn index_list(list: &Value, index: &Value, ref_pool: &mut RefPool) -> Result<Value, ArithmeticError> {
