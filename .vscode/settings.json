@@ -4,6 +4,7 @@
         "Listlen",
         "bytecode",
         "consts",
+        "dealloc",
         "fabs",
         "funcs",
         "libm",

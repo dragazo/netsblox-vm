@@ -70,8 +70,6 @@ fn assert_values_eq(got: &Value, expected: &Value, epsilon: f64, path: &str) {
     }
 }
 
-//<variable name="field"><l>0</l></variable>
-
 #[test]
 fn test_proc_ret() {
     let mut ref_pool = RefPool::default();
