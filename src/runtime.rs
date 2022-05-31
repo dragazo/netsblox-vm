@@ -2,8 +2,9 @@
 
 use std::prelude::v1::*;
 use std::collections::BTreeMap;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
+use std::mem;
 
 use netsblox_ast as ast;
 
@@ -51,6 +52,9 @@ impl ListUpgrade for Weak<RefCell<Vec<Value>>> {
 }
 
 /// Any primitive value.
+/// 
+/// This type implements [`Clone`] but not [`Copy`]; however, cloning a `Value` is guaranteed to be nearly-trivial
+/// (up to reference counting increments) due to having the same reference-type semantics as Snap! and NetsBlox.
 #[derive(Clone, Debug)]
 pub enum Value {
     /// A primitive boolean value.
@@ -169,6 +173,9 @@ impl From<bool> for Value {
 impl From<f64> for Value {
     fn from(val: f64) -> Self { Self::Number(val) }
 }
+impl Default for Value {
+    fn default() -> Self { Self::Number(0.0) }
+}
 
 /// An allocation arena for reference-type values (see [`Value`]).
 #[derive(Default)]
@@ -177,16 +184,67 @@ pub struct RefPool {
     list_pool: Vec<Rc<RefCell<Vec<Value>>>>,
 }
 
+/// Represents a shared mutable resource.
+/// 
+/// This is effectively equivalent to [`Rc<Cell<T>`] except that it performs no dynamic allocation
+/// for the [`Shared::Unique`] case, which is assumed to be significantly more likely than [`Shared::Aliased`].
+pub enum Shared<T> {
+    /// A shared resource which has only (this) single unique handle.
+    Unique(T),
+    /// One of several handles to a single shared resource.
+    Aliased(Rc<Cell<T>>),
+}
+impl<T> Shared<T> {
+    /// Sets the value of the shared resource.
+    fn set(&mut self, value: T) {
+        match self {
+            Shared::Unique(x) => *x = value,
+            Shared::Aliased(x) => x.set(value),
+        }
+    }
+}
+impl<T> Shared<T> where T: Default {
+    /// Creates an aliasing instance of [`Shared`] to the same resource as this one.
+    /// If this instance is the [`Shared::Unique`] variant, transitions to [`Shared::Aliased`] and returns a second handle.
+    /// Otherwise, this simple returns an additional handle to the aliased shared resource.
+    pub fn alias(&mut self) -> Self {
+        match self {
+            Shared::Unique(x) => {
+                let rc = Rc::new(Cell::new(mem::take(x)));
+                *self = Shared::Aliased(rc.clone());
+                Shared::Aliased(rc)
+            }
+            Shared::Aliased(x) => Shared::Aliased(x.clone()),
+        }
+    }
+}
+impl<T> Shared<T> where T: Default + Clone {
+    /// Gets a copy of the shared resource's currently stored value.
+    pub fn get_clone(&self) -> T {
+        match self {
+            Shared::Unique(x) => x.clone(),
+            Shared::Aliased(x) => {
+                let value = x.take();
+                x.set(value.clone());
+                value
+            }
+        }
+    }
+}
+impl<T> From<T> for Shared<T> {
+    fn from(value: T) -> Self { Shared::Unique(value) }
+}
+
 /// Holds a collection of variables in an execution context.
 /// 
 /// `SymbolTable` has utilities to extract variables from an abstract syntax tree,
 /// or to explicitly define variables.
 /// To perform value lookups, use the higher-level utility [`LookupGroup`].
-#[derive(Default, Debug)]
-pub struct SymbolTable(BTreeMap<String, Value>);
+#[derive(Default)]
+pub struct SymbolTable(BTreeMap<String, Shared<Value>>);
 impl SymbolTable {
     fn from_var_defs(var_defs: &[ast::VariableDef], ref_pool: &mut RefPool) -> Self {
-        Self(var_defs.iter().map(|x| (x.trans_name.clone(), Value::from_ast(&x.value, ref_pool, true))).collect())
+        Self(var_defs.iter().map(|x| (x.trans_name.clone(), Value::from_ast(&x.value, ref_pool, true).into())).collect())
     }
     /// Extracts a symbol table containing all the global variables in the project.
     pub fn from_globals(role: &ast::Role, ref_pool: &mut RefPool) -> Self {
@@ -197,16 +255,16 @@ impl SymbolTable {
         Self::from_var_defs(&entity.fields, ref_pool)
     }
     /// Sets the value of an existing variable or defines it if it does not exist.
+    /// If the variable does not exist, creates a [`Shared::Unique`] instance for the new `value`.
     pub fn set_or_define(&mut self, var: &str, value: Value) {
         match self.0.get_mut(var) {
-            Some(x) => *x = value,
-            None => { self.0.insert(var.to_owned(), value); }
+            Some(x) => x.set(value),
+            None => { self.0.insert(var.to_owned(), value.into()); }
         }
     }
 }
 
 /// A collection of symbol tables with hierarchical context searching.
-#[derive(Debug)]
 pub struct LookupGroup<'a, 'b>(&'a mut [&'b mut SymbolTable]);
 impl<'a, 'b> LookupGroup<'a, 'b> {
     /// Creates a new lookup group.
@@ -219,7 +277,7 @@ impl<'a, 'b> LookupGroup<'a, 'b> {
     /// Searches for the given variable in this group of lookup tables,
     /// starting with the last (most-local) table and working towards the first (most-global) table.
     /// Returns a reference to the value if it is found, otherwise returns `None`.
-    pub fn lookup(&self, var: &str) -> Option<&Value> {
+    pub fn lookup(&self, var: &str) -> Option<&Shared<Value>> {
         for src in self.0.iter().rev() {
             if let Some(val) = src.0.get(var) {
                 return Some(val);
@@ -228,7 +286,7 @@ impl<'a, 'b> LookupGroup<'a, 'b> {
         None
     }
     /// As [`LookupGroup::lookup`], but returns a mutable reference.
-    pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Value> {
+    pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Shared<Value>> {
         for src in self.0.iter_mut().rev() {
             if let Some(val) = src.0.get_mut(var) {
                 return Some(val);
@@ -238,10 +296,10 @@ impl<'a, 'b> LookupGroup<'a, 'b> {
     }
     /// Performs a lookup for the given variable.
     /// If it already exists, assigns it a new value.
-    /// Otherwise, defines it in the last (most-local) context.
+    /// Otherwise, defines it in the last (most-local) context equivalently to [`SymbolTable::set_or_define`].
     pub fn set_or_define(&mut self, var: &str, value: Value) {
         match self.lookup_mut(var) {
-            Some(x) => *x = value,
+            Some(x) => x.set(value),
             None => self.0.last_mut().unwrap().set_or_define(var, value),
         }
     }

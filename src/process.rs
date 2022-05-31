@@ -182,7 +182,7 @@ impl Process {
                 self.pos += 1;
             }
             Instruction::PushVariable { var } => {
-                self.value_stack.push(lookup_var!(var).clone());
+                self.value_stack.push(lookup_var!(var).get_clone());
                 self.pos += 1;
             }
             Instruction::DupeValue { top_index } => {
@@ -301,7 +301,7 @@ impl Process {
             }
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
-                let a = lookup_var!(var).clone();
+                let a = lookup_var!(var).get_clone();
                 context.set_or_define(var, ops::binary_op(&a, &b, ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
