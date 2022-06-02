@@ -5,16 +5,14 @@ use std::collections::BTreeMap;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::mem;
+use std::fmt;
 
 use netsblox_ast as ast;
 
 /// The type of a [`Value`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Type {
-    Bool,
-    Number,
-    String,
-    List,
+    Bool, Number, String, List, Closure,
 }
 
 /// A type conversion error on a [`Value`].
@@ -24,30 +22,66 @@ pub struct ConversionError {
     pub expected: Type,
 }
 
-/// A failed [`Weak`] upgrade operation on a [`Value::List`]
+/// A failed [`Weak`] upgrade operation on a [`Value::List`].
 #[derive(Debug)]
 pub struct ListUpgradeError {
     pub weak: Weak<RefCell<Vec<Value>>>,
 }
+/// A failed [`Weak`] upgrade operation on a [`Value::Closure`].
+#[derive(Debug)]
+pub struct ClosureUpgradeError {
+    pub weak: Weak<RefCell<Closure>>,
+}
 
-/// A failed conversion of a [`Value`] to a list.
+/// A failed conversion of a [`Value`] to a list of [`Value`].
 #[derive(Debug)]
 pub enum ListConversionError {
     ConversionError(ConversionError),
     ListUpgradeError(ListUpgradeError),
 }
 trivial_from_impl! { ListConversionError: ConversionError, ListUpgradeError }
+/// A failed conversion of a [`Value`] to a [`Closure`].
+#[derive(Debug)]
+pub enum ClosureConversionError {
+    ConversionError(ConversionError),
+    ClosureUpgradeError(ClosureUpgradeError),
+}
+trivial_from_impl! { ClosureConversionError: ConversionError, ClosureUpgradeError }
 
 /// A convenience trait for working with [`Value::List`] handles.
-pub trait ListUpgrade {
-    fn list_upgrade(&self) -> Result<Rc<RefCell<Vec<Value>>>, ListUpgradeError>;
+pub trait CheckedUpgrade {
+    type Success;
+    type Error;
+    fn checked_upgrade(&self) -> Result<Self::Success, Self::Error>;
 }
-impl ListUpgrade for Weak<RefCell<Vec<Value>>> {
-    fn list_upgrade(&self) -> Result<Rc<RefCell<Vec<Value>>>, ListUpgradeError> {
-        match self.upgrade() {
-            Some(x) => Ok(x),
-            None => Err(ListUpgradeError { weak: self.clone() }),
+macro_rules! UpgradeImpl {
+    ($inner:ty : $err:ty) => {
+        impl CheckedUpgrade for Weak<$inner> {
+            type Success = Rc<$inner>;
+            type Error = $err;
+            fn checked_upgrade(&self) -> Result<Self::Success, Self::Error> {
+                match self.upgrade() {
+                    Some(x) => Ok(x),
+                    None => Err(Self::Error { weak: self.clone() }),
+                }
+            }
         }
+    }
+}
+UpgradeImpl! { RefCell<Vec<Value>> : ListUpgradeError }
+UpgradeImpl! { RefCell<Closure> : ClosureUpgradeError }
+
+/// Information about a closure/lambda function.
+/// 
+/// Used by [`Value::Closure`].
+pub struct Closure {
+    pub pos: usize,
+    pub params: Vec<String>,
+    pub captures: SymbolTable,
+}
+impl fmt::Debug for Closure {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[Closure]")
     }
 }
 
@@ -70,6 +104,11 @@ pub enum Value {
     /// The (only) owning reference to a list is allocated in a [`RefPool`],
     /// which can perform garbage collection logic upon request.
     List(Weak<RefCell<Vec<Value>>>),
+    /// A closure/lambda function.
+    /// This contains information about the closure's bytecode location, parameters, and captures from the parent scope.
+    /// This must be held by weak reference to avoid creating cycles due to captures.
+    Closure(Weak<RefCell<Closure>>),
+
 }
 impl Value {
     /// Creates a new value from an abstract syntax tree value.
@@ -87,11 +126,20 @@ impl Value {
         }
     }
     /// Creates a new [`Value::List`] object with the given values.
+    /// The list is allocated in the provided [`RefPool`].
     pub fn from_vec(values: Vec<Value>, ref_pool: &mut RefPool) -> Self {
         let rc = Rc::new(RefCell::new(values));
         let weak = Rc::downgrade(&rc);
         ref_pool.list_pool.push(rc);
         Value::List(weak)
+    }
+    /// Creates a new [`Value::Closure`] object with the given value.
+    /// The closure is allocated in the provided [`RefPool`].
+    pub fn from_closure(closure: Closure, ref_pool: &mut RefPool) -> Self {
+        let rc = Rc::new(RefCell::new(closure));
+        let weak = Rc::downgrade(&rc);
+        ref_pool.closure_pool.push(rc);
+        Value::Closure(weak)
     }
     /// Creates a new [`Value::String`] object with the given value.
     /// 
@@ -116,6 +164,7 @@ impl Value {
             Value::Number(x) => &*x as *const f64 as *const (),
             Value::String(x) => &**x as *const String as *const (),
             Value::List(x) => x.as_ptr() as *const Vec<Value> as *const (),
+            Value::Closure(x) => x.as_ptr() as *const Closure as *const (),
         }
     }
     /// Gets the type of value that is stored.
@@ -125,18 +174,18 @@ impl Value {
             Value::Number(_) => Type::Number,
             Value::String(_) => Type::String,
             Value::List(_) => Type::List,
+            Value::Closure(_) => Type::Closure,
         }
     }
     /// Attempts to interpret this value as a number.
     pub fn to_number(&self) -> Result<f64, ConversionError> {
         Ok(match self {
-            Value::Bool(_) => return Err(ConversionError { got: Type::Bool, expected: Type::Number }),
-            Value::List(_) => return Err(ConversionError { got: Type::List, expected: Type::Number }),
-            Value::String(x) => match x.parse() {
-                Err(_) => return Err(ConversionError { got: Type::String, expected: Type::Number }),
-                Ok(x) => x,
-            }
             Value::Number(x) => *x,
+            Value::String(x) => match x.parse() {
+                Ok(x) => x,
+                Err(_) => return Err(ConversionError { got: Type::String, expected: Type::Number }),
+            }
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::Number }),
         })
     }
     /// Attempts to interpret this value as a bool.
@@ -144,8 +193,8 @@ impl Value {
         Ok(match self {
             Value::Bool(x) => *x,
             Value::Number(x) => *x != 0.0 && !x.is_nan(),
-            Value::List(_) => return Err(ConversionError { got: Type::List, expected: Type::Bool }),
             Value::String(x) => !x.is_empty(),
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::Bool }),
         })
     }
     /// Attempts to interpret this value as a list.
@@ -153,8 +202,17 @@ impl Value {
     /// as opposed to the [`Weak`] handle normally stored by a [`Value::List`] object.
     pub fn to_list(&self) -> Result<Rc<RefCell<Vec<Value>>>, ListConversionError> {
         match self {
-            Value::List(x) => Ok(x.list_upgrade()?),
+            Value::List(x) => Ok(x.checked_upgrade()?),
             x => Err(ConversionError { got: x.get_type(), expected: Type::List }.into()),
+        }
+    }
+    /// Attempts to interpret this value as a closure.
+    /// On success, yields an owning [`Rc`] handle to the closure,
+    /// as opposed to the [`Weak`] handle normally stored by a [`Value::Closure`] object.
+    pub fn to_closure(&self) -> Result<Rc<RefCell<Closure>>, ClosureConversionError> {
+        match self {
+            Value::Closure(x) => Ok(x.checked_upgrade()?),
+            x => Err(ConversionError { got: x.get_type(), expected: Type::Closure }.into()),
         }
     }
     /// Creates a shallow copy of this value, using the designated [`RefPool`] in the event that this value is a reference type.
@@ -163,7 +221,8 @@ impl Value {
             Value::Bool(x) => Value::Bool(*x),
             Value::Number(x) => Value::Number(*x),
             Value::String(x) => Value::String(x.clone()),
-            Value::List(x) => Value::from_vec(x.list_upgrade()?.borrow().to_owned(), ref_pool),
+            Value::List(x) => Value::from_vec(x.checked_upgrade()?.borrow().to_owned(), ref_pool),
+            Value::Closure(x) => Value::Closure(x.clone()),
         })
     }
 }
@@ -182,6 +241,7 @@ impl Default for Value {
 pub struct RefPool {
     string_pool: Vec<Weak<String>>,
     list_pool: Vec<Rc<RefCell<Vec<Value>>>>,
+    closure_pool: Vec<Rc<RefCell<Closure>>>,
 }
 
 /// Represents a shared mutable resource.
@@ -254,13 +314,30 @@ impl SymbolTable {
     pub fn from_fields(entity: &ast::Entity, ref_pool: &mut RefPool) -> Self {
         Self::from_var_defs(&entity.fields, ref_pool)
     }
-    /// Sets the value of an existing variable or defines it if it does not exist.
+    /// Sets the value of an existing variable (as if by [`Shared::set`]) or defines it if it does not exist.
     /// If the variable does not exist, creates a [`Shared::Unique`] instance for the new `value`.
+    /// If you would prefer to always create a new, non-aliased value, consider using [`SymbolTable::redefine_or_define`] instead.
     pub fn set_or_define(&mut self, var: &str, value: Value) {
         match self.0.get_mut(var) {
             Some(x) => x.set(value),
             None => { self.0.insert(var.to_owned(), value.into()); }
         }
+    }
+    /// Defines or redefines a value in the symbol table to a new instance of [`Shared::Unique`].
+    /// Note that this is not the same as [`SymbolTable::set_or_define`], which sets a value on a potentially aliased variable.
+    /// The result of this function is that `var` is always an instance of [`Shared::Unique`].
+    /// If a variable named `var` already existed and was [`Shared::Aliased`], its value is not modified.
+    pub fn redefine_or_define(&mut self, var: &str, value: Shared<Value>) {
+        self.0.insert(var.to_owned(), value);
+    }
+    /// A convenience function which is equivalent to repeated use of [`SymbolTable::redefine_or_define`] and [`Shared::alias`]
+    /// to create a new symbol table with all values aliasing the originals.
+    pub fn alias(&mut self) -> SymbolTable {
+        let mut res = SymbolTable::default();
+        for (k, v) in self.0.iter_mut() {
+            res.redefine_or_define(k, v.alias());
+        }
+        res
     }
 }
 
@@ -302,5 +379,9 @@ impl<'a, 'b> LookupGroup<'a, 'b> {
             Some(x) => x.set(value),
             None => self.0.last_mut().unwrap().set_or_define(var, value),
         }
+    }
+    /// Gets a mutable reference to the last (most-local) context.
+    pub fn locals_mut(&mut self) -> &mut SymbolTable {
+        self.0.last_mut().unwrap()
     }
 }

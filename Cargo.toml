@@ -11,6 +11,6 @@ std-embedded-time = "0.1.0"
 [dependencies]
 no-std-compat = { version = "0.4.1", features = ["alloc"] }
 embedded-time = "0.12.1"
-netsblox-ast = "=0.2.1"
+netsblox-ast = "=0.2.3"
 slotmap = "1.0.6"
 libm = "0.2.2"

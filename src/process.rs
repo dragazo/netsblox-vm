@@ -19,10 +19,14 @@ pub enum ExecError {
     /// A variable lookup operation failed.
     /// `name` holds the name of the variable that was expected.
     UndefinedVariable { name: String, pos: usize },
-    /// An upgrade operation on a [`Weak`] handle failed.
+    /// An upgrade operation on a [`Weak`] handle for a [`Value::List`] failed.
     /// Proper usage of this crate should never generate this error.
     /// The most likely cause is that a [`RefPool`] instance was improperly used.
     ListUpgradeError { weak: Weak<RefCell<Vec<Value>>>, pos: usize },
+    /// An upgrade operation on a [`Weak`] handle for a [`Value::Closure`] failed.
+    /// Proper usage of this crate should never generate this error.
+    /// The most likely cause is that a [`RefPool`] instance was improperly used.
+    ClosureUpgradeError { weak: Weak<RefCell<Closure>>, pos: usize },
     /// The result of a failed type conversion.
     ConversionError { got: Type, expected: Type, pos: usize },
     /// Attempt to index a list with a non-integer numeric value, `index`.
@@ -33,6 +37,8 @@ pub enum ExecError {
     /// Exceeded the maximum call depth.
     /// This can be configured by [`Process::new`].
     CallDepthLimit { limit: usize, pos: usize },
+    /// Attempt to call a closure which expected `expected` arguments, but `got` arguments were supplied.
+    ClosureArgCount { expected: usize, got: usize, pos: usize },
 }
 
 enum IndexError {
@@ -56,6 +62,9 @@ impl ErrAt for ConversionError {
 impl ErrAt for ListUpgradeError {
     fn err_at(self, pos: usize) -> ExecError { ExecError::ListUpgradeError { weak: self.weak, pos } }
 }
+impl ErrAt for ClosureUpgradeError {
+    fn err_at(self, pos: usize) -> ExecError { ExecError::ClosureUpgradeError { weak: self.weak, pos } }
+}
 impl ErrAt for IndexError {
     fn err_at(self, pos: usize) -> ExecError {
         match self {
@@ -73,6 +82,7 @@ macro_rules! trivial_err_at_impl {
     }
 }
 trivial_err_at_impl! { ListConversionError: ConversionError, ListUpgradeError }
+trivial_err_at_impl! { ClosureConversionError: ConversionError, ClosureUpgradeError }
 trivial_err_at_impl! { ArithmeticError: ConversionError, ListUpgradeError, IndexError }
 
 /// Result of stepping through a [`Process`].
@@ -160,13 +170,15 @@ impl Process {
         let mut context = LookupGroup::new(&mut context);
 
         macro_rules! lookup_var {
-            ($var:expr) => {{
+            ($var:expr => $m:ident) => {{
                 let var = $var;
-                match context.lookup(var) {
+                match context.$m(var) {
                     Some(x) => x,
                     None => return Err(ExecError::UndefinedVariable { name: var.into(), pos: self.pos }),
                 }
-            }}
+            }};
+            ($var:expr) => {lookup_var!($var => lookup)};
+            (mut $var:expr) => {lookup_var!($var => lookup_mut)};
         }
 
         match &self.code.0[self.pos] {
@@ -292,11 +304,16 @@ impl Process {
                 self.pos += 1;
             }
 
-            Instruction::Assign { vars } => {
-                let value = self.value_stack.pop().unwrap();
+            Instruction::DeclareLocals { vars } => {
+                let locals = context.locals_mut();
                 for var in vars {
-                    context.set_or_define(var, value.clone());
+                    locals.redefine_or_define(var, Shared::Unique(0.0.into()));
                 }
+                self.pos += 1;
+            }
+            Instruction::Assign { var } => {
+                let value = self.value_stack.pop().unwrap();
+                context.set_or_define(var, value.clone());
                 self.pos += 1;
             }
             Instruction::BinaryOpAssign { var, op } => {
@@ -319,10 +336,32 @@ impl Process {
 
                 let mut context = SymbolTable::default();
                 for var in params.iter().rev() {
-                    context.set_or_define(var, self.value_stack.pop().unwrap());
+                    context.redefine_or_define(var, self.value_stack.pop().unwrap().into());
                 }
                 self.call_stack.push((ReturnPoint { pos: self.pos + 1, value_stack_size: self.value_stack.len() }, context));
                 self.pos = *pos;
+            }
+            Instruction::MakeClosure { pos, params, captures } => {
+                let mut context = SymbolTable::default();
+                for var in captures {
+                    context.redefine_or_define(var, lookup_var!(mut var).alias());
+                }
+                self.value_stack.push(Value::from_closure(Closure { pos: *pos, params: params.clone(), captures: context }, ref_pool));
+                self.pos += 1;
+            }
+            Instruction::CallClosure { args } => {
+                let closure = self.value_stack.pop().unwrap().to_closure().map_err(|e| e.err_at(self.pos))?;
+                let mut closure = closure.borrow_mut();
+                if closure.params.len() != *args {
+                    return Err(ExecError::ClosureArgCount { expected: closure.params.len(), got: *args, pos: self.pos });
+                }
+
+                let mut context = closure.captures.alias();
+                for var in closure.params.iter().rev() {
+                    context.redefine_or_define(var, self.value_stack.pop().unwrap().into());
+                }
+                self.call_stack.push((ReturnPoint { pos: self.pos + 1, value_stack_size: self.value_stack.len() }, context));
+                self.pos = closure.pos;
             }
             Instruction::Return => {
                 let (return_point, _) = self.call_stack.pop().unwrap();
@@ -351,7 +390,7 @@ mod ops {
 
     fn as_list(v: &Value) -> Result<Option<Rc<RefCell<Vec<Value>>>>, ListUpgradeError> {
         Ok(match v {
-            Value::List(v) => Some(v.list_upgrade()?),
+            Value::List(v) => Some(v.checked_upgrade()?),
             _ => None,
         })
     }
@@ -502,8 +541,12 @@ mod ops {
                 Err(_) => **s == n.to_string(),
             }
 
+            (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Closure(_), _) => false,
+            (_, Value::Closure(_)) => false,
+
             (Value::List(a), Value::List(b)) => {
-                let (a, b) = (a.list_upgrade()?, b.list_upgrade()?);
+                let (a, b) = (a.checked_upgrade()?, b.checked_upgrade()?);
                 let (a, b) = (a.borrow(), b.borrow());
                 if a.len() != b.len() { return Ok(false) }
                 for (a, b) in iter::zip(&*a, &*b) {

@@ -98,7 +98,7 @@ fn test_proc_sum_123n() {
 
     for (n, expect) in [(0.0, 0.0), (1.0, 1.0), (2.0, 3.0), (3.0, 6.0), (4.0, 10.0), (5.0, 15.0), (6.0, 21.0)] {
         let mut locals = SymbolTable::default();
-        locals.set_or_define("n", n.into());
+        locals.redefine_or_define("n", Shared::Unique(n.into()));
         proc.initialize(main, locals);
         match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
             Value::Number(ret) => assert_eq!(ret, expect),
@@ -119,7 +119,7 @@ fn test_proc_recursive_factorial() {
 
     for (n, expect) in [(0.0, 1.0), (1.0, 1.0), (2.0, 2.0), (3.0, 6.0), (4.0, 24.0), (5.0, 120.0), (6.0, 720.0), (7.0, 5040.0)] {
         let mut locals = SymbolTable::default();
-        locals.set_or_define("n", n.into());
+        locals.redefine_or_define("n", Shared::Unique(n.into()));
         proc.initialize(main, locals);
         match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
             Value::Number(ret) => assert_eq!(ret, expect),
@@ -218,7 +218,7 @@ fn test_proc_recursively_self_containing_lists() {
 fn test_proc_sieve_of_eratosthenes() {
     let mut ref_pool = RefPool::default();
     let mut locals = SymbolTable::default();
-    locals.set_or_define("n", 100.0.into());
+    locals.redefine_or_define("n", Shared::Unique(100.0.into()));
     let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -318,4 +318,34 @@ fn test_proc_all_arithmetic() {
         Value::from_vec([0.0, 1.2, -8.9, inf, -inf].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
     ], &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-7, "short circuit test");
+}
+
+#[test]
+fn test_proc_lambda_local_shadow_capture() {
+    let mut ref_pool = RefPool::default();
+    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/proc_lambda_local_shadow_capture.xml"),
+        methods = "",
+    ), Default::default(), &mut ref_pool);
+
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let expect = Value::from_vec([1.0, 0.0, 1.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool);
+    assert_values_eq(&res, &expect, 1e-20, "local shadow capture");
+}
+
+#[test]
+fn test_proc_generators_nested() {
+    let mut ref_pool = RefPool::default();
+    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/proc_generators_nested.xml"),
+        methods = "",
+    ), Default::default(), &mut ref_pool);
+
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let expect = Value::from_vec([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
+    assert_values_eq(&res, &expect, 1e-20, "nested generators");
 }

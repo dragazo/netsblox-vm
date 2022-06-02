@@ -1,7 +1,7 @@
 //! Tools for generating executable [`ByteCode`] from a project's abstract syntax tree.
 
 use std::prelude::v1::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use netsblox_ast as ast;
 
@@ -76,8 +76,12 @@ pub(crate) enum Instruction {
     /// Consumes 1 value, `x`, from the value stack, and pushes the value `f(x)` onto the value stack.
     UnaryOp { op: UnaryOp },
 
-    /// Consumes 1 value from the value stack and assigns it to all of the specified variables.
-    Assign { vars: Vec<String> },
+    /// Re/Declares a set of local variables, which are initialized to 0.
+    /// Note that this is not equivalent to assigning a value of zero to the variable due to the potential issue of [`Shared::Aliased`].
+    /// A new, [`Shared::Unique`] local variable must be created.
+    DeclareLocals { vars: Vec<String> },
+    /// Consumes 1 value from the value stack and assigns it to the specified variable.
+    Assign { var: String },
     /// Consumes 1 value, `b` from the value stack, fetches the variable `a`, and assigns it `f(a, b)`.
     BinaryOpAssign { var: String, op: BinaryOp },
 
@@ -89,6 +93,13 @@ pub(crate) enum Instruction {
     /// Consumes `params.len()` arguments from the value stack (in reverse order of the listed params) to assign to a new symbol table.
     /// Pushes the symbol table and return address to the call stack, and finally jumps to the given location.
     Call { pos: usize, params: Vec<String> },
+    /// Creates a closure object with the given information.
+    /// Captures are looked up and bound immediately based on the current execution context.
+    MakeClosure { pos: usize, params: Vec<String>, captures: Vec<String> },
+    /// Consumes 1 argument, `closure`, and another `args` arguments (in reverse order) from the value stack
+    /// to assign to the parameters of `closure` before executing the closure's stored code.
+    /// It is an error if the number of supplied arguments does not match the number of parameters.
+    CallClosure { args: usize },
     /// Pops a return address from the call stack and jumps to it.
     /// The return value is left on the top of the value stack.
     /// If the call stack is empty, this instead terminates the process
@@ -117,7 +128,8 @@ pub struct Locations<'a> {
 #[derive(Default)]
 struct ByteCodeBuilder<'a> {
     ins: Vec<Instruction>,
-    call_holes: Vec<(usize, &'a ast::FnRef, Option<&'a ast::Entity>)>,
+    call_holes: Vec<(usize, &'a ast::FnRef, Option<&'a ast::Entity>)>, // (hole pos, function, entity)
+    closure_holes: VecDeque<(usize, &'a [ast::VariableDef], &'a [ast::VariableRef], &'a [ast::Stmt], Option<&'a ast::Entity>)>, // (hole pos, params, captures, stmts, entity)
 }
 impl<'a> ByteCodeBuilder<'a> {
     fn append_expr_binary_op(&mut self, left: &'a ast::Expr, right: &'a ast::Expr, op: BinaryOp, entity: Option<&'a ast::Entity>) {
@@ -234,14 +246,29 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.call_holes.push((call_hole_pos, function, entity));
             }
+            ast::Expr::CallClosure { closure, args, .. } => {
+                for arg in args {
+                    self.append_expr(arg, entity);
+                }
+                self.append_expr(closure, entity);
+                self.ins.push(Instruction::CallClosure { args: args.len() });
+            }
+            ast::Expr::Closure { params, captures, stmts, .. } => {
+                let closure_hole_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+                self.closure_holes.push_back((closure_hole_pos, params, captures, stmts, entity));
+            }
             x => unimplemented!("{:?}", x),
         }
     }
     fn append_stmt(&mut self, stmt: &'a ast::Stmt, entity: Option<&'a ast::Entity>) {
         match stmt {
-            ast::Stmt::Assign { vars, value, .. } => {
+            ast::Stmt::VarDecl { vars, .. } => {
+                self.ins.push(Instruction::DeclareLocals { vars: vars.iter().map(|x| x.trans_name.clone()).collect() });
+            }
+            ast::Stmt::Assign { var, value, .. } => {
                 self.append_expr(value, entity);
-                self.ins.push(Instruction::Assign { vars: vars.iter().map(|x| x.trans_name.clone()).collect() })
+                self.ins.push(Instruction::Assign { var: var.trans_name.clone() })
             }
             ast::Stmt::AddAssign { var, value, .. } => {
                 self.append_expr(value, entity);
@@ -267,6 +294,14 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::PopValues { count: 1 });
 
                 self.call_holes.push((call_hole_pos, function, entity));
+            }
+            ast::Stmt::RunClosure { closure, args, .. } => {
+                for arg in args {
+                    self.append_expr(arg, entity);
+                }
+                self.append_expr(closure, entity);
+                self.ins.push(Instruction::CallClosure { args: args.len() });
+                self.ins.push(Instruction::PopValues { count: 1 });
             }
             ast::Stmt::Return { value, .. } => {
                 self.append_expr(value, entity);
@@ -352,7 +387,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::Illegal);
 
                 self.ins.push(Instruction::DupeValue { top_index: 1 });
-                self.ins.push(Instruction::Assign { vars: vec![var.trans_name.clone()] });
+                self.ins.push(Instruction::Assign { var: var.trans_name.clone() });
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
@@ -388,7 +423,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::DupeValue { top_index: 1 });
                 self.ins.push(Instruction::DupeValue { top_index: 1 });
                 self.ins.push(Instruction::ListIndex);
-                self.ins.push(Instruction::Assign { vars: vec![var.trans_name.clone()] });
+                self.ins.push(Instruction::Assign { var: var.trans_name.clone() });
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
@@ -443,10 +478,20 @@ impl<'a> ByteCodeBuilder<'a> {
         };
 
         let get_ptr = |x: Option<&ast::Entity>| x.map(|x| x as *const ast::Entity).unwrap_or(std::ptr::null());
-        for (hole_pos, hole_fn, hole_ent) in self.call_holes {
+        for (hole_pos, hole_fn, hole_ent) in self.call_holes.iter() {
             let sym = &*hole_fn.trans_name;
-            let &(pos, params) = entity_fn_to_info.get(&get_ptr(hole_ent)).and_then(|tab| tab.get(sym)).or_else(|| global_fn_to_info.get(sym)).unwrap();
-            self.ins[hole_pos] = Instruction::Call { pos, params: params.iter().map(|x| x.trans_name.clone()).collect() };
+            let &(pos, params) = entity_fn_to_info.get(&get_ptr(*hole_ent)).and_then(|tab| tab.get(sym)).or_else(|| global_fn_to_info.get(sym)).unwrap();
+            self.ins[*hole_pos] = Instruction::Call { pos, params: params.iter().map(|x| x.trans_name.clone()).collect() };
+        }
+
+        while let Some((hole_pos, params, captures, stmts, entity)) = self.closure_holes.pop_front() {
+            let pos = self.ins.len();
+            self.append_stmts_ret(stmts, entity);
+            self.ins[hole_pos] = Instruction::MakeClosure {
+                pos,
+                params: params.iter().map(|s| s.trans_name.clone()).collect(),
+                captures: captures.iter().map(|s| s.trans_name.clone()).collect(),
+            };
         }
 
         #[cfg(debug_assertions)]
@@ -455,6 +500,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 panic!();
             }
         }
+        assert!(self.closure_holes.is_empty());
 
         (ByteCode(self.ins), locations)
     }
