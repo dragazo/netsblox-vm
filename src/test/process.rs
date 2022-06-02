@@ -349,3 +349,21 @@ fn test_proc_generators_nested() {
     let expect = Value::from_vec([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-20, "nested generators");
 }
+
+#[test]
+fn test_proc_call_in_closure() {
+    let mut ref_pool = RefPool::default();
+    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/proc_call_in_closure.xml"),
+        methods = "",
+    ), Default::default(), &mut ref_pool);
+
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let expect = Value::from_vec(vec![
+        Value::from_vec([2, 4, 6, 8, 10].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),
+        Value::from_vec([1, 3, 5, 7, 9].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),
+    ], &mut ref_pool);
+    assert_values_eq(&res, &expect, 1e-20, "call in closure");
+}

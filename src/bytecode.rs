@@ -445,7 +445,26 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.append_stmt(stmt, entity);
                 }
                 let else_pos = self.ins.len();
+
                 self.ins[patch_pos] = Instruction::ConditionalJump { to: else_pos, when: false };
+            }
+            ast::Stmt::IfElse { condition, then, otherwise, .. } => {
+                self.append_expr(condition, entity);
+                let check_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+                for stmt in then {
+                    self.append_stmt(stmt, entity);
+                }
+                let jump_pos = self.ins.len();
+                self.ins.push(Instruction::Illegal);
+                let else_pos = self.ins.len();
+                for stmt in otherwise {
+                    self.append_stmt(stmt, entity);
+                }
+                let aft = self.ins.len();
+
+                self.ins[check_pos] = Instruction::ConditionalJump { to: else_pos, when: false };
+                self.ins[jump_pos] = Instruction::Jump { to: aft };
             }
             x => unimplemented!("{:?}", x),
         }
@@ -458,6 +477,8 @@ impl<'a> ByteCodeBuilder<'a> {
         self.ins.push(Instruction::Return);
     }
     fn link(mut self, locations: Locations<'a>) -> (ByteCode, Locations<'a>) {
+        assert!(self.closure_holes.is_empty());
+
         let global_fn_to_info = {
             let mut res = BTreeMap::new();
             for (func, pos) in locations.funcs.iter() {
@@ -484,23 +505,12 @@ impl<'a> ByteCodeBuilder<'a> {
             self.ins[*hole_pos] = Instruction::Call { pos, params: params.iter().map(|x| x.trans_name.clone()).collect() };
         }
 
-        while let Some((hole_pos, params, captures, stmts, entity)) = self.closure_holes.pop_front() {
-            let pos = self.ins.len();
-            self.append_stmts_ret(stmts, entity);
-            self.ins[hole_pos] = Instruction::MakeClosure {
-                pos,
-                params: params.iter().map(|s| s.trans_name.clone()).collect(),
-                captures: captures.iter().map(|s| s.trans_name.clone()).collect(),
-            };
-        }
-
         #[cfg(debug_assertions)]
         for ins in self.ins.iter() {
             if let Instruction::Illegal = ins {
                 panic!();
             }
         }
-        assert!(self.closure_holes.is_empty());
 
         (ByteCode(self.ins), locations)
     }
@@ -534,6 +544,16 @@ impl ByteCode {
             }
 
             entities.push((entity, EntityLocations { funcs, scripts }));
+        }
+
+        while let Some((hole_pos, params, captures, stmts, entity)) = code.closure_holes.pop_front() {
+            let pos = code.ins.len();
+            code.append_stmts_ret(stmts, entity);
+            code.ins[hole_pos] = Instruction::MakeClosure {
+                pos,
+                params: params.iter().map(|s| s.trans_name.clone()).collect(),
+                captures: captures.iter().map(|s| s.trans_name.clone()).collect(),
+            };
         }
 
         code.link(Locations { funcs, entities })
