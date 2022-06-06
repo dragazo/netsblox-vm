@@ -297,9 +297,9 @@ impl<T> From<T> for Shared<T> {
 
 /// Holds a collection of variables in an execution context.
 /// 
-/// `SymbolTable` has utilities to extract variables from an abstract syntax tree,
-/// or to explicitly define variables.
-/// To perform value lookups, use the higher-level utility [`LookupGroup`].
+/// `SymbolTable` has utilities to extract variables from an abstract syntax tree, or to explicitly define variables.
+/// Simple methods are provided to perform value lookups in the table.
+/// To perform hierarchical value lookups, use the higher-level utility [`LookupGroup`].
 #[derive(Default)]
 pub struct SymbolTable(BTreeMap<String, Shared<Value>>);
 impl SymbolTable {
@@ -328,6 +328,15 @@ impl SymbolTable {
     /// If a variable named `var` already existed and was [`Shared::Aliased`], its value is not modified.
     pub fn redefine_or_define(&mut self, var: &str, value: Shared<Value>) {
         self.0.insert(var.to_owned(), value);
+    }
+    /// Looks up the given variable in the symbol table.
+    /// If a variable with the given name does not exist, returns [`None`].
+    pub fn lookup(&self, var: &str) -> Option<&Shared<Value>> {
+        self.0.get(var)
+    }
+    /// Equivalent to [`SymbolTable::lookup`] except that it returns a mutable reference.
+    pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Shared<Value>> {
+        self.0.get_mut(var)
     }
     /// Iterates over the key value pairs stored in the symbol table.
     pub fn iter(&self) -> symbol_table::Iter {
@@ -369,7 +378,7 @@ impl<'a, 'b> LookupGroup<'a, 'b> {
     /// Returns a reference to the value if it is found, otherwise returns `None`.
     pub fn lookup(&self, var: &str) -> Option<&Shared<Value>> {
         for src in self.0.iter().rev() {
-            if let Some(val) = src.0.get(var) {
+            if let Some(val) = src.lookup(var) {
                 return Some(val);
             }
         }
@@ -378,7 +387,7 @@ impl<'a, 'b> LookupGroup<'a, 'b> {
     /// As [`LookupGroup::lookup`], but returns a mutable reference.
     pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Shared<Value>> {
         for src in self.0.iter_mut().rev() {
-            if let Some(val) = src.0.get_mut(var) {
+            if let Some(val) = src.lookup_mut(var) {
                 return Some(val);
             }
         }

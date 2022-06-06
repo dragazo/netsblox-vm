@@ -29,6 +29,10 @@ pub(crate) enum Instruction {
 
     /// Explicitly trigger a yield point. This instruction is otherwise a no-op.
     Yield,
+    /// Marks the start of a warp section. Note that warp sections can be nested.
+    WarpStart,
+    /// Marks the end of a warp section started by [`Instruction::WarpStart`].
+    WarpStop,
 
     /// Pushes 1 value to the value stack.
     PushValue { value: ast::Value },
@@ -306,6 +310,13 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Stmt::Return { value, .. } => {
                 self.append_expr(value, entity);
                 self.ins.push(Instruction::Return);
+            }
+            ast::Stmt::Warp { stmts, .. } => {
+                self.ins.push(Instruction::WarpStart);
+                for stmt in stmts {
+                    self.append_stmt(stmt, entity);
+                }
+                self.ins.push(Instruction::WarpStop);
             }
             ast::Stmt::InfLoop { stmts, .. } => {
                 let top = self.ins.len();

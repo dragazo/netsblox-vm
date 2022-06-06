@@ -12,7 +12,7 @@ fn get_running_proc(xml: &str, locals: SymbolTable, ref_pool: &mut RefPool) -> (
     let parser = ast::ParserBuilder::default().build().unwrap();
     let ast = parser.parse(xml).unwrap();
     let (code, locs) = ByteCode::compile(&ast.roles[0]);
-    let mut proc = Process::new(Rc::new(code), 1024);
+    let mut proc = Process::new(Rc::new(code), SettingsBuilder::default().build().unwrap());
     assert!(!proc.is_running());
 
     let main = locs.funcs.iter().find(|x| x.0.trans_name.trim() == "main").expect("no main function at global scope");
@@ -368,4 +368,25 @@ fn test_proc_call_in_closure() {
         Value::from_vec([1, 3, 5, 7, 9].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),
     ], &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-20, "call in closure");
+}
+
+#[test]
+fn test_proc_warp_yields() {
+    let mut ref_pool = RefPool::default();
+    let (mut proc, mut globals, mut fields, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = r#"<variable name="counter"><l>0</l></variable>"#,
+        fields = "",
+        funcs = include_str!("blocks/proc_warp_yields.xml"),
+        methods = "",
+    ), Default::default(), &mut ref_pool);
+
+    for (mode, (expected_counter, expected_yields)) in [(12, 12), (13, 13), (17, 0), (18, 0), (16, 0), (17, 2), (14, 0), (27, 3), (30, 7), (131, 109), (68, 23), (51, 0), (63, 14)].into_iter().enumerate() {
+        let mut locals = SymbolTable::default();
+        locals.redefine_or_define("mode", Shared::Unique((mode as f64).into()));
+        proc.initialize(main, locals);
+        let yields = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().1;
+        let counter = globals.lookup("counter").unwrap().get_clone();
+        assert_values_eq(&counter, &(expected_counter as f64).into(), 1e-20, &format!("yield test (mode {}) value", mode));
+        if yields != expected_yields { panic!("yield test (mode {}) yields - got {} expected {}", mode, yields, expected_yields) }
+    }
 }

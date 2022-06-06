@@ -1,10 +1,9 @@
 use std::prelude::v1::*;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::rc::Rc;
 use std::iter;
 
 use netsblox_ast as ast;
-use embedded_time::Clock as EmbeddedClock;
 use slotmap::SlotMap;
 
 use crate::bytecode::*;
@@ -13,6 +12,7 @@ use crate::process::*;
 
 slotmap::new_key_type! {
     struct EntityKey;
+    struct ProcessKey;
 }
 
 struct Script {
@@ -36,7 +36,7 @@ impl Script {
             self.context_queue.pop_back();
         }
     }
-    fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>, entity_context: &mut EntityContext) -> StepResult {
+    fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>, entity_context: &mut EntityContext) -> StepType {
         unimplemented!()
     }
 }
@@ -59,12 +59,12 @@ struct Entity {
     script_queue_pos: usize,
 }
 impl Entity {
-    fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>) -> StepResult {
-        if self.scripts.is_empty() { return StepResult::Yield }
+    fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>) -> StepType {
+        if self.scripts.is_empty() { return StepType::Yield }
         let res = self.scripts[self.script_queue_pos].step(global_context, &mut self.context);
         match res {
-            StepResult::Normal => (), // keep executing same script
-            StepResult::Yield => self.script_queue_pos = (self.script_queue_pos + 1) % self.scripts.len(), // yield to next script
+            StepType::Normal => (), // keep executing same script
+            StepType::Yield => self.script_queue_pos = (self.script_queue_pos + 1) % self.scripts.len(), // yield to next script
         }
         res
     }
@@ -75,19 +75,21 @@ impl Entity {
 pub enum UserInput {
     ClickStart,
 }
-struct GlobalContext<Clock> {
-    clock: Clock,
+struct GlobalContext {
     ref_pool: RefPool,
     globals: SymbolTable,
 }
-pub struct Engine<Clock> {
-    context: GlobalContext<Clock>,
+pub struct Project {
+    context: GlobalContext,
     entities: SlotMap<EntityKey, Entity>,
     entity_queue: VecDeque<EntityKey>,
+    processes: SlotMap<ProcessKey, Process>,
+    process_queue: VecDeque<ProcessKey>,
+    max_call_depth: usize,
 }
-impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
-    pub fn new(role: &ast::Role, intern: bool, clock: Clock) -> Self {
-        let mut ref_pool = RefPool::new(intern);
+impl Project {
+    pub fn new(role: &ast::Role, max_call_depth: usize) -> Self {
+        let mut ref_pool = RefPool::new();
         let mut globals = SymbolTable::default();
         for glob in role.globals.iter() {
             globals.define(glob.trans_name.clone(), Value::from_ast(&glob.value, &mut ref_pool));
@@ -108,7 +110,7 @@ impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
             for (script, loc) in iter::zip(&entity.scripts, &locs.scripts) {
                 scripts.push(Script {
                     hat: script.hat.clone(),
-                    process: Process::new(code.clone()),
+                    process: Process::new(code.clone(), max_call_depth),
                     start_pos: *loc,
                     context_queue: Default::default(),
                 })
@@ -125,8 +127,8 @@ impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
         }
 
         Self {
-            context: GlobalContext { clock, globals, ref_pool },
-            entities, entity_queue,
+            context: GlobalContext { globals, ref_pool },
+            entities, entity_queue, max_call_depth,
         }
     }
     pub fn input(&mut self, input: UserInput) {
@@ -142,7 +144,7 @@ impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
             }
         }
     }
-    pub fn step(&mut self) {
+    pub fn step(&mut self) -> StepType {
         let (key, entity) = loop {
             match self.entity_queue.pop_front() {
                 None => return,
@@ -154,8 +156,8 @@ impl<Clock: EmbeddedClock<T = u64>> Engine<Clock> {
         };
 
         match entity.step(&mut self.context) {
-            StepResult::Normal => self.entity_queue.push_front(key), // keep executing same entity
-            StepResult::Yield => self.entity_queue.push_back(key), // yield to next entity
+            StepType::Normal => self.entity_queue.push_front(key), // keep executing same entity
+            StepType::Yield => self.entity_queue.push_back(key), // yield to next entity
         }
     }
 }

@@ -6,6 +6,8 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::iter;
 
+use derive_builder::Builder;
+
 use crate::bytecode::*;
 use crate::runtime::*;
 
@@ -103,7 +105,17 @@ pub enum StepType {
 
 struct ReturnPoint {
     pos: usize,
+    warp_counter: usize,
     value_stack_size: usize,
+}
+
+#[derive(Builder)]
+#[builder(no_std)]
+#[derive(Clone, Copy)]
+pub struct Settings {
+    /// The maximum depth of the call stack (default `1024`).
+    #[builder(default = "1024")]
+    max_call_depth: usize,
 }
 
 /// A [`ByteCode`] execution primitive.
@@ -113,20 +125,21 @@ struct ReturnPoint {
 pub struct Process {
     code: Rc<ByteCode>,
     pos: usize,
+    warp_counter: usize,
     running: bool,
-    max_call_depth: usize,
+    settings: Settings,
     call_stack: Vec<(ReturnPoint, SymbolTable)>, // tuples of (ret pos, locals)
     value_stack: Vec<Value>,
 }
 impl Process {
     /// Creates a new process with the given code.
     /// The new process is initially idle; [`Process::initialize`] can be used to begin execution at a specific location (see [`Locations`]).
-    pub fn new(code: Rc<ByteCode>, max_call_depth: usize) -> Self {
+    pub fn new(code: Rc<ByteCode>, settings: Settings) -> Self {
         Self {
-            code,
+            code, settings,
             pos: 0,
+            warp_counter: 0,
             running: false,
-            max_call_depth,
             call_stack: vec![],
             value_stack: vec![],
         }
@@ -145,9 +158,10 @@ impl Process {
     /// Any previous process state is wiped when performing this action.
     pub fn initialize(&mut self, start_pos: usize, context: SymbolTable) {
         self.pos = start_pos;
+        self.warp_counter = 0;
         self.running = true;
         self.call_stack.clear();
-        self.call_stack.push((ReturnPoint { pos: usize::MAX, value_stack_size: 0 }, context));
+        self.call_stack.push((ReturnPoint { pos: usize::MAX, warp_counter: 0, value_stack_size: 0 }, context));
         self.value_stack.clear();
     }
     /// Executes a single instruction with the given execution context.
@@ -186,7 +200,15 @@ impl Process {
 
             Instruction::Yield => {
                 self.pos += 1;
-                return Ok(StepType::Yield);
+                if self.warp_counter == 0 { return Ok(StepType::Yield) }
+            }
+            Instruction::WarpStart => {
+                self.warp_counter += 1;
+                self.pos += 1;
+            }
+            Instruction::WarpStop => {
+                self.warp_counter -= 1;
+                self.pos += 1;
             }
 
             Instruction::PushValue { value } => {
@@ -330,15 +352,15 @@ impl Process {
             }
 
             Instruction::Call { pos, params } => {
-                if self.call_stack.len() >= self.max_call_depth {
-                    return Err(ExecError::CallDepthLimit { limit: self.max_call_depth, pos: self.pos });
+                if self.call_stack.len() >= self.settings.max_call_depth {
+                    return Err(ExecError::CallDepthLimit { limit: self.settings.max_call_depth, pos: self.pos });
                 }
 
                 let mut context = SymbolTable::default();
                 for var in params.iter().rev() {
                     context.redefine_or_define(var, self.value_stack.pop().unwrap().into());
                 }
-                self.call_stack.push((ReturnPoint { pos: self.pos + 1, value_stack_size: self.value_stack.len() }, context));
+                self.call_stack.push((ReturnPoint { pos: self.pos + 1, warp_counter: self.warp_counter, value_stack_size: self.value_stack.len() }, context));
                 self.pos = *pos;
             }
             Instruction::MakeClosure { pos, params, captures } => {
@@ -363,7 +385,7 @@ impl Process {
                 for var in closure.params.iter().rev() {
                     context.redefine_or_define(var, self.value_stack.pop().unwrap().into());
                 }
-                self.call_stack.push((ReturnPoint { pos: self.pos + 1, value_stack_size: self.value_stack.len() }, context));
+                self.call_stack.push((ReturnPoint { pos: self.pos + 1, warp_counter: self.warp_counter, value_stack_size: self.value_stack.len() }, context));
                 self.pos = closure.pos;
             }
             Instruction::Return => {
@@ -376,10 +398,12 @@ impl Process {
                 if self.call_stack.is_empty() {
                     debug_assert_eq!(self.value_stack.len(), 1);
                     debug_assert_eq!(return_point.pos, usize::MAX);
+                    debug_assert_eq!(return_point.warp_counter, 0);
                     debug_assert_eq!(return_point.value_stack_size, 0);
                     return Ok(StepType::Terminate(Some(self.value_stack.pop().unwrap())));
                 } else {
                     self.pos = return_point.pos;
+                    self.warp_counter = return_point.warp_counter;
                 }
             }
         }
