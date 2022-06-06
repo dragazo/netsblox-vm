@@ -25,17 +25,19 @@ fn get_running_proc(xml: &str, locals: SymbolTable, ref_pool: &mut RefPool) -> (
     (proc, globals, fields, main.1)
 }
 
-fn run_till_term(proc: &mut Process, ref_pool: &mut RefPool, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<Option<Value>, ExecError> {
+fn run_till_term(proc: &mut Process, ref_pool: &mut RefPool, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<(Option<Value>, usize), ExecError> {
     assert!(proc.is_running());
+    let mut yields = 0;
     let ret = loop {
         match proc.step(ref_pool, globals, fields)? {
             StepType::Idle => panic!(),
-            StepType::Normal | StepType::Yield => (),
+            StepType::Normal => (),
+            StepType::Yield => yields += 1,
             StepType::Terminate(e) => break e,
         }
     };
     assert!(!proc.is_running());
-    Ok(ret)
+    Ok((ret, yields))
 }
 
 fn assert_values_eq(got: &Value, expected: &Value, epsilon: f64, path: &str) {
@@ -80,7 +82,7 @@ fn test_proc_ret() {
         methods = "",
     ), SymbolTable::default(), &mut ref_pool);
 
-    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
+    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap() {
         Value::String(x) => assert_eq!(&*x, ""),
         x => panic!("{:?}", x),
     }
@@ -100,7 +102,7 @@ fn test_proc_sum_123n() {
         let mut locals = SymbolTable::default();
         locals.redefine_or_define("n", Shared::Unique(n.into()));
         proc.initialize(main, locals);
-        match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
+        match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap() {
             Value::Number(ret) => assert_eq!(ret, expect),
             x => panic!("{:?}", x),
         }
@@ -121,7 +123,7 @@ fn test_proc_recursive_factorial() {
         let mut locals = SymbolTable::default();
         locals.redefine_or_define("n", Shared::Unique(n.into()));
         proc.initialize(main, locals);
-        match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
+        match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap() {
             Value::Number(ret) => assert_eq!(ret, expect),
             x => panic!("{:?}", x),
         }
@@ -138,7 +140,7 @@ fn test_proc_loops_lists_basic() {
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let got = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let got = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap();
     let expected = Value::from_vec(vec![
         Value::from_vec([1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
         Value::from_vec([1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
@@ -177,7 +179,7 @@ fn test_proc_recursively_self_containing_lists() {
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap() {
+    match run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap() {
         Value::List(res) => {
             let res = res.upgrade().unwrap();
             let res = res.borrow();
@@ -226,7 +228,7 @@ fn test_proc_sieve_of_eratosthenes() {
         methods = "",
     ), locals, &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap();
     let expect = Value::from_vec([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-100, "primes");
 }
@@ -241,7 +243,7 @@ fn test_proc_early_return() {
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap();
     let expect = Value::from_vec([1,3].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-100, "res");
 }
@@ -256,7 +258,7 @@ fn test_proc_short_circuit() {
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap();
     let expect = Value::from_vec(vec![
         Value::from_vec(vec![Value::Bool(true), Value::String(Rc::new("xed".into()))], &mut ref_pool),
         Value::from_vec(vec![Value::Bool(false), Value::String(Rc::new("sergb".into()))], &mut ref_pool),
@@ -287,7 +289,7 @@ fn test_proc_all_arithmetic() {
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap();
     let inf = std::f64::INFINITY;
     let expect = Value::from_vec(vec![
         Value::from_vec([8.5, 2.9, -2.9, -8.5].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
@@ -330,7 +332,7 @@ fn test_proc_lambda_local_shadow_capture() {
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap();
     let expect = Value::from_vec([1.0, 0.0, 1.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-20, "local shadow capture");
 }
@@ -345,7 +347,7 @@ fn test_proc_generators_nested() {
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap();
     let expect = Value::from_vec([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-20, "nested generators");
 }
@@ -360,7 +362,7 @@ fn test_proc_call_in_closure() {
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap();
     let expect = Value::from_vec(vec![
         Value::from_vec([2, 4, 6, 8, 10].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),
         Value::from_vec([1, 3, 5, 7, 9].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),

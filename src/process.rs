@@ -37,7 +37,7 @@ pub enum ExecError {
     /// Exceeded the maximum call depth.
     /// This can be configured by [`Process::new`].
     CallDepthLimit { limit: usize, pos: usize },
-    /// Attempt to call a closure which expected `expected` arguments, but `got` arguments were supplied.
+    /// Attempt to call a closure which required `expected` arguments, but `got` arguments were supplied.
     ClosureArgCount { expected: usize, got: usize, pos: usize },
 }
 
@@ -356,7 +356,10 @@ impl Process {
                     return Err(ExecError::ClosureArgCount { expected: closure.params.len(), got: *args, pos: self.pos });
                 }
 
-                let mut context = closure.captures.alias();
+                let mut context = SymbolTable::default();
+                for (k, v) in closure.captures.iter_mut() {
+                    context.redefine_or_define(k, v.alias());
+                }
                 for var in closure.params.iter().rev() {
                     context.redefine_or_define(var, self.value_stack.pop().unwrap().into());
                 }

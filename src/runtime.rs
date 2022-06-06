@@ -48,7 +48,7 @@ pub enum ClosureConversionError {
 }
 trivial_from_impl! { ClosureConversionError: ConversionError, ClosureUpgradeError }
 
-/// A convenience trait for working with [`Value::List`] handles.
+/// A convenience trait for working with [`Value`] variants that hold a [`Weak`] pointer.
 pub trait CheckedUpgrade {
     type Success;
     type Error;
@@ -246,7 +246,7 @@ pub struct RefPool {
 
 /// Represents a shared mutable resource.
 /// 
-/// This is effectively equivalent to [`Rc<Cell<T>`] except that it performs no dynamic allocation
+/// This is effectively equivalent to [`Rc<Cell<T>>`] except that it performs no dynamic allocation
 /// for the [`Shared::Unique`] case, which is assumed to be significantly more likely than [`Shared::Aliased`].
 pub enum Shared<T> {
     /// A shared resource which has only (this) single unique handle.
@@ -256,7 +256,7 @@ pub enum Shared<T> {
 }
 impl<T> Shared<T> {
     /// Sets the value of the shared resource.
-    fn set(&mut self, value: T) {
+    pub fn set(&mut self, value: T) {
         match self {
             Shared::Unique(x) => *x = value,
             Shared::Aliased(x) => x.set(value),
@@ -323,22 +323,35 @@ impl SymbolTable {
             None => { self.0.insert(var.to_owned(), value.into()); }
         }
     }
-    /// Defines or redefines a value in the symbol table to a new instance of [`Shared::Unique`].
+    /// Defines or redefines a value in the symbol table to a new instance of [`Shared<Value>`].
     /// Note that this is not the same as [`SymbolTable::set_or_define`], which sets a value on a potentially aliased variable.
-    /// The result of this function is that `var` is always an instance of [`Shared::Unique`].
     /// If a variable named `var` already existed and was [`Shared::Aliased`], its value is not modified.
     pub fn redefine_or_define(&mut self, var: &str, value: Shared<Value>) {
         self.0.insert(var.to_owned(), value);
     }
-    /// A convenience function which is equivalent to repeated use of [`SymbolTable::redefine_or_define`] and [`Shared::alias`]
-    /// to create a new symbol table with all values aliasing the originals.
-    pub fn alias(&mut self) -> SymbolTable {
-        let mut res = SymbolTable::default();
-        for (k, v) in self.0.iter_mut() {
-            res.redefine_or_define(k, v.alias());
-        }
-        res
+    /// Iterates over the key value pairs stored in the symbol table.
+    pub fn iter(&self) -> symbol_table::Iter {
+        symbol_table::Iter(self.0.iter())
     }
+    /// Iterates over the key value pairs stored in the symbol table.
+    pub fn iter_mut(&mut self) -> symbol_table::IterMut {
+        symbol_table::IterMut(self.0.iter_mut())
+    }
+}
+impl IntoIterator for SymbolTable {
+    type Item = (String, Shared<Value>);
+    type IntoIter = symbol_table::IntoIter;
+    fn into_iter(self) -> Self::IntoIter { symbol_table::IntoIter(self.0.into_iter()) }
+}
+pub mod symbol_table {
+    //! Special types for working with a [`SymbolTable`].
+    use super::*;
+    pub struct IntoIter(pub(crate) std::collections::btree_map::IntoIter<String, Shared<Value>>);
+    pub struct Iter<'a>(pub(crate) std::collections::btree_map::Iter<'a, String, Shared<Value>>);
+    pub struct IterMut<'a>(pub(crate) std::collections::btree_map::IterMut<'a, String, Shared<Value>>);
+    impl Iterator for IntoIter { type Item = (String, Shared<Value>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
+    impl<'a> Iterator for Iter<'a> { type Item = (&'a String, &'a Shared<Value>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
+    impl<'a> Iterator for IterMut<'a> { type Item = (&'a String, &'a mut Shared<Value>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
 }
 
 /// A collection of symbol tables with hierarchical context searching.
@@ -346,10 +359,10 @@ pub struct LookupGroup<'a, 'b>(&'a mut [&'b mut SymbolTable]);
 impl<'a, 'b> LookupGroup<'a, 'b> {
     /// Creates a new lookup group.
     /// The first symbol table is intended to be the most-global, and subsequent tables are increasingly more-local.
-    /// Panics if `tabs` is empty.
-    pub(crate) fn new(tabs: &'a mut [&'b mut SymbolTable]) -> Self {
-        debug_assert!(!tabs.is_empty());
-        Self(tabs)
+    /// Panics if `tables` is empty.
+    pub fn new(tables: &'a mut [&'b mut SymbolTable]) -> Self {
+        debug_assert!(!tables.is_empty());
+        Self(tables)
     }
     /// Searches for the given variable in this group of lookup tables,
     /// starting with the last (most-local) table and working towards the first (most-global) table.
