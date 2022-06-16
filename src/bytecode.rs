@@ -9,6 +9,7 @@ use netsblox_ast as ast;
 pub(crate) enum BinaryOp {
     Add, Sub, Mul, Div, Mod, Pow, Log,
     Greater, Less,
+    SplitCustom,
 }
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum UnaryOp {
@@ -18,6 +19,9 @@ pub(crate) enum UnaryOp {
     Round, Floor, Ceil,
     Sin, Cos, Tan,
     Asin, Acos, Atan,
+    SplitLetter, SplitWord, SplitTab, SplitCR, SplitLF, SplitCsv, SplitJson,
+    Strlen,
+    UnicodeToChar, CharToUnicode,
 }
 
 #[derive(Debug)]
@@ -70,6 +74,9 @@ pub(crate) enum Instruction {
     ListLastIndex,
     /// Pops three values, `value`, `index`, and `list`, from the value stack and assigns `list[index] = value`.
     ListIndexAssign,
+
+    /// Consumes `args` values from the value stack in reverse order and concatenates them into a single string, which is then pushed onto the value stack.
+    Strcat { args: usize },
 
     /// Consumes 2 values, `b` and `a`, from the value stack, and pushes the value `f(a, b)` onto the value stack.
     BinaryOp { op: BinaryOp },
@@ -170,6 +177,9 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Round { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Round, entity),
             ast::Expr::Floor { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Floor, entity),
             ast::Expr::Ceil { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Ceil, entity),
+            ast::Expr::Strlen { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Strlen, entity),
+            ast::Expr::UnicodeToChar { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::UnicodeToChar, entity),
+            ast::Expr::CharToUnicode { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::CharToUnicode, entity),
             ast::Expr::Eq { left, right, .. } => {
                 self.append_expr(left, entity);
                 self.append_expr(right, entity);
@@ -261,6 +271,29 @@ impl<'a> ByteCodeBuilder<'a> {
                 let closure_hole_pos = self.ins.len();
                 self.ins.push(Instruction::Illegal);
                 self.closure_holes.push_back((closure_hole_pos, params, captures, stmts, entity));
+            }
+            ast::Expr::Strcat { values, .. } => {
+                for value in values {
+                    self.append_expr(value, entity);
+                }
+                self.ins.push(Instruction::Strcat { args: values.len() });
+            }
+            ast::Expr::TextSplit { text, mode, .. } => {
+                self.append_expr(text, entity);
+                let ins = match mode {
+                    ast::TextSplitMode::Letter => Instruction::UnaryOp { op: UnaryOp::SplitLetter },
+                    ast::TextSplitMode::Word => Instruction::UnaryOp { op: UnaryOp::SplitWord },
+                    ast::TextSplitMode::Tab => Instruction::UnaryOp { op: UnaryOp::SplitTab },
+                    ast::TextSplitMode::CR => Instruction::UnaryOp { op: UnaryOp::SplitCR },
+                    ast::TextSplitMode::LF => Instruction::UnaryOp { op: UnaryOp::SplitLF },
+                    ast::TextSplitMode::Csv => Instruction::UnaryOp { op: UnaryOp::SplitCsv },
+                    ast::TextSplitMode::Json => Instruction::UnaryOp { op: UnaryOp::SplitJson },
+                    ast::TextSplitMode::Custom(pattern) => {
+                        self.append_expr(pattern, entity);
+                        Instruction::BinaryOp { op: BinaryOp::SplitCustom }
+                    }
+                };
+                self.ins.push(ins);
             }
             x => unimplemented!("{:?}", x),
         }

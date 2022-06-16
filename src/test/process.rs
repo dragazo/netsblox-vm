@@ -54,7 +54,7 @@ fn assert_values_eq(got: &Value, expected: &Value, epsilon: f64, path: &str) {
             if !good { panic!("{} - number error - got {} expected {}", path, got, expected) }
         }
         (Value::String(got), Value::String(expected)) => {
-            if got != expected { panic!("{} - string error - got {} expected {}", path, got, expected) }
+            if got != expected { panic!("{} - string error - got {:?} expected {:?}", path, got, expected) }
         }
         (Value::List(got), Value::List(expected)) => {
             let got = got.upgrade().unwrap();
@@ -390,4 +390,217 @@ fn test_proc_warp_yields() {
         assert_values_eq(&counter, &(expected_counter as f64).into(), 1e-20, &format!("yield test (mode {}) value", mode));
         if yields != expected_yields { panic!("yield test (mode {}) yields - got {} expected {}", mode, yields, expected_yields) }
     }
+}
+
+#[test]
+fn test_proc_string_ops() {
+    let mut ref_pool = RefPool::default();
+    let (mut proc, mut globals, mut fields, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/proc_string_ops.xml"),
+        methods = "",
+    ), Default::default(), &mut ref_pool);
+
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut globals, &mut fields).unwrap().0.unwrap();
+    let expect = Value::from_vec(vec![
+        Value::from_string("hello 5 world".into(), &mut ref_pool, false),
+        Value::from_vec(vec![
+            Value::from_string("these".into(), &mut ref_pool, false),
+            Value::from_string("are".into(), &mut ref_pool, false),
+            Value::from_string("some".into(), &mut ref_pool, false),
+            Value::from_string("words".into(), &mut ref_pool, false),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_vec(vec![
+                Value::from_string("hello".into(), &mut ref_pool, false),
+                Value::from_string("world".into(), &mut ref_pool, false),
+            ], &mut ref_pool),
+            Value::from_vec(vec![
+                Value::from_string("he".into(), &mut ref_pool, false),
+                Value::from_string("".into(), &mut ref_pool, false),
+                Value::from_string("o wor".into(), &mut ref_pool, false),
+                Value::from_string("d".into(), &mut ref_pool, false),
+            ], &mut ref_pool),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("these".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("are".into(), &mut ref_pool, false),
+            Value::from_string("some".into(), &mut ref_pool, false),
+            Value::from_string("words".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_string(" ".into(), &mut ref_pool, false),
+            Value::from_string(" ".into(), &mut ref_pool, false),
+            Value::from_string("t".into(), &mut ref_pool, false),
+            Value::from_string("h".into(), &mut ref_pool, false),
+            Value::from_string("e".into(), &mut ref_pool, false),
+            Value::from_string("s".into(), &mut ref_pool, false),
+            Value::from_string("e".into(), &mut ref_pool, false),
+            Value::from_string(" ".into(), &mut ref_pool, false),
+            Value::from_string(" ".into(), &mut ref_pool, false),
+            Value::from_string(" ".into(), &mut ref_pool, false),
+            Value::from_string(" ".into(), &mut ref_pool, false),
+            Value::from_string("a".into(), &mut ref_pool, false),
+            Value::from_string("r".into(), &mut ref_pool, false),
+            Value::from_string("e".into(), &mut ref_pool, false),
+            Value::from_string(" ".into(), &mut ref_pool, false),
+            Value::from_string("s".into(), &mut ref_pool, false),
+            Value::from_string("o".into(), &mut ref_pool, false),
+            Value::from_string("m".into(), &mut ref_pool, false),
+            Value::from_string("e".into(), &mut ref_pool, false),
+            Value::from_string(" ".into(), &mut ref_pool, false),
+            Value::from_string("w".into(), &mut ref_pool, false),
+            Value::from_string("o".into(), &mut ref_pool, false),
+            Value::from_string("r".into(), &mut ref_pool, false),
+            Value::from_string("d".into(), &mut ref_pool, false),
+            Value::from_string("s".into(), &mut ref_pool, false),
+            Value::from_string(" ".into(), &mut ref_pool, false),
+            Value::from_string(" ".into(), &mut ref_pool, false),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_string("these".into(), &mut ref_pool, false),
+            Value::from_string("are".into(), &mut ref_pool, false),
+            Value::from_string("some".into(), &mut ref_pool, false),
+            Value::from_string("words".into(), &mut ref_pool, false),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_string("hello".into(), &mut ref_pool, false),
+            Value::from_string("world".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("lines".into(), &mut ref_pool, false),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_string("hello".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("world".into(), &mut ref_pool, false),
+            Value::from_string("test".into(), &mut ref_pool, false),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_string("hello".into(), &mut ref_pool, false),
+            Value::from_string("world".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("cr land".into(), &mut ref_pool, false),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_string("test".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("23".into(), &mut ref_pool, false),
+            Value::from_string("21".into(), &mut ref_pool, false),
+            Value::from_string("a".into(), &mut ref_pool, false),
+            Value::from_string("b".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+            Value::from_string("".into(), &mut ref_pool, false),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_vec(vec![
+                Value::from_string("test".into(), &mut ref_pool, false),
+                Value::from_string("".into(), &mut ref_pool, false),
+                Value::from_string("23".into(), &mut ref_pool, false),
+                Value::from_string("21".into(), &mut ref_pool, false),
+                Value::from_string("a".into(), &mut ref_pool, false),
+                Value::from_string("b".into(), &mut ref_pool, false),
+                Value::from_string("".into(), &mut ref_pool, false),
+                Value::from_string("".into(), &mut ref_pool, false),
+            ], &mut ref_pool),
+            Value::from_vec(vec![
+                Value::from_string("perp".into(), &mut ref_pool, false),
+                Value::from_string("".into(), &mut ref_pool, false),
+                Value::from_string("3".into(), &mut ref_pool, false),
+                Value::from_string("".into(), &mut ref_pool, false),
+                Value::from_string("44".into(), &mut ref_pool, false),
+                Value::from_string("3".into(), &mut ref_pool, false),
+                Value::from_string("2".into(), &mut ref_pool, false),
+            ], &mut ref_pool),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_vec(vec![
+                Value::from_string("a".into(), &mut ref_pool, false),
+                Value::from_vec(vec![
+                    1.0.into(),
+                    Value::from_string("a".into(), &mut ref_pool, false),
+                    Value::from_vec(vec![
+                        7.0.into(),
+                        Value::from_vec(vec![], &mut ref_pool),
+                    ], &mut ref_pool),
+                    Value::from_vec(vec![
+                        Value::from_vec(vec![
+                            Value::from_string("g".into(), &mut ref_pool, false),
+                            Value::from_string("4".into(), &mut ref_pool, false),
+                        ], &mut ref_pool),
+                        Value::from_vec(vec![
+                            Value::from_string("h".into(), &mut ref_pool, false),
+                            Value::from_vec(vec![], &mut ref_pool),
+                        ], &mut ref_pool),
+                    ], &mut ref_pool),
+                ], &mut ref_pool),
+            ], &mut ref_pool),
+            Value::from_vec(vec![
+                Value::from_string("b".into(), &mut ref_pool, false),
+                3.0.into(),
+            ], &mut ref_pool),
+            Value::from_vec(vec![
+                Value::from_string("c".into(), &mut ref_pool, false),
+                Value::from_string("hello world".into(), &mut ref_pool, false),
+            ], &mut ref_pool),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_vec(vec![
+                Value::from_string("a".into(), &mut ref_pool, false),
+                Value::from_string("b".into(), &mut ref_pool, false),
+            ], &mut ref_pool),
+            Value::from_vec(vec![
+                Value::from_string("c".into(), &mut ref_pool, false),
+                Value::from_string("d".into(), &mut ref_pool, false),
+            ], &mut ref_pool),
+            Value::from_vec(vec![
+                Value::from_string("g".into(), &mut ref_pool, false),
+            ], &mut ref_pool),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_string("L".into(), &mut ref_pool, false),
+            Value::from_vec(vec![
+                Value::from_string("M".into(), &mut ref_pool, false),
+                Value::from_string("A".into(), &mut ref_pool, false),
+                Value::from_string("f".into(), &mut ref_pool, false),
+            ], &mut ref_pool),
+            Value::from_string("f".into(), &mut ref_pool, false),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            97.0.into(),
+            Value::from_vec([97, 98, 99].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),
+            Value::from_vec(vec![
+                Value::from_vec([104, 101, 108, 108, 111].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),
+                Value::from_vec([104, 105].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),
+                106.0.into(),
+            ], &mut ref_pool),
+        ], &mut ref_pool),
+        6.0.into(),
+        5.0.into(),
+        Value::from_vec([5, 2, 1].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_string("hello".into(), &mut ref_pool, false),
+            Value::from_string("world".into(), &mut ref_pool, false),
+        ], &mut ref_pool),
+        Value::from_vec(vec![
+            Value::from_vec(vec![Value::from_string("a".into(), &mut ref_pool, false),  1.0.into()], &mut ref_pool),
+            Value::from_vec(vec![Value::from_string("b".into(), &mut ref_pool, false),  2.0.into()], &mut ref_pool),
+            Value::from_vec(vec![Value::from_string("c".into(), &mut ref_pool, false),  3.0.into()], &mut ref_pool),
+            Value::from_vec(vec![Value::from_string("d".into(), &mut ref_pool, false),  4.0.into()], &mut ref_pool),
+            Value::from_vec(vec![Value::from_string("e".into(), &mut ref_pool, false),  5.0.into()], &mut ref_pool),
+            Value::from_vec(vec![Value::from_string("f".into(), &mut ref_pool, false),  6.0.into()], &mut ref_pool),
+            Value::from_vec(vec![Value::from_string("g".into(), &mut ref_pool, false),  7.0.into()], &mut ref_pool),
+            Value::from_vec(vec![Value::from_string("h".into(), &mut ref_pool, false),  8.0.into()], &mut ref_pool),
+            Value::from_vec(vec![Value::from_string("i".into(), &mut ref_pool, false),  9.0.into()], &mut ref_pool),
+            Value::from_vec(vec![Value::from_string("j".into(), &mut ref_pool, false), 10.0.into()], &mut ref_pool),
+        ], &mut ref_pool),
+    ], &mut ref_pool);
+    assert_values_eq(&res, &expect, 1e-20, "string ops");
 }

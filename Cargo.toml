@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 no-std-compat = { version = "0.4.1", features = ["alloc"] }
 derive_builder = { version = "0.11.2", default-features = false }
-netsblox-ast = "=0.2.3"
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+netsblox-ast = "=0.2.4"
 slotmap = "1.0.6"
 libm = "0.2.2"

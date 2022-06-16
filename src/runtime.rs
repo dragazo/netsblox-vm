@@ -259,6 +259,14 @@ impl Value {
             x => return Err(ConversionError { got: x.get_type(), expected: Type::Number }),
         })
     }
+    /// Attempts to interpret this value as a string.
+    pub fn to_string(&self) -> Result<Rc<String>, ConversionError> {
+        Ok(match self {
+            Value::String(x) => x.clone(),
+            Value::Number(x) => Rc::new(x.to_string()),
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
+        })
+    }
     /// Attempts to interpret this value as a bool.
     pub fn to_bool(&self) -> Result<bool, ConversionError> {
         Ok(match self {
