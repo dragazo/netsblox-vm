@@ -41,6 +41,7 @@ pub enum ExecError {
     CallDepthLimit { limit: usize, pos: usize },
     /// Attempt to call a closure which required `expected` arguments, but `got` arguments were supplied.
     ClosureArgCount { expected: usize, got: usize, pos: usize },
+    SystemError { error: SystemError, pos: usize },
 }
 
 enum IndexError {
@@ -74,6 +75,9 @@ impl ErrAt for IndexError {
             IndexError::OutOfBounds { index, list_len } => ExecError::IndexOutOfBounds { index, list_len, pos },
         }
     }
+}
+impl ErrAt for SystemError {
+    fn err_at(self, pos: usize) -> ExecError { ExecError::SystemError { error: self, pos } }
 }
 
 macro_rules! trivial_err_at_impl {
@@ -122,7 +126,7 @@ pub struct Settings {
 /// 
 /// A `Process` is a self-contained thread of execution; it maintains its own state machine for executing instructions step by step.
 /// Global variables, entity fields, and several external features are hosted separately and passed into [`Process::step`].
-pub struct Process {
+pub struct Process<S: System> {
     code: Rc<ByteCode>,
     pos: usize,
     warp_counter: usize,
@@ -130,8 +134,9 @@ pub struct Process {
     settings: Settings,
     call_stack: Vec<(ReturnPoint, SymbolTable)>, // tuples of (ret pos, locals)
     value_stack: Vec<Value>,
+    async_req: Option<S::AsyncKey>,
 }
-impl Process {
+impl<S: System> Process<S> {
     /// Creates a new process with the given code.
     /// The new process is initially idle; [`Process::initialize`] can be used to begin execution at a specific location (see [`Locations`]).
     pub fn new(code: Rc<ByteCode>, settings: Settings) -> Self {
@@ -142,6 +147,7 @@ impl Process {
             running: false,
             call_stack: vec![],
             value_stack: vec![],
+            async_req: None,
         }
     }
     /// Checks if the process is currently running.
@@ -170,14 +176,14 @@ impl Process {
     /// 
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with `Err` or
     /// succeeding with [`StepType::Terminate`].
-    pub fn step(&mut self, ref_pool: &mut RefPool, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<StepType, ExecError> {
-        let res = self.step_impl(ref_pool, globals, fields);
+    pub fn step(&mut self, ref_pool: &mut RefPool, system: &mut S, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<StepType, ExecError> {
+        let res = self.step_impl(ref_pool, system, globals, fields);
         if let Ok(StepType::Terminate(_)) | Err(_) = res {
             self.running = false;
         }
         res
     }
-    fn step_impl(&mut self, ref_pool: &mut RefPool, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<StepType, ExecError> {
+    fn step_impl(&mut self, ref_pool: &mut RefPool, system: &mut S, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<StepType, ExecError> {
         if !self.running { return Ok(StepType::Idle); }
         let (_, locals) = self.call_stack.last_mut().unwrap();
         let mut context = [globals, fields, locals];

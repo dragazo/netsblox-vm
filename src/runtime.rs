@@ -9,6 +9,77 @@ use std::fmt;
 
 use netsblox_ast as ast;
 
+/// The result of a successful call to [`System::poll_async`].
+pub enum AsyncPoll {
+    /// The async operation completed with the given value.
+    Completed(Value),
+    /// The async operation is still pending and has not completed.
+    Pending,
+}
+
+/// Represents all the features of an implementing system.
+/// 
+/// This type encodes any features that cannot be performed without platform-specific resources.
+/// 
+/// When implementing `System` for some type, you may prefer to not support one or more features.
+/// This can be accomplished by returning the [`SystemError::NotSupported`] variant for the relevant [`SystemFeature`].
+pub trait System {
+    /// Key type used to refer to the result of an async operation.
+    type AsyncKey;
+
+    /// Polls for the completion of an async operation.
+    /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
+    fn poll_async(&mut self, key: &Self::AsyncKey) -> Result<AsyncPoll, SystemError>;
+
+    /// Gets the current time in milliseconds.
+    /// This is not required to represent the actual real-world time; e.g., this could simply measure uptime.
+    /// Subsequent values are required to be non-decreasing.
+    fn time_ms(&self) -> Result<u64, SystemError>;
+}
+/// Types of [`System`] resources, grouped into feature categories.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemFeature {
+    Time,
+}
+/// An error resulting from improper use of [`System`] resources.
+#[derive(Debug)]
+pub enum SystemError {
+    /// Attempt to use a feature which is not supported or not implemented.
+    NotSupported { feature: SystemFeature },
+    Unknown { msg: String },
+}
+
+#[cfg(any(test, feature = "std"))]
+mod std_system {
+    extern crate std as real_std;
+    use real_std::time::Instant;
+    use super::*;
+
+    /// A type implementing the [`System`] trait which supports all features.
+    /// This requires the `std` feature flag.
+    pub struct StdSystem {
+        start_time: Instant,
+    }
+    impl StdSystem {
+        pub fn new() -> Self {
+            Self {
+                start_time: Instant::now(),
+            }
+        }
+    }
+    impl System for StdSystem {
+        type AsyncKey = ();
+        fn poll_async(&mut self, _key: &Self::AsyncKey) -> Result<AsyncPoll, SystemError> {
+            unimplemented!();
+        }
+        fn time_ms(&self) -> Result<u64, SystemError> {
+            Ok(self.start_time.elapsed().as_millis() as u64)
+        }
+    }
+}
+#[cfg(any(test, feature = "std"))]
+pub use std_system::*;
+
 /// The type of a [`Value`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Type {

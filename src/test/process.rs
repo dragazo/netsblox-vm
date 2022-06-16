@@ -8,7 +8,7 @@ use crate::bytecode::*;
 use crate::runtime::*;
 use crate::process::*;
 
-fn get_running_proc(xml: &str, locals: SymbolTable, ref_pool: &mut RefPool) -> (Process, SymbolTable, SymbolTable, usize) {
+fn get_running_proc(xml: &str, locals: SymbolTable, ref_pool: &mut RefPool) -> (Process<StdSystem>, SymbolTable, SymbolTable, usize) {
     let parser = ast::ParserBuilder::default().build().unwrap();
     let ast = parser.parse(xml).unwrap();
     let (code, locs) = ByteCode::compile(&ast.roles[0]);
@@ -25,11 +25,12 @@ fn get_running_proc(xml: &str, locals: SymbolTable, ref_pool: &mut RefPool) -> (
     (proc, globals, fields, main.1)
 }
 
-fn run_till_term(proc: &mut Process, ref_pool: &mut RefPool, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<(Option<Value>, usize), ExecError> {
+fn run_till_term(proc: &mut Process<StdSystem>, ref_pool: &mut RefPool, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<(Option<Value>, usize), ExecError> {
     assert!(proc.is_running());
     let mut yields = 0;
+    let mut system = StdSystem::new();
     let ret = loop {
-        match proc.step(ref_pool, globals, fields)? {
+        match proc.step(ref_pool, &mut system, globals, fields)? {
             StepType::Idle => panic!(),
             StepType::Normal => (),
             StepType::Yield => yields += 1,
