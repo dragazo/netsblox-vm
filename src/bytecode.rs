@@ -13,7 +13,7 @@ pub(crate) enum BinaryOp {
 }
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum UnaryOp {
-    ToBool,
+    ToBool, Not,
     Abs, Neg,
     Sqrt,
     Round, Floor, Ceil,
@@ -177,6 +177,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Round { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Round, entity),
             ast::Expr::Floor { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Floor, entity),
             ast::Expr::Ceil { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Ceil, entity),
+            ast::Expr::Not { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Not, entity),
             ast::Expr::Strlen { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Strlen, entity),
             ast::Expr::UnicodeToChar { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::UnicodeToChar, entity),
             ast::Expr::CharToUnicode { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::CharToUnicode, entity),

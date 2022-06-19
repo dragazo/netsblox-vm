@@ -83,7 +83,7 @@ pub use std_system::*;
 /// The type of a [`Value`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Type {
-    Bool, Number, String, List, Closure,
+    Bool, Number, String, List, Closure, Entity,
 }
 
 /// A type conversion error on a [`Value`].
@@ -156,6 +156,23 @@ impl fmt::Debug for Closure {
     }
 }
 
+/// Global information about the execution state of an entire project.
+pub struct ProjectInfo {
+    pub name: String,
+    pub globals: SymbolTable,
+}
+
+/// Information about an entity (sprite or stage).
+pub struct Entity {
+    pub name: String,
+    pub fields: RefCell<SymbolTable>,
+}
+impl fmt::Debug for Entity {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[Entity {}]", self.name)
+    }
+}
+
 /// Any primitive value.
 /// 
 /// This type implements [`Clone`] but not [`Copy`]; however, cloning a `Value` is guaranteed to be nearly-trivial
@@ -179,7 +196,10 @@ pub enum Value {
     /// This contains information about the closure's bytecode location, parameters, and captures from the parent scope.
     /// This must be held by weak reference to avoid creating cycles due to captures.
     Closure(Weak<RefCell<Closure>>),
-
+    /// A reference to an [`Entity`] in the environment.
+    /// This is intended to be a valid (upgradeable) shared reference to a living entity,
+    /// or an invalid (non-upgradeable) shared reference to a dead entity.
+    Entity(Weak<Entity>),
 }
 impl Value {
     /// Creates a new value from an abstract syntax tree value.
@@ -236,6 +256,7 @@ impl Value {
             Value::String(x) => &**x as *const String as *const (),
             Value::List(x) => x.as_ptr() as *const Vec<Value> as *const (),
             Value::Closure(x) => x.as_ptr() as *const Closure as *const (),
+            Value::Entity(x) => x.as_ptr() as *const Entity as *const (),
         }
     }
     /// Gets the type of value that is stored.
@@ -246,6 +267,7 @@ impl Value {
             Value::String(_) => Type::String,
             Value::List(_) => Type::List,
             Value::Closure(_) => Type::Closure,
+            Value::Entity(_) => Type::Entity,
         }
     }
     /// Attempts to interpret this value as a number.
@@ -302,6 +324,7 @@ impl Value {
             Value::String(x) => Value::String(x.clone()),
             Value::List(x) => Value::from_vec(x.checked_upgrade()?.borrow().to_owned(), ref_pool),
             Value::Closure(x) => Value::Closure(x.clone()),
+            Value::Entity(x) => Value::Entity(x.clone()),
         })
     }
 }

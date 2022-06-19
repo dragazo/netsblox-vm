@@ -203,17 +203,18 @@ impl<S: System> Process<S> {
     /// 
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with `Err` or
     /// succeeding with [`StepType::Terminate`].
-    pub fn step(&mut self, ref_pool: &mut RefPool, system: &mut S, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<StepType, ExecError> {
-        let res = self.step_impl(ref_pool, system, globals, fields);
+    pub fn step(&mut self, ref_pool: &mut RefPool, system: &mut S, project: &mut ProjectInfo, entity: &Entity) -> Result<StepType, ExecError> {
+        let res = self.step_impl(ref_pool, system, project, entity);
         if let Ok(StepType::Terminate(_)) | Err(_) = res {
             self.running = false;
         }
         res
     }
-    fn step_impl(&mut self, ref_pool: &mut RefPool, system: &mut S, globals: &mut SymbolTable, fields: &mut SymbolTable) -> Result<StepType, ExecError> {
+    fn step_impl(&mut self, ref_pool: &mut RefPool, system: &mut S, project: &mut ProjectInfo, entity: &Entity) -> Result<StepType, ExecError> {
         if !self.running { return Ok(StepType::Idle); }
         let (_, locals) = self.call_stack.last_mut().unwrap();
-        let mut context = [globals, fields, locals];
+        let mut fields = entity.fields.borrow_mut();
+        let mut context = [&mut project.globals, &mut *fields, locals];
         let mut context = LookupGroup::new(&mut context);
 
         macro_rules! lookup_var {
@@ -597,6 +598,7 @@ mod ops {
     pub(super) fn unary_op(x: &Value, ref_pool: &mut RefPool, op: UnaryOp) -> Result<Value, OpError> {
         match op {
             UnaryOp::ToBool => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(x.to_bool()?.into())),
+            UnaryOp::Not    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok((!x.to_bool()?).into())),
             UnaryOp::Abs    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::fabs(x.to_number()?).into())),
             UnaryOp::Neg    => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok((-x.to_number()?).into())),
             UnaryOp::Sqrt   => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok(libm::sqrt(x.to_number()?).into())),
@@ -676,19 +678,17 @@ mod ops {
 
         Ok(match (a, b) {
             (Value::Bool(a), Value::Bool(b)) => *a == *b,
-            (Value::Bool(_), _) => false,
-            (_, Value::Bool(_)) => false,
+            (Value::Bool(_), _) | (_, Value::Bool(_)) => false,
 
             (Value::Number(a), Value::Number(b)) => *a == *b,
-            (Value::String(a), Value::String(b)) => *a == *b,
+            (Value::String(a), Value::String(b)) => a.to_lowercase() == b.to_lowercase(),
             (Value::Number(n), Value::String(s)) | (Value::String(s), Value::Number(n)) => match s.parse::<f64>() {
                 Ok(s) => s == *n,
                 Err(_) => **s == n.to_string(),
             }
 
             (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),
-            (Value::Closure(_), _) => false,
-            (_, Value::Closure(_)) => false,
+            (Value::Closure(_), _) | (_, Value::Closure(_)) => false,
 
             (Value::List(a), Value::List(b)) => {
                 let (a, b) = (a.checked_upgrade()?, b.checked_upgrade()?);
@@ -699,8 +699,10 @@ mod ops {
                 }
                 true
             }
-            (Value::List(_), _) => false,
-            (_, Value::List(_)) => false,
+            (Value::List(_), _) | (_, Value::List(_)) => false,
+
+            (Value::Entity(a), Value::Entity(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Entity(_), _) | (_, Value::Entity(_)) => false,
         })
     }
     pub(super) fn check_eq(a: &Value, b: &Value) -> Result<bool, ListUpgradeError> {
