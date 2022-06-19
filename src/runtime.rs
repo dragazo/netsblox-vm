@@ -7,6 +7,13 @@ use std::rc::{Rc, Weak};
 use std::mem;
 use std::fmt;
 
+use slotmap::SlotMap;
+
+slotmap::new_key_type! {
+    /// A key to an entity stored in [`ProjectInfo`]
+    pub struct EntityKey;
+}
+
 use netsblox_ast as ast;
 
 /// The result of a successful call to [`System::poll_async`].
@@ -160,6 +167,23 @@ impl fmt::Debug for Closure {
 pub struct ProjectInfo {
     pub name: String,
     pub globals: SymbolTable,
+    pub entities: SlotMap<EntityKey, Entity>,
+}
+impl ProjectInfo {
+    pub fn from_role(role: &ast::Role, ref_pool: &mut RefPool) -> Self {
+        let mut entities = SlotMap::default();
+        for entity in role.entities.iter() {
+            entities.insert(Entity {
+                name: entity.trans_name.clone(),
+                fields: RefCell::new(SymbolTable::from_fields(entity, ref_pool)),
+            });
+        }
+        Self {
+            name: role.name.clone(),
+            globals: SymbolTable::from_globals(role, ref_pool),
+            entities,
+        }
+    }
 }
 
 /// Information about an entity (sprite or stage).
@@ -171,6 +195,23 @@ impl fmt::Debug for Entity {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[Entity {}]", self.name)
     }
+}
+
+/// A value representing the identity of a [`Value`].
+#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq,)]
+pub struct Identity(RawIdentity);
+impl Identity {
+    fn from_ptr(ptr: *const ()) -> Self {
+        Self(RawIdentity::Pointer(ptr))
+    }
+    fn from_entity(entity: EntityKey) -> Self {
+        Self(RawIdentity::Entity(entity))
+    }
+}
+#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq,)]
+enum RawIdentity {
+    Pointer(*const ()),
+    Entity(EntityKey),
 }
 
 /// Any primitive value.
@@ -196,10 +237,9 @@ pub enum Value {
     /// This contains information about the closure's bytecode location, parameters, and captures from the parent scope.
     /// This must be held by weak reference to avoid creating cycles due to captures.
     Closure(Weak<RefCell<Closure>>),
-    /// A reference to an [`Entity`] in the environment.
-    /// This is intended to be a valid (upgradeable) shared reference to a living entity,
-    /// or an invalid (non-upgradeable) shared reference to a dead entity.
-    Entity(Weak<Entity>),
+    /// A reference to an [`Entity`] in the environment - see [`ProjectInfo::entities`].
+    /// This is intended to be a valid key to a living entity, or an invalid key to a dead entity.
+    Entity(EntityKey),
 }
 impl Value {
     /// Creates a new value from an abstract syntax tree value.
@@ -247,16 +287,17 @@ impl Value {
         ref_pool.string_pool.push(Rc::downgrade(&rc));
         Value::String(rc)
     }
-    /// Returns a pointer to the underlying allocated memory for this value.
-    /// This is meant only for checking reference equality of values (e.g., of lists/strings), and the result should never be dereferenced.
-    pub fn alloc_ptr(&self) -> *const () {
+    /// Returns a value representing this object that implements [`Eq`] such that
+    /// two values are equal if and only if they are references to the same object.
+    /// This is primarily useful for testing for reference equality of lists.
+    pub fn identity(&self) -> Identity {
         match self {
-            Value::Bool(x) => &*x as *const bool as *const (),
-            Value::Number(x) => &*x as *const f64 as *const (),
-            Value::String(x) => &**x as *const String as *const (),
-            Value::List(x) => x.as_ptr() as *const Vec<Value> as *const (),
-            Value::Closure(x) => x.as_ptr() as *const Closure as *const (),
-            Value::Entity(x) => x.as_ptr() as *const Entity as *const (),
+            Value::Bool(x) => Identity::from_ptr(&*x as *const bool as *const ()),
+            Value::Number(x) => Identity::from_ptr(&*x as *const f64 as *const ()),
+            Value::String(x) => Identity::from_ptr(&**x as *const String as *const ()),
+            Value::List(x) => Identity::from_ptr(x.as_ptr() as *const Vec<Value> as *const ()),
+            Value::Closure(x) => Identity::from_ptr(x.as_ptr() as *const Closure as *const ()),
+            Value::Entity(x) => Identity::from_entity(*x),
         }
     }
     /// Gets the type of value that is stored.

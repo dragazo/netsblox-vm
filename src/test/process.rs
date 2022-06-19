@@ -1,5 +1,4 @@
 use std::prelude::v1::*;
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::iter;
 
@@ -9,9 +8,11 @@ use crate::bytecode::*;
 use crate::runtime::*;
 use crate::process::*;
 
-fn get_running_proc(xml: &str, locals: SymbolTable, ref_pool: &mut RefPool) -> (Process<StdSystem>, ProjectInfo, Entity, usize) {
+fn get_running_proc(xml: &str, locals: SymbolTable, ref_pool: &mut RefPool) -> (Process<StdSystem>, ProjectInfo, usize) {
     let parser = ast::ParserBuilder::default().build().unwrap();
     let ast = parser.parse(xml).unwrap();
+    assert_eq!(ast.roles.len(), 1);
+
     let (code, locs) = ByteCode::compile(&ast.roles[0]);
     let mut proc = Process::new(Rc::new(code), SettingsBuilder::default().build().unwrap());
     assert!(!proc.is_running());
@@ -20,19 +21,15 @@ fn get_running_proc(xml: &str, locals: SymbolTable, ref_pool: &mut RefPool) -> (
     proc.initialize(main.1, locals);
     assert!(proc.is_running());
 
-    let proj = ProjectInfo {
-        name: "test case".into(),
-        globals: SymbolTable::from_globals(&ast.roles[0], ref_pool),
-    };
-    let entity = Entity {
-        name: "test sprite".into(),
-        fields: RefCell::new(SymbolTable::from_fields(&ast.roles[0].entities[0], ref_pool)),
-    };
+    let proj = ProjectInfo::from_role(&ast.roles[0], ref_pool);
 
-    (proc, proj, entity, main.1)
+    (proc, proj, main.1)
 }
 
-fn run_till_term(proc: &mut Process<StdSystem>, ref_pool: &mut RefPool, project: &mut ProjectInfo, entity: &Entity) -> Result<(Option<Value>, usize), ExecError> {
+fn run_till_term(proc: &mut Process<StdSystem>, ref_pool: &mut RefPool, project: &mut ProjectInfo) -> Result<(Option<Value>, usize), ExecError> {
+    assert_eq!(project.entities.len(), 1);
+    let entity = project.entities.keys().next().unwrap();
+
     assert!(proc.is_running());
     let mut yields = 0;
     let mut system = StdSystem::new();
@@ -83,14 +80,14 @@ fn assert_values_eq(got: &Value, expected: &Value, epsilon: f64, path: &str) {
 #[test]
 fn test_proc_ret() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_ret.xml"),
         methods = "",
     ), SymbolTable::default(), &mut ref_pool);
 
-    match run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap() {
+    match run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap() {
         Value::String(x) => assert_eq!(&*x, ""),
         x => panic!("{:?}", x),
     }
@@ -99,7 +96,7 @@ fn test_proc_ret() {
 #[test]
 fn test_proc_sum_123n() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_sum_123n.xml"),
@@ -110,7 +107,7 @@ fn test_proc_sum_123n() {
         let mut locals = SymbolTable::default();
         locals.redefine_or_define("n", Shared::Unique(n.into()));
         proc.initialize(main, locals);
-        match run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap() {
+        match run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap() {
             Value::Number(ret) => assert_eq!(ret, expect),
             x => panic!("{:?}", x),
         }
@@ -120,7 +117,7 @@ fn test_proc_sum_123n() {
 #[test]
 fn test_proc_recursive_factorial() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_recursive_factorial.xml"),
@@ -131,7 +128,7 @@ fn test_proc_recursive_factorial() {
         let mut locals = SymbolTable::default();
         locals.redefine_or_define("n", Shared::Unique(n.into()));
         proc.initialize(main, locals);
-        match run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap() {
+        match run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap() {
             Value::Number(ret) => assert_eq!(ret, expect),
             x => panic!("{:?}", x),
         }
@@ -141,14 +138,14 @@ fn test_proc_recursive_factorial() {
 #[test]
 fn test_proc_loops_lists_basic() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_loops_lists_basic.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let got = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap();
+    let got = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap();
     let expected = Value::from_vec(vec![
         Value::from_vec([1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
         Value::from_vec([1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0].into_iter().map(|v| v.into()).collect(), &mut ref_pool),
@@ -180,14 +177,14 @@ fn test_proc_loops_lists_basic() {
 #[test]
 fn test_proc_recursively_self_containing_lists() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_recursively_self_containing_lists.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    match run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap() {
+    match run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap() {
         Value::List(res) => {
             let res = res.upgrade().unwrap();
             let res = res.borrow();
@@ -209,7 +206,7 @@ fn test_proc_recursively_self_containing_lists() {
                             }
                             x => panic!("{} - not a list - got {:?}", name, x.get_type()),
                         }
-                        assert_eq!(orig_got.alloc_ptr(), got[10].alloc_ptr());
+                        assert_eq!(orig_got.identity(), got[10].identity());
                     }
                     x => panic!("{} - not a list - got {:?}", name, x.get_type()),
                 }
@@ -229,14 +226,14 @@ fn test_proc_sieve_of_eratosthenes() {
     let mut ref_pool = RefPool::default();
     let mut locals = SymbolTable::default();
     locals.redefine_or_define("n", Shared::Unique(100.0.into()));
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_sieve_of_eratosthenes.xml"),
         methods = "",
     ), locals, &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap();
     let expect = Value::from_vec([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-100, "primes");
 }
@@ -244,14 +241,14 @@ fn test_proc_sieve_of_eratosthenes() {
 #[test]
 fn test_proc_early_return() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_early_return.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap();
     let expect = Value::from_vec([1,3].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-100, "res");
 }
@@ -259,14 +256,14 @@ fn test_proc_early_return() {
 #[test]
 fn test_proc_short_circuit() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_short_circuit.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap();
     let expect = Value::from_vec(vec![
         Value::from_vec(vec![Value::Bool(true), Value::String(Rc::new("xed".into()))], &mut ref_pool),
         Value::from_vec(vec![Value::Bool(false), Value::String(Rc::new("sergb".into()))], &mut ref_pool),
@@ -290,14 +287,14 @@ fn test_proc_short_circuit() {
 #[test]
 fn test_proc_all_arithmetic() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_all_arithmetic.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap();
     let inf = std::f64::INFINITY;
     let expect = Value::from_vec(vec![
         Value::from_vec([8.5, 2.9, -2.9, -8.5].into_iter().map(|x| x.into()).collect(), &mut ref_pool),
@@ -333,14 +330,14 @@ fn test_proc_all_arithmetic() {
 #[test]
 fn test_proc_lambda_local_shadow_capture() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_lambda_local_shadow_capture.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap();
     let expect = Value::from_vec([1.0, 0.0, 1.0].into_iter().map(|x| x.into()).collect(), &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-20, "local shadow capture");
 }
@@ -348,14 +345,14 @@ fn test_proc_lambda_local_shadow_capture() {
 #[test]
 fn test_proc_generators_nested() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_generators_nested.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap();
     let expect = Value::from_vec([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool);
     assert_values_eq(&res, &expect, 1e-20, "nested generators");
 }
@@ -363,14 +360,14 @@ fn test_proc_generators_nested() {
 #[test]
 fn test_proc_call_in_closure() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_call_in_closure.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap();
     let expect = Value::from_vec(vec![
         Value::from_vec([2, 4, 6, 8, 10].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),
         Value::from_vec([1, 3, 5, 7, 9].into_iter().map(|x| (x as f64).into()).collect(), &mut ref_pool),
@@ -381,7 +378,7 @@ fn test_proc_call_in_closure() {
 #[test]
 fn test_proc_warp_yields() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, main) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="counter"><l>0</l></variable>"#,
         fields = "",
         funcs = include_str!("blocks/proc_warp_yields.xml"),
@@ -392,7 +389,7 @@ fn test_proc_warp_yields() {
         let mut locals = SymbolTable::default();
         locals.redefine_or_define("mode", Shared::Unique((mode as f64).into()));
         proc.initialize(main, locals);
-        let yields = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().1;
+        let yields = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().1;
         let counter = project.globals.lookup("counter").unwrap().get_clone();
         assert_values_eq(&counter, &(expected_counter as f64).into(), 1e-20, &format!("yield test (mode {}) value", mode));
         if yields != expected_yields { panic!("yield test (mode {}) yields - got {} expected {}", mode, yields, expected_yields) }
@@ -402,14 +399,14 @@ fn test_proc_warp_yields() {
 #[test]
 fn test_proc_string_ops() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_string_ops.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap();
     let expect = Value::from_vec(vec![
         Value::from_string("hello 5 world".into(), &mut ref_pool, false),
         Value::from_vec(vec![
@@ -615,14 +612,14 @@ fn test_proc_string_ops() {
 #[test]
 fn test_proc_str_cmp_case_insensitive() {
     let mut ref_pool = RefPool::default();
-    let (mut proc, mut project, entity, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut proc, mut project, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/proc_str_cmp_case_insensitive.xml"),
         methods = "",
     ), Default::default(), &mut ref_pool);
 
-    let res = run_till_term(&mut proc, &mut ref_pool, &mut project, &entity).unwrap().0.unwrap();
+    let res = run_till_term(&mut proc, &mut ref_pool, &mut project).unwrap().0.unwrap();
     let expect = Value::from_vec(vec![
         false.into(), true.into(), true.into(), true.into(), false.into(),
         Value::from_vec(vec![

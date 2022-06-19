@@ -52,6 +52,8 @@ pub enum ExecError {
     JsonHadBadNumber { value: Rc<String>, pos: usize },
     /// Attempt to interpret an invalid unicode code point (number) as a character.
     InvalidUnicode { value: f64, pos: usize },
+    /// Attempt to execute a process on a dead entity.
+    DeadEntity { entity: EntityKey },
 }
 
 enum IndexError {
@@ -203,17 +205,23 @@ impl<S: System> Process<S> {
     /// 
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with `Err` or
     /// succeeding with [`StepType::Terminate`].
-    pub fn step(&mut self, ref_pool: &mut RefPool, system: &mut S, project: &mut ProjectInfo, entity: &Entity) -> Result<StepType, ExecError> {
+    pub fn step(&mut self, ref_pool: &mut RefPool, system: &mut S, project: &mut ProjectInfo, entity: EntityKey) -> Result<StepType, ExecError> {
         let res = self.step_impl(ref_pool, system, project, entity);
         if let Ok(StepType::Terminate(_)) | Err(_) = res {
             self.running = false;
         }
         res
     }
-    fn step_impl(&mut self, ref_pool: &mut RefPool, system: &mut S, project: &mut ProjectInfo, entity: &Entity) -> Result<StepType, ExecError> {
+    fn step_impl(&mut self, ref_pool: &mut RefPool, system: &mut S, project: &mut ProjectInfo, entity: EntityKey) -> Result<StepType, ExecError> {
         if !self.running { return Ok(StepType::Idle); }
+
+        let entity_ref = match project.entities.get(entity) {
+            Some(x) => x,
+            None => return Err(ExecError::DeadEntity { entity }),
+        };
+
         let (_, locals) = self.call_stack.last_mut().unwrap();
-        let mut fields = entity.fields.borrow_mut();
+        let mut fields = entity_ref.fields.borrow_mut();
         let mut context = [&mut project.globals, &mut *fields, locals];
         let mut context = LookupGroup::new(&mut context);
 
@@ -508,8 +516,8 @@ mod ops {
 
     const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 
-    fn binary_op_impl(a: &Value, b: &Value, matrix_mode: bool, cache: &mut BTreeMap<(*const (), *const (), bool), Value>, ref_pool: &mut RefPool, scalar_op: fn(&Value, &Value, &mut RefPool) -> Result<Value, OpError>) -> Result<Value, OpError> {
-        let cache_key = (a.alloc_ptr(), b.alloc_ptr(), matrix_mode);
+    fn binary_op_impl(a: &Value, b: &Value, matrix_mode: bool, cache: &mut BTreeMap<(Identity, Identity, bool), Value>, ref_pool: &mut RefPool, scalar_op: fn(&Value, &Value, &mut RefPool) -> Result<Value, OpError>) -> Result<Value, OpError> {
+        let cache_key = (a.identity(), b.identity(), matrix_mode);
         Ok(match cache.get(&cache_key) {
             Some(x) => x.clone(),
             None => {
@@ -575,8 +583,8 @@ mod ops {
         }
     }
 
-    fn unary_op_impl(x: &Value, cache: &mut BTreeMap<*const (), Value>, ref_pool: &mut RefPool, scalar_op: &dyn Fn(&Value, &mut RefPool) -> Result<Value, OpError>) -> Result<Value, OpError> {
-        let cache_key = x.alloc_ptr();
+    fn unary_op_impl(x: &Value, cache: &mut BTreeMap<Identity, Value>, ref_pool: &mut RefPool, scalar_op: &dyn Fn(&Value, &mut RefPool) -> Result<Value, OpError>) -> Result<Value, OpError> {
+        let cache_key = x.identity();
         Ok(match cache.get(&cache_key) {
             Some(x) => x.clone(),
             None => match as_list(x)? {
@@ -672,9 +680,9 @@ mod ops {
         unary_op_impl(index, &mut Default::default(), ref_pool, &|x, _| Ok(list[prep_list_index(x, list.len())?].clone()))
     }
 
-    fn check_eq_impl(a: &Value, b: &Value, cache: &mut BTreeSet<(*const (), *const ())>) -> Result<bool, ListUpgradeError> {
+    fn check_eq_impl(a: &Value, b: &Value, cache: &mut BTreeSet<(Identity, Identity)>) -> Result<bool, ListUpgradeError> {
         // if already cached, that cmp handles overall check, so no-op with true (if we ever get a false, the whole thing is false)
-        if !cache.insert((a.alloc_ptr(), b.alloc_ptr())) { return Ok(true) }
+        if !cache.insert((a.identity(), b.identity())) { return Ok(true) }
 
         Ok(match (a, b) {
             (Value::Bool(a), Value::Bool(b)) => *a == *b,
@@ -701,7 +709,7 @@ mod ops {
             }
             (Value::List(_), _) | (_, Value::List(_)) => false,
 
-            (Value::Entity(a), Value::Entity(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Entity(a), Value::Entity(b)) => a == b,
             (Value::Entity(_), _) | (_, Value::Entity(_)) => false,
         })
     }

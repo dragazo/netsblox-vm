@@ -1,6 +1,6 @@
 use std::prelude::v1::*;
 use std::collections::VecDeque;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::iter;
 
 use netsblox_ast as ast;
@@ -15,15 +15,19 @@ slotmap::new_key_type! {
     struct ProcessKey;
 }
 
-struct Script {
+pub enum UserInput {
+    ClickStart,
+}
+
+struct Script<S: System> {
     hat: Option<ast::Hat>,
-    process: Process,
+    process: Process<S>,
     start_pos: usize,
     context_queue: VecDeque<SymbolTable>,
 }
-impl Script {
+impl<S: System> Script<S> {
     fn consume_context(&mut self) {
-        if self.process.state != ProcessState::Running {
+        if !self.process.is_running() {
             if let Some(context) = self.context_queue.pop_front() {
                 self.process.initialize(self.start_pos, context);
             }
@@ -36,75 +40,33 @@ impl Script {
             self.context_queue.pop_back();
         }
     }
-    fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>, entity_context: &mut EntityContext) -> StepType {
-        unimplemented!()
+    fn step(&mut self, ref_pool: &mut RefPool, system: &mut S, project: &mut ProjectInfo) -> StepType {
+        self.consume_context();
+        self.process.step(ref_pool, system, project, &*self.entity.upgrade().unwrap())
     }
 }
 
-// -----------------------------------------------------------------
-
-#[derive(PartialEq, Eq)]
-enum EntityKind {
-    Stage,
-    Original,
-    Clone,
-}
-struct EntityContext {
-    fields: SymbolTable,
-    kind: EntityKind,
-}
-struct Entity {
-    context: EntityContext,
-    scripts: Vec<Script>,
-    script_queue_pos: usize,
-}
-impl Entity {
-    fn step<Clock>(&mut self, global_context: &mut GlobalContext<Clock>) -> StepType {
-        if self.scripts.is_empty() { return StepType::Yield }
-        let res = self.scripts[self.script_queue_pos].step(global_context, &mut self.context);
-        match res {
-            StepType::Normal => (), // keep executing same script
-            StepType::Yield => self.script_queue_pos = (self.script_queue_pos + 1) % self.scripts.len(), // yield to next script
-        }
-        res
-    }
-}
-
-// -----------------------------------------------------------------
-
-pub enum UserInput {
-    ClickStart,
-}
-struct GlobalContext {
+pub struct Project<S: System> {
+    context: ProjectInfo,
     ref_pool: RefPool,
-    globals: SymbolTable,
-}
-pub struct Project {
-    context: GlobalContext,
-    entities: SlotMap<EntityKey, Entity>,
+    entities: SlotMap<EntityKey, Rc<Entity>>,
     entity_queue: VecDeque<EntityKey>,
-    processes: SlotMap<ProcessKey, Process>,
+    processes: SlotMap<ProcessKey, Process<S>>,
     process_queue: VecDeque<ProcessKey>,
     max_call_depth: usize,
 }
-impl Project {
+impl<S: System> Project<S> {
     pub fn new(role: &ast::Role, max_call_depth: usize) -> Self {
-        let mut ref_pool = RefPool::new();
-        let mut globals = SymbolTable::default();
-        for glob in role.globals.iter() {
-            globals.define(glob.trans_name.clone(), Value::from_ast(&glob.value, &mut ref_pool));
-        }
+        let mut ref_pool = RefPool::default();
+        let globals = SymbolTable::from_globals(role, &mut ref_pool);
 
         let (code, locations) = ByteCode::compile(role);
         let code = Rc::new(code);
 
         let mut entities: SlotMap<EntityKey, _> = Default::default();
-        let mut entity_queue = VecDeque::with_capacity(role.sprites.len());
-        for (i, (entity, locs)) in iter::zip(&role.sprites, &locations.entities).enumerate() {
-            let mut fields = SymbolTable::default();
-            for field in entity.fields.iter() {
-                fields.define(field.trans_name.clone(), Value::from_ast(&field.value, &mut ref_pool));
-            }
+        let mut entity_queue = VecDeque::with_capacity(role.entities.len());
+        for (i, (entity, locs)) in iter::zip(&role.entities, &locations.entities).enumerate() {
+            let fields = SymbolTable::from_fields(entity, &mut ref_pool);
 
             let mut scripts = Vec::with_capacity(entity.scripts.len());
             for (script, loc) in iter::zip(&entity.scripts, &locs.scripts) {
@@ -116,19 +78,14 @@ impl Project {
                 })
             }
 
-            entity_queue.push_back(entities.insert(Entity {
-                context: EntityContext {
-                    fields,
-                    kind: if i == 0 { EntityKind::Stage } else { EntityKind::Original },
-                },
-                scripts,
-                script_queue_pos: 0
-            }));
+            entity_queue.push_back(entities.insert(Rc::new(Entity {
+
+            })));
         }
 
         Self {
-            context: GlobalContext { globals, ref_pool },
-            entities, entity_queue, max_call_depth,
+            context: ProjectInfo { name: role.name.into(), globals },
+            ref_pool, entities, entity_queue, max_call_depth,
         }
     }
     pub fn input(&mut self, input: UserInput) {
