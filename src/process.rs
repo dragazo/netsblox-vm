@@ -151,6 +151,11 @@ pub struct Settings {
     max_call_depth: usize,
 }
 
+struct AsyncReq<S: System> {
+    key: S::AsyncKey,
+    aft_pos: usize,
+}
+
 /// A [`ByteCode`] execution primitive.
 /// 
 /// A [`Process`] is a self-contained thread of execution; it maintains its own state machine for executing instructions step by step.
@@ -164,7 +169,7 @@ pub struct Process<S: System> {
     warp_counter: usize,
     call_stack: Vec<(ReturnPoint, SymbolTable)>, // tuples of (ret pos, locals)
     value_stack: Vec<Value>,
-    async_req: Option<S::AsyncKey>,
+    async_req: Option<AsyncReq<S>>,
 }
 impl<S: System> Process<S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity`.
@@ -210,6 +215,17 @@ impl<S: System> Process<S> {
         res
     }
     fn step_impl(&mut self, project: &mut ProjectInfo, system: &mut S) -> Result<StepType, ExecError> {
+        if let Some(async_req) = &self.async_req {
+            match system.poll_async(&async_req.key).map_err(|e| e.err_at(self.pos))? {
+                AsyncPoll::Completed(x) => {
+                    self.value_stack.push(x);
+                    self.pos = async_req.aft_pos;
+                    self.async_req = None;
+                }
+                AsyncPoll::Pending => return Ok(StepType::Yield),
+            }
+        }
+
         let entity = match project.entities.get(self.entity) {
             Some(x) => x,
             None => return Ok(StepType::Terminate(None)),
