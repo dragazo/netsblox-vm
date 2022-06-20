@@ -10,7 +10,7 @@ use std::fmt;
 use slotmap::SlotMap;
 
 slotmap::new_key_type! {
-    /// A key to an entity stored in [`ProjectInfo`]
+    /// A key to an [`Entity`] stored in [`ProjectInfo`].
     pub struct EntityKey;
 }
 
@@ -28,7 +28,7 @@ pub enum AsyncPoll {
 /// 
 /// This type encodes any features that cannot be performed without platform-specific resources.
 /// 
-/// When implementing `System` for some type, you may prefer to not support one or more features.
+/// When implementing [`System`] for some type, you may prefer to not support one or more features.
 /// This can be accomplished by returning the [`SystemError::NotSupported`] variant for the relevant [`SystemFeature`].
 pub trait System {
     /// Key type used to refer to the result of an async operation.
@@ -63,7 +63,7 @@ mod std_system {
     use super::*;
 
     /// A type implementing the [`System`] trait which supports all features.
-    /// This requires the `std` feature flag.
+    /// This requires the [`std`](crate) feature flag.
     pub struct StdSystem {
         start_time: Instant,
     }
@@ -166,22 +166,26 @@ impl fmt::Debug for Closure {
 /// Global information about the execution state of an entire project.
 pub struct ProjectInfo {
     pub name: String,
+    pub ref_pool: RefPool,
     pub globals: SymbolTable,
     pub entities: SlotMap<EntityKey, Entity>,
 }
 impl ProjectInfo {
-    pub fn from_role(role: &ast::Role, ref_pool: &mut RefPool) -> Self {
+    pub fn from_role(role: &ast::Role) -> Self {
+        let mut ref_pool = Default::default();
+
         let mut entities = SlotMap::default();
         for entity in role.entities.iter() {
             entities.insert(Entity {
                 name: entity.trans_name.clone(),
-                fields: RefCell::new(SymbolTable::from_fields(entity, ref_pool)),
+                fields: RefCell::new(SymbolTable::from_ast(&entity.fields, &mut ref_pool)),
             });
         }
+
         Self {
             name: role.name.clone(),
-            globals: SymbolTable::from_globals(role, ref_pool),
-            entities,
+            globals: SymbolTable::from_ast(&role.globals, &mut ref_pool),
+            ref_pool, entities,
         }
     }
 }
@@ -216,7 +220,7 @@ enum RawIdentity {
 
 /// Any primitive value.
 /// 
-/// This type implements [`Clone`] but not [`Copy`]; however, cloning a `Value` is guaranteed to be nearly-trivial
+/// This type implements [`Clone`] but not [`Copy`]; however, cloning a [`Value`] is guaranteed to be nearly-trivial
 /// (up to reference counting increments) due to having the same reference-type semantics as Snap! and NetsBlox.
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -226,16 +230,22 @@ pub enum Value {
     /// Snap! and NetsBlox use 64-bit floating point values for all numbers.
     Number(f64),
     /// A primitive string value, which is an immutable reference type.
-    /// Each string is weakly-linked to a [`RefPool`] to facilitate string interning if requested.
+    /// 
+    /// The recommended way to create an instance of [`Value::String`] is to use [`Value::from_string`],
+    /// which automatically performs string interning over a project-level [`RefPool`] if enabled with the [`intern_strings`](crate) feature flag.
     String(Rc<String>),
     /// A primitive list type, which is a mutable reference type.
-    /// `Value` holds lists by weak reference so that containment cycles do not cause memory leaks.
+    /// [`Value::List`] holds lists by weak reference so that containment cycles do not cause memory leaks.
     /// The (only) owning reference to a list is allocated in a [`RefPool`],
     /// which can perform garbage collection logic upon request.
+    /// 
+    /// To create an instance of [`Value::List`], use [`Value::from_vec`], which allocates the owning object in the provided project-level [`RefPool`].
     List(Weak<RefCell<Vec<Value>>>),
     /// A closure/lambda function.
     /// This contains information about the closure's bytecode location, parameters, and captures from the parent scope.
     /// This must be held by weak reference to avoid creating cycles due to captures.
+    /// 
+    /// To create an instance of [`Value::Closure`], use [`Value::from_closure`], which allocates that owning object in the provided project-level [`RefPool`].
     Closure(Weak<RefCell<Closure>>),
     /// A reference to an [`Entity`] in the environment - see [`ProjectInfo::entities`].
     /// This is intended to be a valid key to a living entity, or an invalid key to a dead entity.
@@ -244,16 +254,14 @@ pub enum Value {
 impl Value {
     /// Creates a new value from an abstract syntax tree value.
     /// In the event that `value` is a reference type, it is tied to the provided [`RefPool`].
-    /// 
-    /// The `intern` flag controls whether to perform interning for string values.
-    pub fn from_ast(value: &ast::Value, ref_pool: &mut RefPool, intern: bool) -> Self {
+    pub fn from_ast(value: &ast::Value, ref_pool: &mut RefPool) -> Self {
         match value {
             ast::Value::Bool(x) => Value::Bool(*x),
             ast::Value::Number(x) => Value::Number(*x),
             ast::Value::Constant(ast::Constant::E) => Value::Number(std::f64::consts::E),
             ast::Value::Constant(ast::Constant::Pi) => Value::Number(std::f64::consts::PI),
-            ast::Value::String(x) => Self::from_string(x.clone(), ref_pool, intern),
-            ast::Value::List(x) => Self::from_vec(x.iter().map(|x| Value::from_ast(x, ref_pool, intern)).collect(), ref_pool),
+            ast::Value::String(x) => Self::from_string(x.clone(), ref_pool),
+            ast::Value::List(x) => Self::from_vec(x.iter().map(|x| Value::from_ast(x, ref_pool)).collect(), ref_pool),
         }
     }
     /// Creates a new [`Value::List`] object with the given values.
@@ -274,17 +282,32 @@ impl Value {
     }
     /// Creates a new [`Value::String`] object with the given value.
     /// 
-    /// The `intern` flag controls whether to perform interning.
-    pub fn from_string(value: String, ref_pool: &mut RefPool, intern: bool) -> Self {
-        if intern {
-            for v in ref_pool.string_pool.iter() {
-                if let Some(rc) = v.upgrade() {
-                    if *rc == value { return Value::String(rc); }
+    /// The `intern_strings` feature flag controls whether or not to perform interning.
+    /// When not enabled, this is equivalent to `Value::String(Rc::new(value))`.
+    pub fn from_string(value: String, #[allow(unused_variables)] ref_pool: &mut RefPool) -> Self {
+        #[cfg(feature = "intern_strings")]
+        let bucket = {
+            let hash = {
+                let mut hasher = rustc_hash::FxHasher::default();
+                use std::hash::Hasher;
+                hasher.write(value.as_bytes());
+                hasher.finish()
+            };
+            let bucket = ref_pool.string_pool.entry(hash).or_default();
+            for i in (0..bucket.len()).rev() {
+                match bucket[i].upgrade() {
+                    Some(rc) => if *rc == value { return Value::String(rc); },
+                    None => { bucket.swap_remove(i); }
                 }
             }
-        }
+            bucket
+        };
+
         let rc = Rc::new(value);
-        ref_pool.string_pool.push(Rc::downgrade(&rc));
+
+        #[cfg(feature = "intern_strings")]
+        bucket.push(Rc::downgrade(&rc));
+
         Value::String(rc)
     }
     /// Returns a value representing this object that implements [`Eq`] such that
@@ -382,9 +405,11 @@ impl Default for Value {
 /// An allocation arena for reference-type values (see [`Value`]).
 #[derive(Default)]
 pub struct RefPool {
-    string_pool: Vec<Weak<String>>,
     list_pool: Vec<Rc<RefCell<Vec<Value>>>>,
     closure_pool: Vec<Rc<RefCell<Closure>>>,
+
+    #[cfg(feature = "intern_strings")]
+    string_pool: BTreeMap<u64, Vec<Weak<String>>>,
 }
 
 /// Represents a shared mutable resource.
@@ -440,22 +465,15 @@ impl<T> From<T> for Shared<T> {
 
 /// Holds a collection of variables in an execution context.
 /// 
-/// `SymbolTable` has utilities to extract variables from an abstract syntax tree, or to explicitly define variables.
+/// [`SymbolTable`] has utilities to extract variables from an abstract syntax tree, or to explicitly define variables.
 /// Simple methods are provided to perform value lookups in the table.
 /// To perform hierarchical value lookups, use the higher-level utility [`LookupGroup`].
 #[derive(Default)]
 pub struct SymbolTable(BTreeMap<String, Shared<Value>>);
 impl SymbolTable {
-    fn from_var_defs(var_defs: &[ast::VariableDef], ref_pool: &mut RefPool) -> Self {
-        Self(var_defs.iter().map(|x| (x.trans_name.clone(), Value::from_ast(&x.value, ref_pool, true).into())).collect())
-    }
-    /// Extracts a symbol table containing all the global variables in the project.
-    pub fn from_globals(role: &ast::Role, ref_pool: &mut RefPool) -> Self {
-        Self::from_var_defs(&role.globals, ref_pool)
-    }
-    /// Extracts a symbol table containing all the fields in a given entity.
-    pub fn from_fields(entity: &ast::Entity, ref_pool: &mut RefPool) -> Self {
-        Self::from_var_defs(&entity.fields, ref_pool)
+    /// Creates a symbol table containing all the provided variable definitions.
+    pub fn from_ast(vars: &[ast::VariableDef], ref_pool: &mut RefPool) -> Self {
+        Self(vars.iter().map(|x| (x.trans_name.clone(), Value::from_ast(&x.value, ref_pool).into())).collect())
     }
     /// Sets the value of an existing variable (as if by [`Shared::set`]) or defines it if it does not exist.
     /// If the variable does not exist, creates a [`Shared::Unique`] instance for the new `value`.
@@ -518,7 +536,7 @@ impl<'a, 'b> LookupGroup<'a, 'b> {
     }
     /// Searches for the given variable in this group of lookup tables,
     /// starting with the last (most-local) table and working towards the first (most-global) table.
-    /// Returns a reference to the value if it is found, otherwise returns `None`.
+    /// Returns a reference to the value if it is found, otherwise returns [`None`].
     pub fn lookup(&self, var: &str) -> Option<&Shared<Value>> {
         for src in self.0.iter().rev() {
             if let Some(val) = src.lookup(var) {

@@ -52,8 +52,6 @@ pub enum ExecError {
     JsonHadBadNumber { value: Rc<String>, pos: usize },
     /// Attempt to interpret an invalid unicode code point (number) as a character.
     InvalidUnicode { value: f64, pos: usize },
-    /// Attempt to execute a process on a dead entity.
-    DeadEntity { entity: EntityKey },
 }
 
 enum IndexError {
@@ -132,7 +130,8 @@ pub enum StepType {
     /// Yielding is primarily needed for executing an entire semi-concurrent project so that scripts can appear to run simultaneously.
     /// If instead you are explicitly only using a single sandboxed process, this can be treated equivalently to [`StepType::Normal`].
     Yield,
-    /// The process has successfully terminated with the given return value, or `None` if terminated by an (error-less) abort
+    /// The process has successfully terminated with the given return value, or [`None`] if terminated by an (error-less) abort,
+    /// such as a stop script command or the death of the process's associated entity.
     Terminate(Option<Value>),
 }
 
@@ -142,6 +141,7 @@ struct ReturnPoint {
     value_stack_size: usize,
 }
 
+/// Settings to use for a [`Process`].
 #[derive(Builder)]
 #[builder(no_std)]
 #[derive(Clone, Copy)]
@@ -153,27 +153,28 @@ pub struct Settings {
 
 /// A [`ByteCode`] execution primitive.
 /// 
-/// A `Process` is a self-contained thread of execution; it maintains its own state machine for executing instructions step by step.
-/// Global variables, entity fields, and several external features are hosted separately and passed into [`Process::step`].
+/// A [`Process`] is a self-contained thread of execution; it maintains its own state machine for executing instructions step by step.
 pub struct Process<S: System> {
     code: Rc<ByteCode>,
-    pos: usize,
-    warp_counter: usize,
-    running: bool,
+    start_pos: usize,
+    entity: EntityKey,
     settings: Settings,
+    pos: usize,
+    running: bool,
+    warp_counter: usize,
     call_stack: Vec<(ReturnPoint, SymbolTable)>, // tuples of (ret pos, locals)
     value_stack: Vec<Value>,
     async_req: Option<S::AsyncKey>,
 }
 impl<S: System> Process<S> {
-    /// Creates a new process with the given code.
-    /// The new process is initially idle; [`Process::initialize`] can be used to begin execution at a specific location (see [`Locations`]).
-    pub fn new(code: Rc<ByteCode>, settings: Settings) -> Self {
+    /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity`.
+    /// The created process is initialized to an idle (non-running) state; use [`Process::initialize`] to begin execution with an input context.
+    pub fn new(code: Rc<ByteCode>, start_pos: usize, entity: EntityKey, settings: Settings) -> Self {
         Self {
-            code, settings,
+            code, settings, start_pos, entity,
+            running: false,
             pos: 0,
             warp_counter: 0,
-            running: false,
             call_stack: vec![],
             value_stack: vec![],
             async_req: None,
@@ -184,44 +185,38 @@ impl<S: System> Process<S> {
     pub fn is_running(&self) -> bool {
         self.running
     }
-    /// Gets a reference to the [`ByteCode`] object that the process was built from.
-    pub fn get_code(&self) -> &Rc<ByteCode> {
-        &self.code
-    }
-    /// Prepares the process to execute code at the given [`ByteCode`] position
-    /// and with the given context of local variables.
+    /// Prepares the process to execute starting at the main entry point (see [`Process::new`])
+    /// with the provided `context` of input (local) variables.
     /// Any previous process state is wiped when performing this action.
-    pub fn initialize(&mut self, start_pos: usize, context: SymbolTable) {
-        self.pos = start_pos;
-        self.warp_counter = 0;
+    pub fn initialize(&mut self, context: SymbolTable) {
+        self.pos = self.start_pos;
         self.running = true;
+        self.warp_counter = 0;
         self.call_stack.clear();
         self.call_stack.push((ReturnPoint { pos: usize::MAX, warp_counter: 0, value_stack_size: 0 }, context));
         self.value_stack.clear();
+        self.async_req = None;
     }
     /// Executes a single instruction with the given execution context.
     /// The return value can be used to determine what additional effects the script has requested,
-    /// as well as retrieving the return value or execution error in the event that the process terminates.
+    /// as well as to retrieve the return value or execution error in the event that the process terminates.
     /// 
-    /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with `Err` or
-    /// succeeding with [`StepType::Terminate`].
-    pub fn step(&mut self, ref_pool: &mut RefPool, system: &mut S, project: &mut ProjectInfo, entity: EntityKey) -> Result<StepType, ExecError> {
-        let res = self.step_impl(ref_pool, system, project, entity);
+    /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`StepType::Terminate`].
+    pub fn step(&mut self, project: &mut ProjectInfo, system: &mut S) -> Result<StepType, ExecError> {
+        let res = self.step_impl(project, system);
         if let Ok(StepType::Terminate(_)) | Err(_) = res {
             self.running = false;
         }
         res
     }
-    fn step_impl(&mut self, ref_pool: &mut RefPool, system: &mut S, project: &mut ProjectInfo, entity: EntityKey) -> Result<StepType, ExecError> {
-        if !self.running { return Ok(StepType::Idle); }
-
-        let entity_ref = match project.entities.get(entity) {
+    fn step_impl(&mut self, project: &mut ProjectInfo, system: &mut S) -> Result<StepType, ExecError> {
+        let entity = match project.entities.get(self.entity) {
             Some(x) => x,
-            None => return Err(ExecError::DeadEntity { entity }),
+            None => return Ok(StepType::Terminate(None)),
         };
 
         let (_, locals) = self.call_stack.last_mut().unwrap();
-        let mut fields = entity_ref.fields.borrow_mut();
+        let mut fields = entity.fields.borrow_mut();
         let mut context = [&mut project.globals, &mut *fields, locals];
         let mut context = LookupGroup::new(&mut context);
 
@@ -254,7 +249,7 @@ impl<S: System> Process<S> {
             }
 
             Instruction::PushValue { value } => {
-                self.value_stack.push(Value::from_ast(value, ref_pool, true));
+                self.value_stack.push(Value::from_ast(value, &mut project.ref_pool));
                 self.pos += 1;
             }
             Instruction::PushVariable { var } => {
@@ -280,7 +275,7 @@ impl<S: System> Process<S> {
 
             Instruction::ShallowCopy => {
                 let val = self.value_stack.pop().unwrap();
-                self.value_stack.push(val.shallow_copy(ref_pool).map_err(|e| e.err_at(self.pos))?);
+                self.value_stack.push(val.shallow_copy(&mut project.ref_pool).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
 
@@ -290,7 +285,7 @@ impl<S: System> Process<S> {
                     vals.push(self.value_stack.pop().unwrap());
                 }
                 vals.reverse();
-                self.value_stack.push(Value::from_vec(vals, ref_pool));
+                self.value_stack.push(Value::from_vec(vals, &mut project.ref_pool));
                 self.pos += 1;
             }
             Instruction::ListLen => {
@@ -301,7 +296,7 @@ impl<S: System> Process<S> {
             Instruction::ListIndex => {
                 let index = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::index_list(&list, &index, ref_pool).map_err(|e| e.err_at(self.pos))?);
+                self.value_stack.push(ops::index_list(&list, &index, &mut project.ref_pool).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
             Instruction::ListLastIndex => {
@@ -331,7 +326,7 @@ impl<S: System> Process<S> {
                     }
                 }
 
-                self.value_stack.push(Value::from_vec(res, ref_pool));
+                self.value_stack.push(Value::from_vec(res, &mut project.ref_pool));
                 self.pos += 1;
             }
             Instruction::ListPush => {
@@ -359,14 +354,14 @@ impl<S: System> Process<S> {
                 for value in values.iter().rev() {
                     res += value.to_string().map_err(|e| e.err_at(self.pos))?.as_str();
                 }
-                self.value_stack.push(Value::from_string(res, ref_pool, false));
+                self.value_stack.push(Value::from_string(res, &mut project.ref_pool));
                 self.pos += 1;
             }
 
             Instruction::BinaryOp { op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::binary_op(&a, &b, ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
+                self.value_stack.push(ops::binary_op(&a, &b, &mut project.ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
             Instruction::Eq => {
@@ -377,7 +372,7 @@ impl<S: System> Process<S> {
             }
             Instruction::UnaryOp { op } => {
                 let x = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::unary_op(&x, ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
+                self.value_stack.push(ops::unary_op(&x, &mut project.ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
 
@@ -396,7 +391,7 @@ impl<S: System> Process<S> {
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = lookup_var!(var).get_clone();
-                context.set_or_define(var, ops::binary_op(&a, &b, ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
+                context.set_or_define(var, ops::binary_op(&a, &b, &mut project.ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
 
@@ -423,7 +418,7 @@ impl<S: System> Process<S> {
                 for var in captures {
                     context.redefine_or_define(var, lookup_var!(mut var).alias());
                 }
-                self.value_stack.push(Value::from_closure(Closure { pos: *pos, params: params.clone(), captures: context }, ref_pool));
+                self.value_stack.push(Value::from_closure(Closure { pos: *pos, params: params.clone(), captures: context }, &mut project.ref_pool));
                 self.pos += 1;
             }
             Instruction::CallClosure { args } => {
@@ -497,10 +492,10 @@ mod ops {
                 Some(x) => x.into(),
                 None => return Err(EncodingError::JsonHadBadNumber { value: value.clone() }),
             }
-            Json::String(x) => Value::from_string(x, ref_pool, false),
+            Json::String(x) => Value::from_string(x, ref_pool),
             Json::Array(x) => Value::from_vec(x.into_iter().map(|x| json_to_value(x, ref_pool, value)).collect::<Result<_,_>>()?, ref_pool),
             Json::Object(x) => Value::from_vec(x.into_iter().map(|(k, v)| Ok(Value::from_vec(vec![
-                Value::from_string(k, ref_pool, false),
+                Value::from_string(k, ref_pool),
                 json_to_value(v, ref_pool, value)?,
             ], ref_pool))).collect::<Result<_,_>>()?, ref_pool),
         })
@@ -578,7 +573,7 @@ mod ops {
 
             BinaryOp::SplitCustom => binary_op_impl(a, b, true, &mut Default::default(), ref_pool, |a, b, ref_pool| {
                 let (text, pattern) = (a.to_string()?, b.to_string()?);
-                Ok(Value::from_vec(text.split(pattern.as_str()).map(|x| Value::from_string(x.into(), ref_pool, false)).collect(), ref_pool))
+                Ok(Value::from_vec(text.split(pattern.as_str()).map(|x| Value::from_string(x.into(), ref_pool)).collect(), ref_pool))
             }),
         }
     }
@@ -622,22 +617,22 @@ mod ops {
             UnaryOp::Strlen => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, _| Ok((x.to_string()?.chars().count() as f64).into())),
 
             UnaryOp::SplitLetter => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, ref_pool| {
-                Ok(Value::from_vec(x.to_string()?.chars().map(|x| Value::from_string(x.into(), ref_pool, false)).collect(), ref_pool))
+                Ok(Value::from_vec(x.to_string()?.chars().map(|x| Value::from_string(x.into(), ref_pool)).collect(), ref_pool))
             }),
             UnaryOp::SplitWord => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, ref_pool| {
-                Ok(Value::from_vec(x.to_string()?.split_whitespace().map(|x| Value::from_string(x.into(), ref_pool, false)).collect(), ref_pool))
+                Ok(Value::from_vec(x.to_string()?.split_whitespace().map(|x| Value::from_string(x.into(), ref_pool)).collect(), ref_pool))
             }),
             UnaryOp::SplitTab => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, ref_pool| {
-                Ok(Value::from_vec(x.to_string()?.split('\t').map(|x| Value::from_string(x.into(), ref_pool, false)).collect(), ref_pool))
+                Ok(Value::from_vec(x.to_string()?.split('\t').map(|x| Value::from_string(x.into(), ref_pool)).collect(), ref_pool))
             }),
             UnaryOp::SplitCR => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, ref_pool| {
-                Ok(Value::from_vec(x.to_string()?.split('\r').map(|x| Value::from_string(x.into(), ref_pool, false)).collect(), ref_pool))
+                Ok(Value::from_vec(x.to_string()?.split('\r').map(|x| Value::from_string(x.into(), ref_pool)).collect(), ref_pool))
             }),
             UnaryOp::SplitLF => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, ref_pool| {
-                Ok(Value::from_vec(x.to_string()?.lines().map(|x| Value::from_string(x.into(), ref_pool, false)).collect(), ref_pool))
+                Ok(Value::from_vec(x.to_string()?.lines().map(|x| Value::from_string(x.into(), ref_pool)).collect(), ref_pool))
             }),
             UnaryOp::SplitCsv => unary_op_impl(x, &mut Default::default(), ref_pool, &|x, ref_pool| {
-                let lines: Vec<_> = x.to_string()?.lines().map(|line| Value::from_vec(line.split(',').map(|x| Value::from_string(x.into(), ref_pool, false)).collect(), ref_pool)).collect();
+                let lines: Vec<_> = x.to_string()?.lines().map(|line| Value::from_vec(line.split(',').map(|x| Value::from_string(x.into(), ref_pool)).collect(), ref_pool)).collect();
                 Ok(match lines.len() {
                     1 => lines.into_iter().next().unwrap(),
                     _ => Value::from_vec(lines, ref_pool),
@@ -657,7 +652,7 @@ mod ops {
                 let num = fnum as u32;
                 if num as f64 != fnum { return Err(OpError::EncodingError(EncodingError::InvalidUnicode { value: fnum })) }
                 match char::from_u32(num) {
-                    Some(ch) => Ok(Value::from_string(ch.to_string(), ref_pool, false)),
+                    Some(ch) => Ok(Value::from_string(ch.to_string(), ref_pool)),
                     None => Err(OpError::EncodingError(EncodingError::InvalidUnicode { value: fnum })),
                 }
             }),

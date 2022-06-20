@@ -120,7 +120,7 @@ pub(crate) enum Instruction {
 
 /// An interpreter-ready sequence of instructions.
 /// 
-/// [`Process`](crate::process::Process) is an execution primitive that can be used to execute generated `ByteCode`.
+/// [`Process`](crate::process::Process) is an execution primitive that can be used to execute generated [`ByteCode`].
 #[derive(Debug)]
 pub struct ByteCode(pub(crate) Vec<Instruction>);
 /// Location info in a [`ByteCode`] object for a particular entity.
