@@ -119,7 +119,7 @@ trivial_err_at_impl! { ClosureConversionError: ConversionError, ClosureUpgradeEr
 trivial_err_at_impl! { OpError: ConversionError, ListUpgradeError, IndexError, EncodingError }
 
 /// Result of stepping through a [`Process`].
-pub enum StepType {
+pub enum ProcessStep {
     /// The process was not running.
     Idle,
     /// The process executed an instruction successfully and does not need to yield.
@@ -128,7 +128,7 @@ pub enum StepType {
     /// Many yield results may occur back-to-back, such as while awaiting an asynchronous result.
     /// 
     /// Yielding is primarily needed for executing an entire semi-concurrent project so that scripts can appear to run simultaneously.
-    /// If instead you are explicitly only using a single sandboxed process, this can be treated equivalently to [`StepType::Normal`].
+    /// If instead you are explicitly only using a single sandboxed process, this can be treated equivalently to [`ProcessStep::Normal`].
     Yield,
     /// The process has successfully terminated with the given return value, or [`None`] if terminated by an (error-less) abort,
     /// such as a stop script command or the death of the process's associated entity.
@@ -206,15 +206,15 @@ impl<S: System> Process<S> {
     /// The return value can be used to determine what additional effects the script has requested,
     /// as well as to retrieve the return value or execution error in the event that the process terminates.
     /// 
-    /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`StepType::Terminate`].
-    pub fn step(&mut self, project: &mut ProjectInfo, system: &mut S) -> Result<StepType, ExecError> {
-        let res = self.step_impl(project, system);
-        if let Ok(StepType::Terminate(_)) | Err(_) = res {
+    /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`ProcessStep::Terminate`].
+    pub fn step(&mut self, runtime: &mut Runtime, system: &mut S) -> Result<ProcessStep, ExecError> {
+        let res = self.step_impl(runtime, system);
+        if let Ok(ProcessStep::Terminate(_)) | Err(_) = res {
             self.running = false;
         }
         res
     }
-    fn step_impl(&mut self, project: &mut ProjectInfo, system: &mut S) -> Result<StepType, ExecError> {
+    fn step_impl(&mut self, runtime: &mut Runtime, system: &mut S) -> Result<ProcessStep, ExecError> {
         if let Some(async_req) = &self.async_req {
             match system.poll_async(&async_req.key).map_err(|e| e.err_at(self.pos))? {
                 AsyncPoll::Completed(x) => {
@@ -222,18 +222,18 @@ impl<S: System> Process<S> {
                     self.pos = async_req.aft_pos;
                     self.async_req = None;
                 }
-                AsyncPoll::Pending => return Ok(StepType::Yield),
+                AsyncPoll::Pending => return Ok(ProcessStep::Yield),
             }
         }
 
-        let entity = match project.entities.get(self.entity) {
+        let entity = match runtime.entities.get(self.entity) {
             Some(x) => x,
-            None => return Ok(StepType::Terminate(None)),
+            None => return Ok(ProcessStep::Terminate(None)),
         };
 
         let (_, locals) = self.call_stack.last_mut().unwrap();
         let mut fields = entity.fields.borrow_mut();
-        let mut context = [&mut project.globals, &mut *fields, locals];
+        let mut context = [&mut runtime.globals, &mut *fields, locals];
         let mut context = LookupGroup::new(&mut context);
 
         macro_rules! lookup_var {
@@ -253,7 +253,7 @@ impl<S: System> Process<S> {
 
             Instruction::Yield => {
                 self.pos += 1;
-                if self.warp_counter == 0 { return Ok(StepType::Yield) }
+                if self.warp_counter == 0 { return Ok(ProcessStep::Yield) }
             }
             Instruction::WarpStart => {
                 self.warp_counter += 1;
@@ -265,7 +265,7 @@ impl<S: System> Process<S> {
             }
 
             Instruction::PushValue { value } => {
-                self.value_stack.push(Value::from_ast(value, &mut project.ref_pool));
+                self.value_stack.push(Value::from_ast(value, &mut runtime.ref_pool));
                 self.pos += 1;
             }
             Instruction::PushVariable { var } => {
@@ -291,7 +291,7 @@ impl<S: System> Process<S> {
 
             Instruction::ShallowCopy => {
                 let val = self.value_stack.pop().unwrap();
-                self.value_stack.push(val.shallow_copy(&mut project.ref_pool).map_err(|e| e.err_at(self.pos))?);
+                self.value_stack.push(val.shallow_copy(&mut runtime.ref_pool).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
 
@@ -301,7 +301,7 @@ impl<S: System> Process<S> {
                     vals.push(self.value_stack.pop().unwrap());
                 }
                 vals.reverse();
-                self.value_stack.push(Value::from_vec(vals, &mut project.ref_pool));
+                self.value_stack.push(Value::from_vec(vals, &mut runtime.ref_pool));
                 self.pos += 1;
             }
             Instruction::ListLen => {
@@ -312,7 +312,7 @@ impl<S: System> Process<S> {
             Instruction::ListIndex => {
                 let index = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::index_list(&list, &index, &mut project.ref_pool).map_err(|e| e.err_at(self.pos))?);
+                self.value_stack.push(ops::index_list(&list, &index, &mut runtime.ref_pool).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
             Instruction::ListLastIndex => {
@@ -342,7 +342,7 @@ impl<S: System> Process<S> {
                     }
                 }
 
-                self.value_stack.push(Value::from_vec(res, &mut project.ref_pool));
+                self.value_stack.push(Value::from_vec(res, &mut runtime.ref_pool));
                 self.pos += 1;
             }
             Instruction::ListPush => {
@@ -370,14 +370,14 @@ impl<S: System> Process<S> {
                 for value in values.iter().rev() {
                     res += value.to_string().map_err(|e| e.err_at(self.pos))?.as_str();
                 }
-                self.value_stack.push(Value::from_string(res, &mut project.ref_pool));
+                self.value_stack.push(Value::from_string(res, &mut runtime.ref_pool));
                 self.pos += 1;
             }
 
             Instruction::BinaryOp { op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::binary_op(&a, &b, &mut project.ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
+                self.value_stack.push(ops::binary_op(&a, &b, &mut runtime.ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
             Instruction::Eq => {
@@ -388,7 +388,7 @@ impl<S: System> Process<S> {
             }
             Instruction::UnaryOp { op } => {
                 let x = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::unary_op(&x, &mut project.ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
+                self.value_stack.push(ops::unary_op(&x, &mut runtime.ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
 
@@ -407,7 +407,7 @@ impl<S: System> Process<S> {
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = lookup_var!(var).get_clone();
-                context.set_or_define(var, ops::binary_op(&a, &b, &mut project.ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
+                context.set_or_define(var, ops::binary_op(&a, &b, &mut runtime.ref_pool, *op).map_err(|e| e.err_at(self.pos))?);
                 self.pos += 1;
             }
 
@@ -434,7 +434,7 @@ impl<S: System> Process<S> {
                 for var in captures {
                     context.redefine_or_define(var, lookup_var!(mut var).alias());
                 }
-                self.value_stack.push(Value::from_closure(Closure { pos: *pos, params: params.clone(), captures: context }, &mut project.ref_pool));
+                self.value_stack.push(Value::from_closure(Closure { pos: *pos, params: params.clone(), captures: context }, &mut runtime.ref_pool));
                 self.pos += 1;
             }
             Instruction::CallClosure { args } => {
@@ -466,7 +466,7 @@ impl<S: System> Process<S> {
                     debug_assert_eq!(return_point.pos, usize::MAX);
                     debug_assert_eq!(return_point.warp_counter, 0);
                     debug_assert_eq!(return_point.value_stack_size, 0);
-                    return Ok(StepType::Terminate(Some(self.value_stack.pop().unwrap())));
+                    return Ok(ProcessStep::Terminate(Some(self.value_stack.pop().unwrap())));
                 } else {
                     self.pos = return_point.pos;
                     self.warp_counter = return_point.warp_counter;
@@ -474,7 +474,7 @@ impl<S: System> Process<S> {
             }
         }
 
-        Ok(StepType::Normal)
+        Ok(ProcessStep::Normal)
     }
 }
 

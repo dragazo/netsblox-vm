@@ -27,5 +27,6 @@ macro_rules! trivial_from_impl {
 pub mod bytecode;
 pub mod runtime;
 pub mod process;
+pub mod project;
 
 #[cfg(test)] mod test;

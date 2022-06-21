@@ -1,5 +1,6 @@
+use std::prelude::v1::*;
 use std::collections::VecDeque;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::iter;
 
 use netsblox_ast as ast;
@@ -10,110 +11,152 @@ use crate::runtime::*;
 use crate::process::*;
 
 slotmap::new_key_type! {
-    struct EntityKey;
     struct ProcessKey;
 }
 
-pub enum UserInput {
-    ClickStart,
+/// Simulates input from the user.
+pub enum Input {
+    /// Simulate pressing the start (green flag) button.
+    /// This has the effect of interrupting any running "on start" scripts and restarting them (with an empty context).
+    /// Any other running processes are not affected.
+    Start,
+    /// Simulate pressing the stop button.
+    /// This has the effect of stopping all currently-running processes.
+    /// Note that some hat blocks could cause new processes to spin up after this operation.
+    Stop,
 }
 
-struct Script<S: System> {
-    hat: Option<ast::Hat>,
-    process: Process<S>,
+/// Result of stepping through the execution of a [`Project`].
+pub enum ProjectStep {
+    /// The project had running processes to execute and did so.
+    Normal,
+    /// There were no running processes to execute.
+    Idle,
+}
+
+struct Script {
+    hat: ast::Hat,
     start_pos: usize,
+    entity: EntityKey,
+    process: Option<ProcessKey>,
     context_queue: VecDeque<SymbolTable>,
 }
-impl<S: System> Script<S> {
-    fn consume_context(&mut self) {
-        if !self.process.is_running() {
-            if let Some(context) = self.context_queue.pop_front() {
-                self.process.initialize(self.start_pos, context);
+impl Script {
+    fn get_process_mut<'a, S: System>(&self, state: &'a mut State<S>) -> Option<&'a mut Process<S>> {
+        state.processes.get_mut(self.process?)
+    }
+    fn consume_context<S: System>(&mut self, state: &mut State<S>) {
+        let process = self.get_process_mut(state);
+        if process.as_ref().map(|x| x.is_running()).unwrap_or(false) { return }
+
+        let context = match self.context_queue.pop_front() {
+            Some(x) => x,
+            None => return,
+        };
+
+        match process {
+            Some(process) => process.initialize(context),
+            None => {
+                let mut process = Process::new(state.code.clone(), self.start_pos, self.entity, state.settings);
+                process.initialize(context);
+                let key = state.processes.insert(process);
+                state.process_queue.push_back(key);
+                self.process = Some(key);
             }
         }
     }
-    fn schedule(&mut self, max_queue: usize, context: SymbolTable) {
+    fn stop_all<S: System>(&mut self, state: &mut State<S>) {
+        if let Some(process) = self.process {
+            state.processes.remove(process);
+            self.process = None;
+        }
+        self.context_queue.clear();
+    }
+    fn schedule<S: System>(&mut self, state: &mut State<S>, context: SymbolTable, max_queue: usize) {
         self.context_queue.push_back(context);
-        self.consume_context();
+        self.consume_context(state);
         if self.context_queue.len() > max_queue {
             self.context_queue.pop_back();
         }
     }
-    fn step(&mut self, ref_pool: &mut RefPool, system: &mut S, project: &mut ProjectInfo) -> StepType {
-        self.consume_context();
-        self.process.step(ref_pool, system, project, &*self.entity.upgrade().unwrap())
-    }
 }
 
-pub struct Project<S: System> {
-    context: ProjectInfo,
-    ref_pool: RefPool,
-    entities: SlotMap<EntityKey, Rc<Entity>>,
-    entity_queue: VecDeque<EntityKey>,
+struct State<S: System> {
+    runtime: Runtime,
+    code: Rc<ByteCode>,
+    settings: Settings,
     processes: SlotMap<ProcessKey, Process<S>>,
     process_queue: VecDeque<ProcessKey>,
-    max_call_depth: usize,
+}
+pub struct Project<S: System> {
+    state: State<S>,
+    scripts: Vec<Script>,
 }
 impl<S: System> Project<S> {
-    pub fn new(role: &ast::Role, max_call_depth: usize) -> Self {
-        let mut ref_pool = RefPool::default();
-        let globals = SymbolTable::from_globals(role, &mut ref_pool);
-
+    pub fn from_ast(role: &ast::Role, settings: Settings) -> Self {
+        let (runtime, entity_keys) = Runtime::from_ast(role);
         let (code, locations) = ByteCode::compile(role);
-        let code = Rc::new(code);
 
-        let mut entities: SlotMap<EntityKey, _> = Default::default();
-        let mut entity_queue = VecDeque::with_capacity(role.entities.len());
-        for (i, (entity, locs)) in iter::zip(&role.entities, &locations.entities).enumerate() {
-            let fields = SymbolTable::from_fields(entity, &mut ref_pool);
-
-            let mut scripts = Vec::with_capacity(entity.scripts.len());
+        let mut scripts = vec![];
+        for (entity_key, (entity, locs)) in iter::zip(entity_keys, &locations.entities) {
             for (script, loc) in iter::zip(&entity.scripts, &locs.scripts) {
-                scripts.push(Script {
-                    hat: script.hat.clone(),
-                    process: Process::new(code.clone(), max_call_depth),
-                    start_pos: *loc,
-                    context_queue: Default::default(),
-                })
-            }
-
-            entity_queue.push_back(entities.insert(Rc::new(Entity {
-
-            })));
-        }
-
-        Self {
-            context: ProjectInfo { name: role.name.into(), globals },
-            ref_pool, entities, entity_queue, max_call_depth,
-        }
-    }
-    pub fn input(&mut self, input: UserInput) {
-        match input {
-            UserInput::ClickStart => {
-                for (_, entity) in self.entities.iter_mut() {
-                    for script in entity.scripts.iter_mut() {
-                        if let Some(ast::Hat::OnFlag { .. }) = &script.hat {
-                            script.schedule(0, Default::default());
-                        }
-                    }
+                if let Some(hat) = &script.hat {
+                    scripts.push(Script {
+                        hat: hat.clone(),
+                        entity: entity_key,
+                        process: None,
+                        start_pos: loc.1,
+                        context_queue: Default::default(),
+                    });
                 }
             }
         }
+
+        Self { scripts, state: State { runtime, code: Rc::new(code), settings, processes: Default::default(), process_queue: Default::default() } }
     }
-    pub fn step(&mut self) -> StepType {
-        let (key, entity) = loop {
-            match self.entity_queue.pop_front() {
-                None => return,
-                Some(key) => match self.entities.get_mut(key) {
-                    None => (), // prune invalid key due to pop
-                    Some(entity) => break (key, entity),
-                },
+    pub fn runtime(&self) -> &Runtime {
+        &self.state.runtime
+    }
+    pub fn runtime_mut(&mut self) -> &mut Runtime {
+        &mut self.state.runtime
+    }
+    pub fn input(&mut self, input: Input) {
+        match input {
+            Input::Start => {
+                for script in self.scripts.iter_mut() {
+                    if let ast::Hat::OnFlag { .. } = &script.hat {
+                        script.stop_all(&mut self.state);
+                        script.schedule(&mut self.state, Default::default(), 0);
+                    }
+                }
+            }
+            Input::Stop => {
+                self.state.processes.clear();
+                self.state.process_queue.clear();
+            }
+        }
+    }
+    pub fn step(&mut self, system: &mut S) -> ProjectStep {
+        let (process_key, process) = loop {
+            match self.state.process_queue.pop_front() {
+                None => return ProjectStep::Idle,
+                Some(process_key) => match self.state.processes.get_mut(process_key) {
+                    None => (), // prune dead process key
+                    Some(process) => break (process_key, process),
+                }
             }
         };
 
-        match entity.step(&mut self.context) {
-            StepType::Normal => self.entity_queue.push_front(key), // keep executing same entity
-            StepType::Yield => self.entity_queue.push_back(key), // yield to next entity
+        match process.step(&mut self.state.runtime, system) {
+            Ok(x) => match x {
+                ProcessStep::Normal => self.state.process_queue.push_front(process_key),   // continue executing same process
+                ProcessStep::Yield => self.state.process_queue.push_back(process_key),     // next process
+                ProcessStep::Terminate(_) => { self.state.processes.remove(process_key); } // prune terminated process and key
+                ProcessStep::Idle => unreachable!(),
+            }
+            Err(_) => unimplemented!(),
         }
+
+        ProjectStep::Normal
     }
 }

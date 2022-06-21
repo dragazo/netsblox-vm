@@ -164,29 +164,32 @@ impl fmt::Debug for Closure {
 }
 
 /// Global information about the execution state of an entire project.
-pub struct ProjectInfo {
+pub struct Runtime {
     pub name: String,
     pub ref_pool: RefPool,
     pub globals: SymbolTable,
     pub entities: SlotMap<EntityKey, Entity>,
 }
-impl ProjectInfo {
-    pub fn from_role(role: &ast::Role) -> Self {
+impl Runtime {
+    pub fn from_ast(role: &ast::Role) -> (Self, Vec<EntityKey>) {
         let mut ref_pool = Default::default();
 
         let mut entities = SlotMap::default();
+        let mut entity_order = vec![];
         for entity in role.entities.iter() {
-            entities.insert(Entity {
+            let key = entities.insert(Entity {
                 name: entity.trans_name.clone(),
                 fields: RefCell::new(SymbolTable::from_ast(&entity.fields, &mut ref_pool)),
             });
+            entity_order.push(key);
         }
 
-        Self {
+        let project = Self {
             name: role.name.clone(),
             globals: SymbolTable::from_ast(&role.globals, &mut ref_pool),
             ref_pool, entities,
-        }
+        };
+        (project, entity_order)
     }
 }
 

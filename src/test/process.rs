@@ -1,6 +1,5 @@
 use std::prelude::v1::*;
 use std::rc::Rc;
-use std::iter;
 
 use netsblox_ast as ast;
 
@@ -8,69 +7,39 @@ use crate::bytecode::*;
 use crate::runtime::*;
 use crate::process::*;
 
-fn get_running_proc(xml: &str) -> (Process<StdSystem>, ProjectInfo) {
+use super::*;
+
+fn get_running_proc(xml: &str) -> (Process<StdSystem>, Runtime) {
     let parser = ast::ParserBuilder::default().build().unwrap();
     let ast = parser.parse(xml).unwrap();
     assert_eq!(ast.roles.len(), 1);
 
-    let proj = ProjectInfo::from_role(&ast.roles[0]);
+    let runtime = Runtime::from_ast(&ast.roles[0]).0;
     let (code, locs) = ByteCode::compile(&ast.roles[0]);
     let main = locs.funcs.iter().find(|x| x.0.trans_name.trim() == "main").expect("no main function at global scope");
 
-    let mut proc = Process::new(Rc::new(code), main.1, proj.entities.keys().next().unwrap(), SettingsBuilder::default().build().unwrap());
+    let mut proc = Process::new(Rc::new(code), main.1, runtime.entities.keys().next().unwrap(), SettingsBuilder::default().build().unwrap());
     assert!(!proc.is_running());
     proc.initialize(Default::default());
     assert!(proc.is_running());
 
-    (proc, proj)
+    (proc, runtime)
 }
 
-fn run_till_term(proc: &mut Process<StdSystem>, proj: &mut ProjectInfo) -> Result<(Option<Value>, usize), ExecError> {
+fn run_till_term(proc: &mut Process<StdSystem>, runtime: &mut Runtime) -> Result<(Option<Value>, usize), ExecError> {
     assert!(proc.is_running());
     let mut yields = 0;
     let mut system = StdSystem::new();
     let ret = loop {
-        match proc.step(proj, &mut system)? {
-            StepType::Idle => panic!(),
-            StepType::Normal => (),
-            StepType::Yield => yields += 1,
-            StepType::Terminate(e) => break e,
+        match proc.step(runtime, &mut system)? {
+            ProcessStep::Idle => panic!(),
+            ProcessStep::Normal => (),
+            ProcessStep::Yield => yields += 1,
+            ProcessStep::Terminate(e) => break e,
         }
     };
     assert!(!proc.is_running());
     Ok((ret, yields))
-}
-
-fn assert_values_eq(got: &Value, expected: &Value, epsilon: f64, path: &str) {
-    if got.get_type() != expected.get_type() {
-        panic!("{} - type error - got {:?} expected {:?} - {:?}", path, got.get_type(), expected.get_type(), got);
-    }
-    match (got, expected) {
-        (Value::Bool(got), Value::Bool(expected)) => {
-            if got != expected { panic!("{} - bool error - got {} expected {}", path, got, expected) }
-        }
-        (Value::Number(got), Value::Number(expected)) => {
-            let good = if got.is_finite() && expected.is_finite() { (got - expected).abs() <= epsilon } else { got == expected };
-            if !good { panic!("{} - number error - got {} expected {}", path, got, expected) }
-        }
-        (Value::String(got), Value::String(expected)) => {
-            if got != expected { panic!("{} - string error - got {:?} expected {:?}", path, got, expected) }
-        }
-        (Value::List(got), Value::List(expected)) => {
-            let got = got.upgrade().unwrap();
-            let got = got.borrow();
-
-            let expected = expected.upgrade().unwrap();
-            let expected = expected.borrow();
-
-            if got.len() != expected.len() { panic!("{} - list len error - got {} expected {}\ngot:      {:?}\nexpected: {:?}", path, got.len(), expected.len(), got, expected) }
-
-            for (i, (got, expected)) in iter::zip(got.iter(), expected.iter()).enumerate() {
-                assert_values_eq(got, expected, epsilon, &format!("{}[{}]", path, i));
-            }
-        }
-        (x, y) => unimplemented!("types: {:?} {:?}", x.get_type(), y.get_type()),
-    }
 }
 
 #[test]
@@ -78,7 +47,7 @@ fn test_proc_ret() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_ret.xml"),
+        funcs = include_str!("blocks/ret.xml"),
         methods = "",
     ));
 
@@ -93,7 +62,7 @@ fn test_proc_sum_123n() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_sum_123n.xml"),
+        funcs = include_str!("blocks/sum-123n.xml"),
         methods = "",
     ));
 
@@ -113,7 +82,7 @@ fn test_proc_recursive_factorial() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_recursive_factorial.xml"),
+        funcs = include_str!("blocks/recursive-factorial.xml"),
         methods = "",
     ));
 
@@ -133,7 +102,7 @@ fn test_proc_loops_lists_basic() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_loops_lists_basic.xml"),
+        funcs = include_str!("blocks/loops-lists-basic.xml"),
         methods = "",
     ));
 
@@ -171,7 +140,7 @@ fn test_proc_recursively_self_containing_lists() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_recursively_self_containing_lists.xml"),
+        funcs = include_str!("blocks/recursively-self-containing-lists.xml"),
         methods = "",
     ));
 
@@ -217,7 +186,7 @@ fn test_proc_sieve_of_eratosthenes() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_sieve_of_eratosthenes.xml"),
+        funcs = include_str!("blocks/sieve-of-eratosthenes.xml"),
         methods = "",
     ));
 
@@ -238,7 +207,7 @@ fn test_proc_early_return() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_early_return.xml"),
+        funcs = include_str!("blocks/early-return.xml"),
         methods = "",
     ));
 
@@ -252,7 +221,7 @@ fn test_proc_short_circuit() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_short_circuit.xml"),
+        funcs = include_str!("blocks/short-circuit.xml"),
         methods = "",
     ));
 
@@ -282,7 +251,7 @@ fn test_proc_all_arithmetic() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_all_arithmetic.xml"),
+        funcs = include_str!("blocks/all-arithmetic.xml"),
         methods = "",
     ));
 
@@ -324,7 +293,7 @@ fn test_proc_lambda_local_shadow_capture() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_lambda_local_shadow_capture.xml"),
+        funcs = include_str!("blocks/lambda-local-shadow-capture.xml"),
         methods = "",
     ));
 
@@ -338,7 +307,7 @@ fn test_proc_generators_nested() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_generators_nested.xml"),
+        funcs = include_str!("blocks/generators-nested.xml"),
         methods = "",
     ));
 
@@ -352,7 +321,7 @@ fn test_proc_call_in_closure() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_call_in_closure.xml"),
+        funcs = include_str!("blocks/call-in-closure.xml"),
         methods = "",
     ));
 
@@ -369,7 +338,7 @@ fn test_proc_warp_yields() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="counter"><l>0</l></variable>"#,
         fields = "",
-        funcs = include_str!("blocks/proc_warp_yields.xml"),
+        funcs = include_str!("blocks/warp-yields.xml"),
         methods = "",
     ));
 
@@ -389,7 +358,7 @@ fn test_proc_string_ops() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_string_ops.xml"),
+        funcs = include_str!("blocks/string-ops.xml"),
         methods = "",
     ));
 
@@ -601,7 +570,7 @@ fn test_proc_str_cmp_case_insensitive() {
     let (mut proc, mut proj) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
-        funcs = include_str!("blocks/proc_str_cmp_case_insensitive.xml"),
+        funcs = include_str!("blocks/str-cmp-case-insensitive.xml"),
         methods = "",
     ));
 
