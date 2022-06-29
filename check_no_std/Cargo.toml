@@ -10,4 +10,4 @@ panic = "abort"
 panic = "abort"
 
 [dependencies]
-netsblox-vm = { path = ".." }
+netsblox-vm = { path = "..", default-features = false }

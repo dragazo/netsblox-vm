@@ -4,14 +4,25 @@ use std::rc::Rc;
 use std::iter;
 
 use netsblox_ast as ast;
-use slotmap::SlotMap;
 
+use crate::gc::*;
+use crate::system::*;
 use crate::bytecode::*;
-use crate::runtime::*;
 use crate::process::*;
 
-slotmap::new_key_type! {
-    struct ProcessKey;
+#[derive(Collect)]
+#[collect(no_drop)]
+struct State<'gc, S: System> {
+    global_context: GcCell<'gc, GlobalContext<'gc>>,
+    code: Rc<ByteCode>,
+    settings: Settings,
+    processes: VecDeque<Process<'gc, S>>,
+}
+#[derive(Collect)]
+#[collect(no_drop)]
+pub struct Project<'gc, S: System> {
+    state: State<'gc, S>,
+    scripts: Vec<Script<'gc, S>>,
 }
 
 /// Simulates input from the user.
@@ -34,18 +45,27 @@ pub enum ProjectStep {
     Idle,
 }
 
-struct Script {
-    hat: ast::Hat,
-    start_pos: usize,
-    entity: EntityKey,
-    process: Option<ProcessKey>,
-    context_queue: VecDeque<SymbolTable>,
+#[derive(Collect)]
+#[collect(require_static)]
+enum Hat {
+    OnFlag,
+    LocalMessage { msg_type: String },
 }
-impl Script {
-    fn get_process_mut<'a, S: System>(&self, state: &'a mut State<S>) -> Option<&'a mut Process<S>> {
+
+#[derive(Collect)]
+#[collect(no_drop)]
+struct Script<'gc, S: System> {
+    hat: Hat,
+    start_pos: usize,
+    entity: GcCell<'gc, Entity<'gc>>,
+    process: Option<ProcessKey>,
+    context_queue: VecDeque<SymbolTable<'gc>>,
+}
+impl<'gc, S: System> Script<'gc, S> {
+    fn get_process_mut<'a>(&self, state: &'a mut State<'gc, S>) -> Option<&'a mut Process<'gc, S>> {
         state.processes.get_mut(self.process?)
     }
-    fn consume_context<S: System>(&mut self, state: &mut State<S>) {
+    fn consume_context(&mut self, state: &mut State<'gc, S>) {
         let process = self.get_process_mut(state);
         if process.as_ref().map(|x| x.is_running()).unwrap_or(false) { return }
 
@@ -65,14 +85,14 @@ impl Script {
             }
         }
     }
-    fn stop_all<S: System>(&mut self, state: &mut State<S>) {
+    fn stop_all(&mut self, state: &mut State<'gc, S>) {
         if let Some(process) = self.process {
             state.processes.remove(process);
             self.process = None;
         }
         self.context_queue.clear();
     }
-    fn schedule<S: System>(&mut self, state: &mut State<S>, context: SymbolTable, max_queue: usize) {
+    fn schedule(&mut self, state: &mut State<'gc, S>, context: SymbolTable<'gc>, max_queue: usize) {
         self.context_queue.push_back(context);
         self.consume_context(state);
         if self.context_queue.len() > max_queue {
@@ -81,29 +101,22 @@ impl Script {
     }
 }
 
-struct State<S: System> {
-    runtime: Runtime,
-    code: Rc<ByteCode>,
-    settings: Settings,
-    processes: SlotMap<ProcessKey, Process<S>>,
-    process_queue: VecDeque<ProcessKey>,
-}
-pub struct Project<S: System> {
-    state: State<S>,
-    scripts: Vec<Script>,
-}
-impl<S: System> Project<S> {
-    pub fn from_ast(role: &ast::Role, settings: Settings) -> Self {
-        let (runtime, entity_keys) = Runtime::from_ast(role);
+impl<'gc, S: System> Project<'gc, S> {
+    pub fn from_ast(mc: MutationContext<'gc, '_>, role: &ast::Role, settings: Settings) -> Self {
+        let runtime = Runtime::from_ast(mc, role);
         let (code, locations) = ByteCode::compile(role);
 
         let mut scripts = vec![];
-        for (entity_key, (entity, locs)) in iter::zip(entity_keys, &locations.entities) {
-            for (script, loc) in iter::zip(&entity.scripts, &locs.scripts) {
+        for (entity, (ast_entity, locs)) in iter::zip(&runtime.entities, &locations.entities) {
+            for (script, loc) in iter::zip(&ast_entity.scripts, &locs.scripts) {
                 if let Some(hat) = &script.hat {
                     scripts.push(Script {
-                        hat: hat.clone(),
-                        entity: entity_key,
+                        hat: match hat {
+                            ast::Hat::OnFlag { .. } => Hat::OnFlag,
+                            ast::Hat::LocalMessage { msg_type, .. } => Hat::LocalMessage { msg_type: msg_type.clone() },
+                            x => unimplemented!("{:?}", x),
+                        },
+                        entity: *entity,
                         process: None,
                         start_pos: loc.1,
                         context_queue: Default::default(),
@@ -112,46 +125,33 @@ impl<S: System> Project<S> {
             }
         }
 
-        Self { scripts, state: State { runtime, code: Rc::new(code), settings, processes: Default::default(), process_queue: Default::default() } }
+        Self { scripts, state: State { runtime, code: Rc::new(code), settings, processes: Default::default() } }
     }
-    pub fn runtime(&self) -> &Runtime {
-        &self.state.runtime
-    }
-    pub fn runtime_mut(&mut self) -> &mut Runtime {
-        &mut self.state.runtime
-    }
-    pub fn input(&mut self, input: Input) {
+    pub fn input(&mut self, mc: MutationContext<'gc, '_>, input: Input) {
         match input {
             Input::Start => {
-                for script in self.scripts.iter_mut() {
-                    if let ast::Hat::OnFlag { .. } = &script.hat {
+                for script in self.scripts.iter() {
+                    let script = script.write(mc);
+                    if let Hat::OnFlag = &script.hat {
                         script.stop_all(&mut self.state);
                         script.schedule(&mut self.state, Default::default(), 0);
                     }
                 }
             }
-            Input::Stop => {
-                self.state.processes.clear();
-                self.state.process_queue.clear();
-            }
+            Input::Stop => self.state.processes.clear(),
         }
     }
-    pub fn step(&mut self, system: &mut S) -> ProjectStep {
-        let (process_key, process) = loop {
-            match self.state.process_queue.pop_front() {
-                None => return ProjectStep::Idle,
-                Some(process_key) => match self.state.processes.get_mut(process_key) {
-                    None => (), // prune dead process key
-                    Some(process) => break (process_key, process),
-                }
-            }
+    pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &mut S) -> ProjectStep {
+        let process = match self.state.processes.front_mut() {
+            None => return ProjectStep::Idle,
+            Some(x) => x,
         };
 
-        match process.step(&mut self.state.runtime, system) {
+        match process.step(mc, &mut self.state.runtime, system) {
             Ok(x) => match x {
-                ProcessStep::Normal => self.state.process_queue.push_front(process_key),   // continue executing same process
-                ProcessStep::Yield => self.state.process_queue.push_back(process_key),     // next process
-                ProcessStep::Terminate(_) => { self.state.processes.remove(process_key); } // prune terminated process and key
+                ProcessStep::Normal => (),
+                ProcessStep::Yield => self.state.processes.rotate_left(1),
+                ProcessStep::Terminate => { self.state.processes.pop_front(); }
                 ProcessStep::Idle => unreachable!(),
             }
             Err(_) => unimplemented!(),

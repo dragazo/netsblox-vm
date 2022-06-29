@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, VecDeque};
 
 use netsblox_ast as ast;
 
+use crate::gc::*;
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BinaryOp {
     Add, Sub, Mul, Div, Mod, Pow, Log,
@@ -120,8 +122,9 @@ pub(crate) enum Instruction {
 
 /// An interpreter-ready sequence of instructions.
 /// 
-/// [`Process`](crate::process::Process) is an execution primitive that can be used to execute generated [`ByteCode`].
-#[derive(Debug)]
+/// [`Process`](crate::runtime::Process) is an execution primitive that can be used to execute generated [`ByteCode`].
+#[derive(Debug, Collect)]
+#[collect(require_static)]
 pub struct ByteCode(pub(crate) Vec<Instruction>);
 /// Location info in a [`ByteCode`] object for a particular entity.
 #[derive(Debug)]

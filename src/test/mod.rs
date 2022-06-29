@@ -5,9 +5,9 @@ use crate::runtime::*;
 use crate::process::*;
 
 mod process;
-mod project;
+// mod project;
 
-fn assert_values_eq(got: &Value, expected: &Value, epsilon: f64, path: &str) {
+fn assert_values_eq<'gc>(got: &Value<'gc>, expected: &Value<'gc>, epsilon: f64, path: &str) {
     if got.get_type() != expected.get_type() {
         panic!("{} - type error - got {:?} expected {:?} - {:?}", path, got.get_type(), expected.get_type(), got);
     }
@@ -20,14 +20,11 @@ fn assert_values_eq(got: &Value, expected: &Value, epsilon: f64, path: &str) {
             if !good { panic!("{} - number error - got {} expected {}", path, got, expected) }
         }
         (Value::String(got), Value::String(expected)) => {
-            if got != expected { panic!("{} - string error - got {:?} expected {:?}", path, got, expected) }
+            if got.as_str() != expected.as_str() { panic!("{} - string error - got {:?} expected {:?}", path, got, expected) }
         }
         (Value::List(got), Value::List(expected)) => {
-            let got = got.upgrade().unwrap();
-            let got = got.borrow();
-
-            let expected = expected.upgrade().unwrap();
-            let expected = expected.borrow();
+            let got = got.read();
+            let expected = expected.read();
 
             if got.len() != expected.len() { panic!("{} - list len error - got {} expected {}\ngot:      {:?}\nexpected: {:?}", path, got.len(), expected.len(), got, expected) }
 

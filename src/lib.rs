@@ -8,25 +8,41 @@
 //! NetsBlox projects running anywhere in the world.
 //!
 //! `netsblox_vm` is a pure Rust implementation of the NetsBlox block-based code execution engine
-//! which is written in safe, no_std Rust for use on arbitrary devices, including in embedded applications.
+//! which is written in safe, `no_std` Rust for use on arbitrary devices, including in embedded applications.
+//! This makes it possible to execute general block-based code on nearly any platform or environment with cross-compilation.
+//!
+//! # `no_std`
+//! 
+//! To use `netsblox_vm` in `no_std` Rust projects, simply pass the `default-features = false` flag to the project dependency.
+//! Note that `alloc` is required in this case.
+//! 
+//! ```toml
+//! [dependencies]
+//! netsblox_vm = { version = "...", default-features = false }
+//! ```
 //! 
 //! ## Features
+//! 
 //! | Name | Description | Default |
 //! | ---- | ----------- | ------- |
-//! | `std` | Link to the standard library. This gives access to the `StdSystem` implementation of [`System`](crate::runtime::System). | Disabled |
-//! | `intern_strings` | Globally enable string interning for each new [`Value::String`](crate::runtime::Value::String) allocation within a project context. In general, this degrades performance, but could be useful in some embedded systems where memory is limited and there are many duplicate string values (e.g., from parsing a csv/json value) | Disabled |
+//! | `std` | Link to the standard library. Among other benefits, this gives access to the `StdSystem` implementation of [`System`](crate::runtime::System), which works out of the box. | Enabled |
 
 extern crate no_std_compat as std;
 
-macro_rules! trivial_from_impl {
-    ($t:ident : $($f:ident),*$(,)?) => {$(
-        impl From<$f> for $t { fn from(e: $f) -> $t { $t::$f(e) } }
-    )*}
+/// Re-exports of relevant items from `gc_arena`.
+pub mod gc {
+    pub use gc_arena::{Collect, Gc, GcCell, MutationContext, make_arena};
+}
+
+/// Re-exports of relevant items from `serde_json`.
+pub mod json {
+    pub use serde_json::{Value as Json, json};
 }
 
 pub mod bytecode;
+// pub mod slotmap;
 pub mod runtime;
 pub mod process;
-pub mod project;
+// pub mod project;
 
 #[cfg(test)] mod test;
