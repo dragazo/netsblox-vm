@@ -66,7 +66,7 @@ struct Script<'gc> {
     start_pos: usize,
     entity: GcCell<'gc, Entity<'gc>>,
     process: Option<ProcessKey>,
-    context_queue: VecDeque<SymbolTable<'gc>>,
+    context_queue: VecDeque<(SymbolTable<'gc>, Option<Barrier>)>,
 }
 impl<'gc> Script<'gc> {
     fn get_process_mut<'a, S: System>(&self, state: &'a mut State<'gc, S>) -> Option<&'a mut Process<'gc, S>> {
@@ -76,16 +76,16 @@ impl<'gc> Script<'gc> {
         let process = self.get_process_mut(state);
         if process.as_ref().map(|x| x.is_running()).unwrap_or(false) { return }
 
-        let context = match self.context_queue.pop_front() {
+        let (context, barrier) = match self.context_queue.pop_front() {
             Some(x) => x,
             None => return,
         };
 
         match process {
-            Some(process) => process.initialize(context),
+            Some(process) => process.initialize(context, barrier),
             None => {
                 let mut process = Process::new(state.code.clone(), self.start_pos, state.global_context, self.entity, state.settings);
-                process.initialize(context);
+                process.initialize(context, barrier);
                 let key = state.processes.insert(process);
                 state.process_queue.push_back(key);
                 self.process = Some(key);
@@ -99,8 +99,8 @@ impl<'gc> Script<'gc> {
         }
         self.context_queue.clear();
     }
-    fn schedule<S: System>(&mut self, state: &mut State<'gc, S>, context: SymbolTable<'gc>, max_queue: usize) {
-        self.context_queue.push_back(context);
+    fn schedule<S: System>(&mut self, state: &mut State<'gc, S>, context: SymbolTable<'gc>, barrier: Option<Barrier>, max_queue: usize) {
+        self.context_queue.push_back((context, barrier));
         self.consume_context(state);
         if self.context_queue.len() > max_queue {
             self.context_queue.pop_back();
@@ -149,7 +149,7 @@ impl<'gc, S: System> Project<'gc, S> {
                 for script in self.scripts.iter_mut() {
                     if let Hat::OnFlag = &script.hat {
                         script.stop_all(&mut self.state);
-                        script.schedule(&mut self.state, Default::default(), 0);
+                        script.schedule(&mut self.state, Default::default(), None, 0);
                     }
                 }
             }
@@ -171,8 +171,19 @@ impl<'gc, S: System> Project<'gc, S> {
             Ok(x) => match x {
                 ProcessStep::Normal => self.state.process_queue.push_front(proc_key),
                 ProcessStep::Yield => self.state.process_queue.push_back(proc_key),
-                ProcessStep::Terminate(_) => (),
+                ProcessStep::Terminate { .. } => (),
                 ProcessStep::Idle => unreachable!(),
+                ProcessStep::Broadcast { msg_type, barrier } => {
+                    for script in self.scripts.iter_mut() {
+                        if let Hat::LocalMessage { msg_type: recv_type } = &script.hat {
+                            if *recv_type == *msg_type {
+                                script.stop_all(&mut self.state);
+                                script.schedule(&mut self.state, Default::default(), barrier.clone(), 0);
+                            }
+                        }
+                    }
+                    self.state.process_queue.push_front(proc_key); // keep executing same process, if it was a wait, it'll yield next step
+                }
             }
             Err(_) => unimplemented!(),
         }

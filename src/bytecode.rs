@@ -118,6 +118,10 @@ pub(crate) enum Instruction {
     /// If the call stack is empty, this instead terminates the process
     /// with the reported value being the (only) value remaining in the value stack.
     Return,
+
+    /// Pops 1 value from the value stack, `msg_type`, and broadcasts a message to all scripts.
+    /// The `wait` flag can be set to denote that the broadcasting script should wait until all receiving scripts have terminated.
+    Broadcast { wait: bool },
 }
 
 /// An interpreter-ready sequence of instructions.
@@ -513,6 +517,13 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins[check_pos] = Instruction::ConditionalJump { to: else_pos, when: false };
                 self.ins[jump_pos] = Instruction::Jump { to: aft };
+            }
+            ast::Stmt::SendLocalMessage { target, msg_type, wait, .. } => match target {
+                Some(_) => unimplemented!(),
+                None => {
+                    self.append_expr(msg_type, entity);
+                    self.ins.push(Instruction::Broadcast { wait: *wait });
+                }
             }
             x => unimplemented!("{:?}", x),
         }

@@ -14,5 +14,5 @@ no-std-compat = { version = "0.4.1", features = ["alloc"] }
 derive_builder = { version = "0.11.2", default-features = false }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 gc-arena = { version = "0.2.2", default-features = false }
-netsblox-ast = { version = "=0.2.4", default-features = false }
+netsblox-ast = { version = "=0.2.5", default-features = false }
 libm = "0.2.2"

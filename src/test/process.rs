@@ -31,7 +31,7 @@ fn get_running_proc(xml: &str) -> EnvArena {
 
         let mut proc = Process::new(Rc::new(code), main.1, glob, glob.read().entities[0], SettingsBuilder::default().build().unwrap());
         assert!(!proc.is_running());
-        proc.initialize(Default::default());
+        proc.initialize(Default::default(), None);
         assert!(proc.is_running());
 
         Env { glob, proc: GcCell::allocate(mc, proc) }
@@ -50,7 +50,8 @@ fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(Mu
                 Ok(ProcessStep::Idle) => panic!(),
                 Ok(ProcessStep::Normal) => (),
                 Ok(ProcessStep::Yield) => yields += 1,
-                Ok(ProcessStep::Terminate(e)) => break e,
+                Ok(ProcessStep::Terminate { result }) => break result,
+                Ok(ProcessStep::Broadcast { .. }) => panic!("proc tests should not broadcast"),
                 Err(e) => return and_then(mc, env, Err(e)),
             }
         };
@@ -88,7 +89,7 @@ fn test_proc_sum_123n() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("n", Shared::Unique(n.into()));
-            env.proc.write(mc).initialize(locals);
+            env.proc.write(mc).initialize(locals, None);
         });
         run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
             Value::Number(ret) => assert_eq!(ret, expect),
@@ -110,7 +111,7 @@ fn test_proc_recursive_factorial() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("n", Shared::Unique(n.into()));
-            env.proc.write(mc).initialize(locals);
+            env.proc.write(mc).initialize(locals, None);
         });
         run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
             Value::Number(ret) => assert_eq!(ret, expect),
@@ -217,7 +218,7 @@ fn test_proc_sieve_of_eratosthenes() {
 
         let mut proc = env.proc.write(mc);
         assert!(proc.is_running());
-        proc.initialize(locals);
+        proc.initialize(locals, None);
         assert!(proc.is_running());
     });
 
@@ -373,7 +374,7 @@ fn test_proc_warp_yields() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("mode", Shared::Unique((mode as f64).into()));
-            env.proc.write(mc).initialize(locals);
+            env.proc.write(mc).initialize(locals, None);
         });
 
         run_till_term(&mut env, |_, env, res| {

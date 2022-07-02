@@ -70,7 +70,9 @@ pub enum ProcessStep<'gc> {
     Yield,
     /// The process has successfully terminated with the given return value, or [`None`] if terminated by an (error-less) abort,
     /// such as a stop script command or the death of the process's associated entity.
-    Terminate(Option<Value<'gc>>),
+    Terminate { result: Option<Value<'gc>> },
+    /// The process has requested to broadcast a message to all entities, which may trigger other code to execute.
+    Broadcast { msg_type: Gc<'gc, String>, barrier: Option<Barrier> },
 }
 
 /// Settings to use for a [`Process`].
@@ -93,9 +95,9 @@ struct ReturnPoint {
 
 #[derive(Collect)]
 #[collect(require_static)]
-struct AsyncReq<S: System> {
-    key: S::AsyncKey,
-    aft_pos: usize,
+enum Defer<S: System> {
+    Async { key: S::AsyncKey, aft_pos: usize },
+    Barrier { condition: BarrierCondition, aft_pos: usize },
 }
 
 /// A [`ByteCode`] execution primitive.
@@ -112,10 +114,11 @@ pub struct Process<'gc, S: System> {
     settings: Settings,
     pos: usize,
     running: bool,
+    barrier: Option<Barrier>,
     warp_counter: usize,
     call_stack: Vec<(ReturnPoint, SymbolTable<'gc>)>, // tuples of (ret pos, locals)
     value_stack: Vec<Value<'gc>>,
-    async_req: Option<AsyncReq<S>>,
+    defer: Option<Defer<S>>,
 }
 impl<'gc, S: System> Process<'gc, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity`.
@@ -124,11 +127,12 @@ impl<'gc, S: System> Process<'gc, S> {
         Self {
             code, start_pos, global_context, entity, settings,
             running: false,
+            barrier: None,
             pos: 0,
             warp_counter: 0,
             call_stack: vec![],
             value_stack: vec![],
-            async_req: None,
+            defer: None,
         }
     }
     /// Checks if the process is currently running.
@@ -136,17 +140,19 @@ impl<'gc, S: System> Process<'gc, S> {
     pub fn is_running(&self) -> bool {
         self.running
     }
-    /// Prepares the process to execute starting at the main entry point (see [`Process::new`])
-    /// with the provided input local variables.
+    /// Prepares the process to execute starting at the main entry point (see [`Process::new`]) with the provided input local variables.
+    /// A [`Barrier`] may also be set, which will be destroyed upon termination, either due to completion or an error.
+    /// 
     /// Any previous process state is wiped when performing this action.
-    pub fn initialize(&mut self, locals: SymbolTable<'gc>) {
+    pub fn initialize(&mut self, locals: SymbolTable<'gc>, barrier: Option<Barrier>) {
         self.pos = self.start_pos;
         self.running = true;
+        self.barrier = barrier;
         self.warp_counter = 0;
         self.call_stack.clear();
         self.call_stack.push((ReturnPoint { pos: usize::MAX, warp_counter: 0, value_stack_size: 0 }, locals));
         self.value_stack.clear();
-        self.async_req = None;
+        self.defer = None;
     }
     /// Executes a single bytecode instruction.
     /// The return value can be used to determine what additional effects the script has requested,
@@ -155,25 +161,34 @@ impl<'gc, S: System> Process<'gc, S> {
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`ProcessStep::Terminate`].
     pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &mut S) -> Result<ProcessStep<'gc>, ExecError> {
         let res = self.step_impl(mc, system);
-        if let Ok(ProcessStep::Terminate(_)) | Err(_) = res {
+        if let Ok(ProcessStep::Terminate { .. }) | Err(_) = res {
             self.running = false;
+            self.barrier = None;
         }
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
     fn step_impl(&mut self, mc: MutationContext<'gc, '_>, system: &mut S) -> Result<ProcessStep<'gc>, ErrorCause> {
-        if let Some(async_req) = &self.async_req {
-            match system.poll_async(mc, &async_req.key)? {
+        match &self.defer {
+            None => (),
+            Some(Defer::Async { key, aft_pos }) => match system.poll_async(mc, key)? {
                 AsyncPoll::Completed(x) => {
                     self.value_stack.push(x);
-                    self.pos = async_req.aft_pos;
-                    self.async_req = None;
+                    self.pos = *aft_pos;
+                    self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
+            }
+            Some(Defer::Barrier { condition, aft_pos }) => match condition.is_completed() {
+                true => {
+                    self.pos = *aft_pos;
+                    self.defer = None;
+                }
+                false => return Ok(ProcessStep::Yield),
             }
         }
 
         let mut entity = self.entity.write(mc);
-        if !entity.alive { return Ok(ProcessStep::Terminate(None)) }
+        if !entity.alive { return Ok(ProcessStep::Terminate { result: None }) }
 
         let mut global_context = self.global_context.write(mc);
         let mut context = [&mut global_context.globals, &mut entity.fields, &mut self.call_stack.last_mut().unwrap().1];
@@ -409,11 +424,26 @@ impl<'gc, S: System> Process<'gc, S> {
                     debug_assert_eq!(return_point.pos, usize::MAX);
                     debug_assert_eq!(return_point.warp_counter, 0);
                     debug_assert_eq!(return_point.value_stack_size, 0);
-                    return Ok(ProcessStep::Terminate(Some(self.value_stack.pop().unwrap())));
+                    return Ok(ProcessStep::Terminate { result: Some(self.value_stack.pop().unwrap()) });
                 } else {
                     self.pos = return_point.pos;
                     self.warp_counter = return_point.warp_counter;
                 }
+            }
+            Instruction::Broadcast { wait } => {
+                let msg_type = self.value_stack.pop().unwrap().to_string(mc)?;
+                let barrier = match *wait {
+                    false => {
+                        self.pos += 1;
+                        None
+                    }
+                    true => {
+                        let barrier = Barrier::new();
+                        self.defer = Some(Defer::Barrier { condition: barrier.get_condition(), aft_pos: self.pos + 1 });
+                        Some(barrier)
+                    }
+                };
+                return Ok(ProcessStep::Broadcast { msg_type, barrier });
             }
         }
 

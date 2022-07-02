@@ -1,6 +1,7 @@
 use std::prelude::v1::*;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
+use std::rc::{Rc, Weak};
 use std::fmt;
 
 use netsblox_ast as ast;
@@ -495,6 +496,32 @@ impl<'gc> GlobalContext<'gc> {
                 alive: true,
             })).collect(),
         }
+    }
+}
+
+/// A blocking handle for a [`BarrierCondition`].
+#[derive(Debug, Clone, Collect)]
+#[collect(require_static)]
+pub struct Barrier(Rc<()>);
+/// Waits for the destruction of all associated [`Barrier`] handles.
+#[derive(Debug, Clone)]
+pub struct BarrierCondition(Weak<()>);
+impl Barrier {
+    /// Creates a new [`Barrier`] which is not related to any other barrier.
+    /// A barrier can be cloned to create additional associated, blocking handles for the same condition.
+    pub fn new() -> Self {
+        Barrier(Rc::new(()))
+    }
+    /// Constructs a [`BarrierCondition`] object which waits for this barrier handle and all of its associated handles
+    /// (created before or after this point) to be destroyed.
+    pub fn get_condition(&self) -> BarrierCondition {
+        BarrierCondition(Rc::downgrade(&self.0))
+    }
+}
+impl BarrierCondition {
+    /// Checks if the condition has been completed, i.e., that all the associated barriers have been destroyed.
+    pub fn is_completed(&self) -> bool {
+        self.0.strong_count() == 0
     }
 }
 
