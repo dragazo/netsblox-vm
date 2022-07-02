@@ -40,9 +40,9 @@ pub mod json {
 }
 
 pub mod bytecode;
-// pub mod slotmap;
+pub mod slotmap;
 pub mod runtime;
 pub mod process;
-// pub mod project;
+pub mod project;
 
 #[cfg(test)] mod test;

@@ -5,7 +5,7 @@ use crate::runtime::*;
 use crate::process::*;
 
 mod process;
-// mod project;
+mod project;
 
 fn assert_values_eq<'gc>(got: &Value<'gc>, expected: &Value<'gc>, epsilon: f64, path: &str) {
     if got.get_type() != expected.get_type() {

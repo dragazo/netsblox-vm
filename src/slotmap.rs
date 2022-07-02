@@ -20,7 +20,7 @@ pub trait Key: Copy + Eq + Ord + 'static {
 #[macro_export]
 macro_rules! new_key {
     ($($(#[doc = $doc:expr])? $vis:vis struct $name:ident;)*) => {$(
-        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Collect)]
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, $crate::gc::Collect)]
         #[collect(require_static)]
         $(#[doc = $doc])?
         $vis struct $name(usize, usize);
@@ -32,7 +32,8 @@ macro_rules! new_key {
     )*}
 }
 
-#[derive(Clone)]
+#[derive(Clone, Collect)]
+#[collect(no_drop)]
 struct Slot<T> {
     value: Option<T>,
     generation: usize,
@@ -42,7 +43,8 @@ struct Slot<T> {
 /// 
 /// You can use the [`new_key`] macro to create a new key type to use.
 /// It is recommended to use different key types for different collections to avoid accidentally using a key from a different map.
-#[derive(Clone)]
+#[derive(Clone, Collect)]
+#[collect(no_drop)]
 pub struct SlotMap<K: Key, T> {
     slots: Vec<Slot<T>>,
     empty_slots: Vec<usize>,
@@ -64,13 +66,15 @@ impl<K: Key, T> SlotMap<K, T> {
             _key: PhantomData,
         }
     }
-    #[cfg(debug_assertions)]
+    #[cfg(test)]
     fn invariant(&self) -> bool {
+        self.num_values == self.slots.iter().filter(|x| x.value.is_some()).count()
+        &&
         self.num_values + self.empty_slots.len() == self.slots.len()
     }
     /// Adds a new value to the map and returns a new key that references it.
     pub fn insert(&mut self, value: T) -> K {
-        debug_assert!(self.invariant());
+        #[cfg(test)] assert!(self.invariant());
 
         self.num_values += 1;
         let key = match self.empty_slots.pop() {
@@ -87,13 +91,13 @@ impl<K: Key, T> SlotMap<K, T> {
             }
         };
 
-        debug_assert!(self.invariant());
+        #[cfg(test)] assert!(self.invariant());
         key
     }
     /// Removes a value from the map and returns it (if it existed).
     /// It is guaranteed that all future accesses with the removed key will return [`None`].
     pub fn remove(&mut self, key: K) -> Option<T> {
-        debug_assert!(self.invariant());
+        #[cfg(test)] assert!(self.invariant());
 
         let slot = self.slots.get_mut(key.get_slot())?;
         let res = slot.value.take();
@@ -103,8 +107,21 @@ impl<K: Key, T> SlotMap<K, T> {
             self.empty_slots.push(key.get_slot());
         }
 
-        debug_assert!(self.invariant());
+        #[cfg(test)] assert!(self.invariant());
         res
+    }
+    pub fn clear(&mut self) {
+        #[cfg(test)] assert!(self.invariant());
+
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            if slot.value.take().is_some() {
+                slot.generation += 1;
+                self.empty_slots.push(i);
+            }
+        }
+        self.num_values = 0;
+
+        #[cfg(test)] assert!(self.invariant());
     }
     /// Get a reference to a value in the map.
     pub fn get(&self, key: K) -> Option<&T> {
@@ -119,6 +136,10 @@ impl<K: Key, T> SlotMap<K, T> {
     /// Get the number of values stored in the map.
     pub fn len(&self) -> usize {
         self.num_values
+    }
+    /// Checks if the map is currently empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
     /// Iterates over the keys and values currently stored in the map.
     pub fn iter(&self) -> Iter<K, T> {
@@ -217,16 +238,16 @@ fn test_slotmap() {
 
     for _ in 0..4 {
         let mut keys = vec![];
-        for i in 0..512 {
+        for i in 0..128 {
             keys.push((map.insert(i), i));
         }
-        assert_eq!(map.slots.len(), 512);
-        keys[100..].reverse();
-        keys[..400].reverse();
-        keys[200..300].reverse();
+        assert_eq!(map.slots.len(), 128);
+        keys[20..].reverse();
+        keys[..100].reverse();
+        keys[40..70].reverse();
 
         for i in 0..keys.len() {
-            assert_eq!(map.len(), 512 - i);
+            assert_eq!(map.len(), 128 - i);
             for j in 0..i {
                 assert!(map.get(keys[j].0).is_none());
                 assert!(map.get_mut(keys[j].0).is_none());
@@ -243,7 +264,7 @@ fn test_slotmap() {
                 assert_eq!(*map.get(keys[j].0).unwrap(), keys[j].1);
                 assert_eq!(*map.get_mut(keys[j].0).unwrap(), keys[j].1);
             }
-            assert_eq!(map.len(), 512 - i - 1);
+            assert_eq!(map.len(), 128 - i - 1);
 
             let mut cache = BTreeSet::default();
             let cpy = map.clone();
@@ -266,5 +287,34 @@ fn test_slotmap() {
                 assert_eq!(*cpy.get(key).unwrap(), val);
             }
         }
+    }
+
+    assert_eq!(map.slots.len(), 128);
+    assert_eq!(map.len(), 0);
+    assert!(map.is_empty());
+
+    let mut keys = vec![];
+    for i in 0..32 {
+        keys.push((i, map.insert(i)));
+    }
+    keys[..25].reverse();
+    keys[7..].reverse();
+    keys[11..19].reverse();
+
+    assert_eq!(map.slots.len(), 128);
+    assert_eq!(map.len(), 32);
+    assert!(!map.is_empty());
+    for (i, key) in keys.iter().copied() {
+        assert_eq!(*map.get(key).unwrap(), i);
+        assert_eq!(*map.get_mut(key).unwrap(), i);
+    }
+
+    map.clear();
+    assert_eq!(map.slots.len(), 128);
+    assert_eq!(map.len(), 0);
+    assert!(map.is_empty());
+    for (_, key) in keys.iter().copied() {
+        assert_eq!(map.get(key).copied(), None);
+        assert_eq!(map.get_mut(key).copied(), None);
     }
 }
