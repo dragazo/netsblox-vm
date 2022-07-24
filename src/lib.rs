@@ -29,6 +29,8 @@
 
 extern crate no_std_compat as std;
 
+#[macro_use] extern crate num_derive;
+
 /// Re-exports of relevant items from `gc_arena`.
 pub mod gc {
     pub use gc_arena::{Collect, Gc, GcCell, MutationContext, make_arena};
@@ -38,6 +40,9 @@ pub mod gc {
 pub mod json {
     pub use serde_json::{Value as Json, json};
 }
+
+/// The re-exported version of the `netsblox-ast` crate.
+pub use netsblox_ast as ast;
 
 pub mod bytecode;
 pub mod slotmap;

@@ -3,8 +3,6 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::iter;
 
-use netsblox_ast as ast;
-
 use crate::*;
 use crate::gc::*;
 use crate::slotmap::*;

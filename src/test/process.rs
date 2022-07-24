@@ -1,8 +1,6 @@
 use std::prelude::v1::*;
 use std::rc::Rc;
 
-use netsblox_ast as ast;
-
 use crate::*;
 use crate::gc::*;
 use crate::bytecode::*;

@@ -7,7 +7,7 @@ edition = "2021"
 
 [features]
 default = ["std"]
-std = ["no-std-compat/std"]
+std = ["no-std-compat/std", "reqwest", "tokio", "clap"]
 
 [dependencies]
 no-std-compat = { version = "0.4.1", features = ["alloc"] }
@@ -15,4 +15,10 @@ derive_builder = { version = "0.11.2", default-features = false }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 gc-arena = { version = "0.2.2", default-features = false }
 netsblox-ast = { version = "=0.2.5", default-features = false }
+num-traits = { version = "0.2.15", default-features = false }
+num-derive = { version = "0.3.3", default-features = false }
 libm = "0.2.2"
+
+reqwest = { version = "0.11", features = ["json"], optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+clap = { version = "3.2.14", features = ["derive"], optional = true }

@@ -13,6 +13,7 @@ use std::iter;
 
 use derive_builder::Builder;
 
+use crate::*;
 use crate::gc::*;
 use crate::json::*;
 use crate::runtime::*;
@@ -118,6 +119,7 @@ pub struct Process<'gc, S: System> {
     warp_counter: usize,
     call_stack: Vec<(ReturnPoint, SymbolTable<'gc>)>, // tuples of (ret pos, locals)
     value_stack: Vec<Value<'gc>>,
+    meta_stack: Vec<String>,
     defer: Option<Defer<S>>,
 }
 impl<'gc, S: System> Process<'gc, S> {
@@ -132,6 +134,7 @@ impl<'gc, S: System> Process<'gc, S> {
             warp_counter: 0,
             call_stack: vec![],
             value_stack: vec![],
+            meta_stack: vec![],
             defer: None,
         }
     }
@@ -152,6 +155,7 @@ impl<'gc, S: System> Process<'gc, S> {
         self.call_stack.clear();
         self.call_stack.push((ReturnPoint { pos: usize::MAX, warp_counter: 0, value_stack_size: 0 }, locals));
         self.value_stack.clear();
+        self.meta_stack.clear();
         self.defer = None;
     }
     /// Executes a single bytecode instruction.
@@ -206,72 +210,77 @@ impl<'gc, S: System> Process<'gc, S> {
             (mut $var:expr) => {lookup_var!($var => lookup_mut)};
         }
 
-        match &self.code.0[self.pos] {
-            Instruction::Illegal => panic!(),
-
+        let (ins, aft_pos) = Instruction::read(&self.code.raw(), self.pos);
+        match ins {
             Instruction::Yield => {
-                self.pos += 1;
+                self.pos = aft_pos;
                 if self.warp_counter == 0 { return Ok(ProcessStep::Yield) }
             }
             Instruction::WarpStart => {
                 self.warp_counter += 1;
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::WarpStop => {
                 self.warp_counter -= 1;
-                self.pos += 1;
+                self.pos = aft_pos;
             }
 
-            Instruction::PushValue { value } => {
-                self.value_stack.push(Value::from_ast(mc, value));
-                self.pos += 1;
+            Instruction::PushBool { value } => {
+                self.value_stack.push(value.into());
+                self.pos = aft_pos;
+            }
+            Instruction::PushNumber { value } => {
+                self.value_stack.push(value.into());
+                self.pos = aft_pos;
+            }
+            Instruction::PushString { value } => {
+                self.value_stack.push(Value::from_simple(mc, simple_value!(value)));
+                self.pos = aft_pos;
             }
             Instruction::PushVariable { var } => {
                 self.value_stack.push(lookup_var!(var).get());
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::DupeValue { top_index } => {
-                let val = self.value_stack[self.value_stack.len() - 1 - top_index];
+                let val = self.value_stack[self.value_stack.len() - 1 - top_index as usize];
                 self.value_stack.push(val);
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::SwapValues { top_index_1, top_index_2 } => {
                 let len = self.value_stack.len();
-                self.value_stack.swap(len - 1 - top_index_1, len - 1 - top_index_2);
-                self.pos += 1;
+                self.value_stack.swap(len - 1 - top_index_1 as usize, len - 1 - top_index_2 as usize);
+                self.pos = aft_pos;
             }
-            Instruction::PopValues { count } => {
-                let len = self.value_stack.len();
-                self.value_stack.drain(len - count..);
-                debug_assert_eq!(self.value_stack.len(), len - count);
-                self.pos += 1;
+            Instruction::PopValue => {
+                self.value_stack.pop().unwrap();
+                self.pos = aft_pos;
             }
 
             Instruction::ShallowCopy => {
                 let val = self.value_stack.pop().unwrap();
                 self.value_stack.push(val.shallow_copy(mc));
-                self.pos += 1;
+                self.pos = aft_pos;
             }
 
             Instruction::MakeList { len } => {
-                let mut vals = Vec::with_capacity(*len);
-                for _ in 0..*len {
+                let mut vals = Vec::with_capacity(len);
+                for _ in 0..len {
                     vals.push(self.value_stack.pop().unwrap());
                 }
                 vals.reverse();
                 self.value_stack.push(GcCell::allocate(mc, vals).into());
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::ListLen => {
                 let list = self.value_stack.pop().unwrap().to_list(mc)?;
                 self.value_stack.push((list.read().len() as f64).into());
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::ListIndex => {
                 let index = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap();
                 self.value_stack.push(ops::index_list(mc, &list, &index)?);
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::ListLastIndex => {
                 let list = self.value_stack.pop().unwrap().to_list(mc)?;
@@ -279,7 +288,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     Some(x) => *x,
                     None => return Err(ErrorCause::IndexOutOfBounds { index: 0.0, list_len: 0 }),
                 });
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::MakeListRange => {
                 let b = self.value_stack.pop().unwrap().to_number()?;
@@ -301,13 +310,13 @@ impl<'gc, S: System> Process<'gc, S> {
                 }
 
                 self.value_stack.push(GcCell::allocate(mc, res).into());
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::ListPush => {
                 let val = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().to_list(mc)?;
                 list.write(mc).push(val);
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::ListIndexAssign => {
                 let value = self.value_stack.pop().unwrap();
@@ -316,12 +325,12 @@ impl<'gc, S: System> Process<'gc, S> {
                 let mut list = list.write(mc);
                 let index = ops::prep_list_index(&index, list.len())?;
                 list[index] = value;
-                self.pos += 1;
+                self.pos = aft_pos;
             }
 
             Instruction::Strcat { args } => {
-                let mut values = Vec::with_capacity(*args);
-                for _ in 0..*args {
+                let mut values = Vec::with_capacity(args);
+                for _ in 0..args {
                     values.push(self.value_stack.pop().unwrap());
                 }
                 let mut res = String::new();
@@ -329,50 +338,52 @@ impl<'gc, S: System> Process<'gc, S> {
                     res += value.to_string(mc)?.as_str();
                 }
                 self.value_stack.push(Gc::allocate(mc, res).into());
-                self.pos += 1;
+                self.pos = aft_pos;
             }
 
             Instruction::BinaryOp { op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::binary_op(mc, &a, &b, *op)?);
-                self.pos += 1;
+                self.value_stack.push(ops::binary_op(mc, &a, &b, op)?);
+                self.pos = aft_pos;
             }
             Instruction::Eq => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
                 self.value_stack.push(ops::check_eq(&a, &b).into());
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::UnaryOp { op } => {
                 let x = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::unary_op(mc, &x, *op)?);
-                self.pos += 1;
+                self.value_stack.push(ops::unary_op(mc, &x, op)?);
+                self.pos = aft_pos;
             }
 
-            Instruction::DeclareLocals { vars } => {
-                let locals = context.locals_mut();
-                for var in vars {
-                    locals.redefine_or_define(var, Shared::Unique(0.0.into()));
-                }
-                self.pos += 1;
+            Instruction::DeclareLocal { var } => {
+                context.locals_mut().redefine_or_define(var, Shared::Unique(0.0.into()));
+                self.pos = aft_pos;
             }
             Instruction::Assign { var } => {
                 let value = self.value_stack.pop().unwrap();
                 context.set_or_define(mc, var, value);
-                self.pos += 1;
+                self.pos = aft_pos;
             }
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = lookup_var!(var).get();
-                context.set_or_define(mc, var, ops::binary_op(mc, &a, &b, *op)?);
-                self.pos += 1;
+                context.set_or_define(mc, var, ops::binary_op(mc, &a, &b, op)?);
+                self.pos = aft_pos;
             }
 
-            Instruction::Jump { to } => self.pos = *to,
+            Instruction::Jump { to } => self.pos = to,
             Instruction::ConditionalJump { to, when } => {
                 let value = self.value_stack.pop().unwrap();
-                self.pos = if value.to_bool()? == *when { *to } else { self.pos + 1 };
+                self.pos = if value.to_bool()? == when { to } else { aft_pos };
+            }
+
+            Instruction::MetaPush { value } => {
+                self.meta_stack.push(value.to_owned());
+                self.pos = aft_pos;
             }
 
             Instruction::Call { pos, params } => {
@@ -380,26 +391,33 @@ impl<'gc, S: System> Process<'gc, S> {
                     return Err(ErrorCause::CallDepthLimit { limit: self.settings.max_call_depth });
                 }
 
+                debug_assert_eq!(self.meta_stack.len(), params);
+                let params: Vec<_> = self.meta_stack.drain(..).collect();
+
                 let mut locals = SymbolTable::default();
                 for var in params.iter().rev() {
                     locals.redefine_or_define(var, self.value_stack.pop().unwrap().into());
                 }
-                self.call_stack.push((ReturnPoint { pos: self.pos + 1, warp_counter: self.warp_counter, value_stack_size: self.value_stack.len() }, locals));
-                self.pos = *pos;
+                self.call_stack.push((ReturnPoint { pos: aft_pos, warp_counter: self.warp_counter, value_stack_size: self.value_stack.len() }, locals));
+                self.pos = pos;
             }
             Instruction::MakeClosure { pos, params, captures } => {
+                debug_assert_eq!(self.meta_stack.len(), params + captures);
+                let captures: Vec<_> = self.meta_stack.drain(params..).collect();
+                let params: Vec<_> = self.meta_stack.drain(..).collect();
+
                 let mut caps = SymbolTable::default();
-                for var in captures {
+                for var in captures.iter() {
                     caps.redefine_or_define(var, lookup_var!(mut var).alias(mc));
                 }
-                self.value_stack.push(GcCell::allocate(mc, Closure { pos: *pos, params: params.clone(), captures: caps }).into());
-                self.pos += 1;
+                self.value_stack.push(GcCell::allocate(mc, Closure { pos, params, captures: caps }).into());
+                self.pos = aft_pos;
             }
             Instruction::CallClosure { args } => {
                 let closure = self.value_stack.pop().unwrap().to_closure(mc)?;
                 let mut closure = closure.write(mc);
-                if closure.params.len() != *args {
-                    return Err(ErrorCause::ClosureArgCount { expected: closure.params.len(), got: *args });
+                if closure.params.len() != args {
+                    return Err(ErrorCause::ClosureArgCount { expected: closure.params.len(), got: args });
                 }
 
                 let mut locals = SymbolTable::default();
@@ -409,7 +427,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 for var in closure.params.iter().rev() {
                     locals.redefine_or_define(var, self.value_stack.pop().unwrap().into());
                 }
-                self.call_stack.push((ReturnPoint { pos: self.pos + 1, warp_counter: self.warp_counter, value_stack_size: self.value_stack.len() }, locals));
+                self.call_stack.push((ReturnPoint { pos: aft_pos, warp_counter: self.warp_counter, value_stack_size: self.value_stack.len() }, locals));
                 self.pos = closure.pos;
             }
             Instruction::Return => {
@@ -432,14 +450,14 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::Broadcast { wait } => {
                 let msg_type = self.value_stack.pop().unwrap().to_string(mc)?;
-                let barrier = match *wait {
+                let barrier = match wait {
                     false => {
-                        self.pos += 1;
+                        self.pos = aft_pos;
                         None
                     }
                     true => {
                         let barrier = Barrier::new();
-                        self.defer = Some(Defer::Barrier { condition: barrier.get_condition(), aft_pos: self.pos + 1 });
+                        self.defer = Some(Defer::Barrier { condition: barrier.get_condition(), aft_pos });
                         Some(barrier)
                     }
                 };

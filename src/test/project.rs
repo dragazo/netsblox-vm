@@ -1,7 +1,5 @@
 use std::prelude::v1::*;
 
-use netsblox_ast as ast;
-
 use crate::*;
 use crate::gc::*;
 use crate::runtime::*;

@@ -4,8 +4,7 @@ use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::fmt;
 
-use netsblox_ast as ast;
-
+use crate::*;
 use crate::gc::*;
 use crate::json::*;
 

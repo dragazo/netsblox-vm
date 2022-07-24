@@ -2,18 +2,22 @@
 
 use std::prelude::v1::*;
 use std::collections::{BTreeMap, VecDeque};
+use std::mem;
 
-use netsblox_ast as ast;
+use num_traits::FromPrimitive;
 
+use crate::*;
 use crate::gc::*;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, FromPrimitive)]
+#[repr(u8)]
 pub(crate) enum BinaryOp {
     Add, Sub, Mul, Div, Mod, Pow, Log,
     Greater, Less,
     SplitCustom,
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, FromPrimitive)]
+#[repr(u8)]
 pub(crate) enum UnaryOp {
     ToBool, Not,
     Abs, Neg,
@@ -26,13 +30,23 @@ pub(crate) enum UnaryOp {
     UnicodeToChar, CharToUnicode,
 }
 
-#[derive(Debug)]
-pub(crate) enum Instruction {
+pub(crate) enum InternalInstruction<'a> {
     /// Triggers an error when encountered.
     /// This is an internal value that is only used to denote incomplete linking results for better testing.
     /// Properly-linked byte code should not contain this value.
     Illegal,
+    /// A special instruction which is used by the linker to simulate inserting multiple instructions at a single instruction position.
+    /// After linking, this variant will not be present in the resulting binary.
+    /// Notably, these packed instructions must be a single logical step, because addressing is only allowed at the [`InternalInstruction`] level.
+    Packed(Vec<Instruction<'a>>),
+    /// A valid instruction that will be present in the resulting binary.
+    Valid(Instruction<'a>),
+}
+impl<'a> From<Instruction<'a>> for InternalInstruction<'a> { fn from(ins: Instruction<'a>) -> Self { Self::Valid(ins) } }
 
+#[derive(Debug)]
+#[repr(u8)]
+pub(crate) enum Instruction<'a> {
     /// Explicitly trigger a yield point. This instruction is otherwise a no-op.
     Yield,
     /// Marks the start of a warp section. Note that warp sections can be nested.
@@ -40,19 +54,22 @@ pub(crate) enum Instruction {
     /// Marks the end of a warp section started by [`Instruction::WarpStart`].
     WarpStop,
 
-    /// Pushes 1 value to the value stack.
-    PushValue { value: ast::Value },
+    /// Pushes 1 bool value to the value stack.
+    PushBool { value: bool },
+    /// Pushes 1 number value to the value stack.
+    PushNumber { value: f64 },
+    /// Pushes 1 string value to the value stack.
+    PushString { value: &'a str },
     /// Pushes 1 value to the value stack, as looked up from the current execution context.
-    PushVariable { var: String },
+    PushVariable { var: &'a str },
     /// Consumes `count` values from the value stack and discards them.
-    PopValues { count: usize },
+    PopValue,
 
     /// Pushes 1 value onto the value stack, which is a copy of item `top_index` from the value stack.
     /// The top of the stack has `top_index == 0`, the item below it has `top_index == 1`, and so on.
-    DupeValue { top_index: usize },
+    DupeValue { top_index: u8 },
     /// Swaps two values in the value stack, as determined by the specified top index values (see [`Instruction::DupeValue`].
-    SwapValues { top_index_1: usize, top_index_2: usize },
-
+    SwapValues { top_index_1: u8, top_index_2: u8 },
     /// Consumes 1 value, `val`, from the value stack and pushes a shallow copy of `val` into the value stack.
     ShallowCopy,
 
@@ -67,7 +84,6 @@ pub(crate) enum Instruction {
 
     /// Pops a value, `x`, and a list, `list`, from the value stack and adds `x` to the end of `list`.
     ListPush,
-
     /// Consumes 1 value, `list`, from the value stack and pushes the the length of the list onto the value stack.
     ListLen,
     /// Consumes two values, `index` and `list`, from the value stack and pushes the value `list[index]` onto the value stack.
@@ -92,23 +108,29 @@ pub(crate) enum Instruction {
     /// Re/Declares a set of local variables, which are initialized to 0.
     /// Note that this is not equivalent to assigning a value of zero to the variable due to the potential issue of [`Shared::Aliased`].
     /// A new, [`Shared::Unique`] local variable must be created.
-    DeclareLocals { vars: Vec<String> },
+    DeclareLocal { var: &'a str },
     /// Consumes 1 value from the value stack and assigns it to the specified variable.
-    Assign { var: String },
+    Assign { var: &'a str },
     /// Consumes 1 value, `b` from the value stack, fetches the variable `a`, and assigns it `f(a, b)`.
-    BinaryOpAssign { var: String, op: BinaryOp },
+    /// Equivalent to fetching the variable, performing the operation, and re-assigning the new value, but is atomic.
+    BinaryOpAssign { var: &'a str, op: BinaryOp },
 
     /// Unconditionally jumps to the given location.
     Jump { to: usize },
     /// Pops a value from the value stack and jumps to the given location if its truthyness value is equal to `when`
     ConditionalJump { to: usize, when: bool },
 
-    /// Consumes `params.len()` arguments from the value stack (in reverse order of the listed params) to assign to a new symbol table.
+    /// Pushes 1 string value onto the meta stack.
+    MetaPush { value: &'a str },
+
+    /// Consumes `params` values from the meta stack (in reverse order) which are names of parameters to pass.
+    /// Then consumes `params` arguments from the value stack (in reverse order of the listed params) to assign to a new symbol table.
     /// Pushes the symbol table and return address to the call stack, and finally jumps to the given location.
-    Call { pos: usize, params: Vec<String> },
-    /// Creates a closure object with the given information.
+    Call { pos: usize, params: usize },
+    /// Consumes `captures` values from the meta stack (in reverse order), and then `params` values from the meta stack, each representing symbol names.
+    /// Then creates a closure object with the given information.
     /// Captures are looked up and bound immediately based on the current execution context.
-    MakeClosure { pos: usize, params: Vec<String>, captures: Vec<String> },
+    MakeClosure { pos: usize, params: usize, captures: usize },
     /// Consumes 1 argument, `closure`, and another `args` arguments (in reverse order) from the value stack
     /// to assign to the parameters of `closure` before executing the closure's stored code.
     /// It is an error if the number of supplied arguments does not match the number of parameters.
@@ -124,12 +146,214 @@ pub(crate) enum Instruction {
     Broadcast { wait: bool },
 }
 
+pub(crate) trait Binary<'a>: Sized {
+    /// Reads a value from `src` starting at `start`.
+    /// Returns the read value and the position of the first byte after the read segment.
+    fn read(src: &'a [u8], start: usize) -> (Self, usize);
+    /// Appends a binary representation of the value to the given binary buffer.
+    /// The addresses of any written pointers will be appended to `pointer_positions` (for relocation purposes).
+    /// This function is not intended for use outside of [`ByteCode`] linking.
+    fn append(val: &Self, out: &mut Vec<u8>, pointer_positions: &mut Vec<usize>);
+}
+
+macro_rules! binary_int_impl {
+    ($($t:ty),+$(,)?) => {$(
+        impl Binary<'_> for $t {
+            fn read(src: &[u8], start: usize) -> (Self, usize) {
+                let mut buf = [0u8; mem::size_of::<$t>()];
+                buf[..].copy_from_slice(&src[start..start + mem::size_of::<$t>()]);
+                (<$t>::from_le_bytes(buf), start + mem::size_of::<$t>())
+            }
+            fn append(val: &Self, out: &mut Vec<u8>, _: &mut Vec<usize>) {
+                out.extend_from_slice(&<$t>::to_le_bytes(*val))
+            }
+        }
+    )*}
+}
+binary_int_impl! { u64, u32, u16, u8, f64 }
+
+impl Binary<'_> for BinaryOp {
+    fn read(src: &[u8], start: usize) -> (Self, usize) {
+        (Self::from_u8(src[start]).unwrap(), start + 1)
+    }
+    fn append(val: &Self, out: &mut Vec<u8>, _: &mut Vec<usize>) {
+        debug_assert_eq!(mem::size_of::<Self>(), 1);
+        out.push((*val) as u8);
+    }
+}
+impl Binary<'_> for UnaryOp {
+    fn read(src: &[u8], start: usize) -> (Self, usize) {
+        (Self::from_u8(src[start]).unwrap(), start + 1)
+    }
+    fn append(val: &Self, out: &mut Vec<u8>, _: &mut Vec<usize>) {
+        debug_assert_eq!(mem::size_of::<Self>(), 1);
+        out.push((*val) as u8)
+    }
+}
+
+type UsizeRepr = u32; // we'll assume projects don't include over 4GB of code, cause that's ridiculous
+impl Binary<'_> for usize {
+    fn read(src: &[u8], start: usize) -> (Self, usize) {
+        let x: (UsizeRepr, usize) = Binary::read(src, start);
+        debug_assert!(x.0 <= usize::MAX as UsizeRepr);
+        (x.0 as usize, x.1)
+    }
+    fn append(val: &Self, out: &mut Vec<u8>, pointer_positions: &mut Vec<usize>) {
+        assert!(*val == *val as UsizeRepr as usize);
+        Binary::append(&((*val) as UsizeRepr), out, pointer_positions)
+    }
+}
+
+impl<'a> Binary<'a> for &'a str {
+    fn read(src: &'a [u8], start: usize) -> (Self, usize) {
+        let len: (usize, usize) = Binary::read(src, start);
+        (&std::str::from_utf8(&src[len.1..len.1 + len.0]).unwrap(), len.1 + len.0)
+    }
+    fn append(val: &Self, out: &mut Vec<u8>, pointer_positions: &mut Vec<usize>) {
+        Binary::append(&val.len(), out, pointer_positions);
+        out.extend_from_slice(val.as_bytes());
+    }
+}
+
+impl<'a> Binary<'a> for Instruction<'a> {
+    fn read(src: &'a [u8], start: usize) -> (Self, usize) {
+        macro_rules! read_prefixed {
+            (Instruction::$root:ident) => {
+                (Instruction::$root, start + 1)
+            };
+            (Instruction::$root:ident { $($tt:tt)* } $(: $($vals:ident),+$(,)? )?) => {{
+                #[allow(unused_mut)]
+                let mut parsing_stop = start + 1;
+                $($(let $vals = {
+                    let x = Binary::read(src, parsing_stop);
+                    parsing_stop = x.1;
+                    x.0
+                };)*)?
+                (Instruction::$root { $($tt)* $($($vals),+ )? }, parsing_stop)
+            }};
+        }
+        match src[start] {
+            0 => read_prefixed!(Instruction::Yield),
+            1 => read_prefixed!(Instruction::WarpStart),
+            2 => read_prefixed!(Instruction::WarpStop),
+
+            3 => read_prefixed!(Instruction::PushBool { value: false }),
+            4 => read_prefixed!(Instruction::PushBool { value: true }),
+            5 => read_prefixed!(Instruction::PushNumber {} : value),
+            6 => read_prefixed!(Instruction::PushString {} : value),
+            7 => read_prefixed!(Instruction::PushVariable {} : var),
+            8 => read_prefixed!(Instruction::PopValue),
+
+            9 => read_prefixed!(Instruction::DupeValue {} : top_index),
+            10 => read_prefixed!(Instruction::SwapValues {} : top_index_1, top_index_2),
+            11 => read_prefixed!(Instruction::ShallowCopy),
+
+            12 => read_prefixed!(Instruction::MakeList {} : len),
+            13 => read_prefixed!(Instruction::MakeListRange),
+
+            14 => read_prefixed!(Instruction::ListPush),
+            15 => read_prefixed!(Instruction::ListLen),
+            16 => read_prefixed!(Instruction::ListIndex),
+            17 => read_prefixed!(Instruction::ListLastIndex),
+            18 => read_prefixed!(Instruction::ListIndexAssign),
+
+            19 => read_prefixed!(Instruction::Strcat {} : args),
+
+            20 => read_prefixed!(Instruction::BinaryOp {} : op),
+            21 => read_prefixed!(Instruction::Eq),
+            22 => read_prefixed!(Instruction::UnaryOp {} : op),
+
+            23 => read_prefixed!(Instruction::DeclareLocal {} : var),
+            24 => read_prefixed!(Instruction::Assign {} : var),
+            25 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
+
+            26 => read_prefixed!(Instruction::Jump {} : to),
+            27 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
+            28 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
+
+            29 => read_prefixed!(Instruction::MetaPush {} : value),
+
+            30 => read_prefixed!(Instruction::Call {} : pos, params),
+            31 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
+            32 => read_prefixed!(Instruction::CallClosure {} : args),
+            33 => read_prefixed!(Instruction::Return),
+
+            34 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            35 => read_prefixed!(Instruction::Broadcast { wait: true }),
+
+            _ => unreachable!(),
+        }
+    }
+    fn append(val: &Self, out: &mut Vec<u8>, pointer_positions: &mut Vec<usize>) {
+        macro_rules! append_prefixed {
+            ($op:literal $(: $($($vals:ident)+),+)?) => {{
+                out.push($op);
+                $($( append_prefixed!(@single $($vals)+); )*)?
+            }};
+            (@single move $val:ident) => {{
+                pointer_positions.push(out.len());
+                append_prefixed!(@single $val);
+            }};
+            (@single $val:ident) => { Binary::append($val, out, pointer_positions) };
+        }
+        match val {
+            Instruction::Yield => append_prefixed!(0),
+            Instruction::WarpStart => append_prefixed!(1),
+            Instruction::WarpStop => append_prefixed!(2),
+
+            Instruction::PushBool { value: false } => append_prefixed!(3),
+            Instruction::PushBool { value: true } => append_prefixed!(4),
+            Instruction::PushNumber { value } => append_prefixed!(5: value),
+            Instruction::PushString { value } => append_prefixed!(6: value),
+            Instruction::PushVariable { var } => append_prefixed!(7: var),
+            Instruction::PopValue => append_prefixed!(8),
+
+            Instruction::DupeValue { top_index } => append_prefixed!(9: top_index),
+            Instruction::SwapValues { top_index_1, top_index_2 } => append_prefixed!(10: top_index_1, top_index_2),
+            Instruction::ShallowCopy => append_prefixed!(11),
+
+            Instruction::MakeList { len } => append_prefixed!(12: len),
+            Instruction::MakeListRange => append_prefixed!(13),
+
+            Instruction::ListPush => append_prefixed!(14),
+            Instruction::ListLen => append_prefixed!(15),
+            Instruction::ListIndex => append_prefixed!(16),
+            Instruction::ListLastIndex => append_prefixed!(17),
+            Instruction::ListIndexAssign => append_prefixed!(18),
+
+            Instruction::Strcat { args } => append_prefixed!(19: args),
+
+            Instruction::BinaryOp { op } => append_prefixed!(20: op),
+            Instruction::Eq => append_prefixed!(21),
+            Instruction::UnaryOp { op } => append_prefixed!(22: op),
+
+            Instruction::DeclareLocal { var } => append_prefixed!(23: var),
+            Instruction::Assign { var } => append_prefixed!(24: var),
+            Instruction::BinaryOpAssign { var, op } => append_prefixed!(25: var, op),
+
+            Instruction::Jump { to } => append_prefixed!(26: move to),
+            Instruction::ConditionalJump { to, when: false } => append_prefixed!(27: move to),
+            Instruction::ConditionalJump { to, when: true } => append_prefixed!(28: move to),
+
+            Instruction::MetaPush { value } => append_prefixed!(29: value),
+
+            Instruction::Call { pos, params } => append_prefixed!(30: move pos, params),
+            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(31: move pos, params, captures),
+            Instruction::CallClosure { args } => append_prefixed!(32: args),
+            Instruction::Return => append_prefixed!(33),
+
+            Instruction::Broadcast { wait: false } => append_prefixed!(34),
+            Instruction::Broadcast { wait: true } => append_prefixed!(35),
+        }
+    }
+}
+
 /// An interpreter-ready sequence of instructions.
 /// 
 /// [`Process`](crate::runtime::Process) is an execution primitive that can be used to execute generated [`ByteCode`].
 #[derive(Debug, Collect)]
 #[collect(require_static)]
-pub struct ByteCode(pub(crate) Vec<Instruction>);
+pub struct ByteCode(Box<[u8]>);
 /// Location info in a [`ByteCode`] object for a particular entity.
 #[derive(Debug)]
 pub struct EntityLocations<'a> {
@@ -145,7 +369,7 @@ pub struct Locations<'a> {
 
 #[derive(Default)]
 struct ByteCodeBuilder<'a> {
-    ins: Vec<Instruction>,
+    ins: Vec<InternalInstruction<'a>>,
     call_holes: Vec<(usize, &'a ast::FnRef, Option<&'a ast::Entity>)>, // (hole pos, function, entity)
     closure_holes: VecDeque<(usize, &'a [ast::VariableDef], &'a [ast::VariableRef], &'a [ast::Stmt], Option<&'a ast::Entity>)>, // (hole pos, params, captures, stmts, entity)
 }
@@ -153,16 +377,27 @@ impl<'a> ByteCodeBuilder<'a> {
     fn append_expr_binary_op(&mut self, left: &'a ast::Expr, right: &'a ast::Expr, op: BinaryOp, entity: Option<&'a ast::Entity>) {
         self.append_expr(left, entity);
         self.append_expr(right, entity);
-        self.ins.push(Instruction::BinaryOp { op });
+        self.ins.push(Instruction::BinaryOp { op }.into());
     }
     fn append_expr_unary_op(&mut self, value: &'a ast::Expr, op: UnaryOp, entity: Option<&'a ast::Entity>) {
         self.append_expr(value, entity);
-        self.ins.push(Instruction::UnaryOp { op });
+        self.ins.push(Instruction::UnaryOp { op }.into());
     }
     fn append_expr(&mut self, expr: &'a ast::Expr, entity: Option<&'a ast::Entity>) {
         match expr {
-            ast::Expr::Value(v) => self.ins.push(Instruction::PushValue { value: v.clone() }),
-            ast::Expr::Variable { var, .. } => self.ins.push(Instruction::PushVariable { var: var.trans_name.clone() }),
+            ast::Expr::Value(v) => self.ins.push(match v {
+                ast::Value::Number(v) => Instruction::PushNumber { value: *v },
+                ast::Value::String(v) => Instruction::PushString { value: v },
+                ast::Value::Constant(v) => Instruction::PushNumber {
+                    value: match v {
+                        ast::Constant::Pi => std::f64::consts::PI,
+                        ast::Constant::E => std::f64::consts::E,
+                    }
+                },
+                ast::Value::Bool(v) => Instruction::PushBool { value: *v },
+                ast::Value::List(_) => unreachable!(),
+            }.into()),
+            ast::Expr::Variable { var, .. } => self.ins.push(Instruction::PushVariable { var: &var.trans_name }.into()),
             ast::Expr::Add { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Add, entity),
             ast::Expr::Sub { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Sub, entity),
             ast::Expr::Mul { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Mul, entity),
@@ -191,80 +426,80 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Eq { left, right, .. } => {
                 self.append_expr(left, entity);
                 self.append_expr(right, entity);
-                self.ins.push(Instruction::Eq);
+                self.ins.push(Instruction::Eq.into());
             }
             ast::Expr::MakeList { values, .. } => {
                 for value in values {
                     self.append_expr(value, entity);
                 }
-                self.ins.push(Instruction::MakeList { len: values.len() });
+                self.ins.push(Instruction::MakeList { len: values.len() }.into());
             }
             ast::Expr::ListIndex { list, index, .. } => {
                 self.append_expr(list, entity);
                 self.append_expr(index, entity);
-                self.ins.push(Instruction::ListIndex);
+                self.ins.push(Instruction::ListIndex.into());
             }
             ast::Expr::ListLastIndex { list, .. } => {
                 self.append_expr(list, entity);
-                self.ins.push(Instruction::ListLastIndex);
+                self.ins.push(Instruction::ListLastIndex.into());
             }
             ast::Expr::Listlen { value, .. } => {
                 self.append_expr(value, entity);
-                self.ins.push(Instruction::ListLen);
+                self.ins.push(Instruction::ListLen.into());
             }
             ast::Expr::RangeInclusive { start, stop, .. } => {
                 self.append_expr(start, entity);
                 self.append_expr(stop, entity);
-                self.ins.push(Instruction::MakeListRange);
+                self.ins.push(Instruction::MakeListRange.into());
             }
             ast::Expr::Conditional { condition, then, otherwise, .. } => {
                 self.append_expr(condition, entity);
                 let test_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
 
                 self.append_expr(then, entity);
                 let jump_aft_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
 
                 let test_false_pos = self.ins.len();
                 self.append_expr(otherwise, entity);
                 let aft_pos = self.ins.len();
 
-                self.ins[test_pos] = Instruction::ConditionalJump { to: test_false_pos, when: false };
-                self.ins[jump_aft_pos] = Instruction::Jump { to: aft_pos };
+                self.ins[test_pos] = Instruction::ConditionalJump { to: test_false_pos, when: false }.into();
+                self.ins[jump_aft_pos] = Instruction::Jump { to: aft_pos }.into();
             }
             ast::Expr::Or { left, right, .. } => {
                 self.append_expr(left, entity);
-                self.ins.push(Instruction::DupeValue { top_index: 0 });
+                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
                 let check_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
-                self.ins.push(Instruction::PopValues { count: 1 });
+                self.ins.push(InternalInstruction::Illegal);
+                self.ins.push(Instruction::PopValue.into());
                 self.append_expr(right, entity);
                 let aft = self.ins.len();
 
-                self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: true };
+                self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: true }.into();
 
-                self.ins.push(Instruction::UnaryOp { op: UnaryOp::ToBool });
+                self.ins.push(Instruction::UnaryOp { op: UnaryOp::ToBool }.into());
             }
             ast::Expr::And { left, right, .. } => {
                 self.append_expr(left, entity);
-                self.ins.push(Instruction::DupeValue { top_index: 0 });
+                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
                 let check_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
-                self.ins.push(Instruction::PopValues { count: 1 });
+                self.ins.push(InternalInstruction::Illegal);
+                self.ins.push(Instruction::PopValue.into());
                 self.append_expr(right, entity);
                 let aft = self.ins.len();
 
-                self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: false };
+                self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: false }.into();
 
-                self.ins.push(Instruction::UnaryOp { op: UnaryOp::ToBool });
+                self.ins.push(Instruction::UnaryOp { op: UnaryOp::ToBool }.into());
             }
             ast::Expr::CallFn { function, args, .. } => {
                 for arg in args {
                     self.append_expr(arg, entity);
                 }
                 let call_hole_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
 
                 self.call_holes.push((call_hole_pos, function, entity));
             }
@@ -273,18 +508,18 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.append_expr(arg, entity);
                 }
                 self.append_expr(closure, entity);
-                self.ins.push(Instruction::CallClosure { args: args.len() });
+                self.ins.push(Instruction::CallClosure { args: args.len() }.into());
             }
             ast::Expr::Closure { params, captures, stmts, .. } => {
                 let closure_hole_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
                 self.closure_holes.push_back((closure_hole_pos, params, captures, stmts, entity));
             }
             ast::Expr::Strcat { values, .. } => {
                 for value in values {
                     self.append_expr(value, entity);
                 }
-                self.ins.push(Instruction::Strcat { args: values.len() });
+                self.ins.push(Instruction::Strcat { args: values.len() }.into());
             }
             ast::Expr::TextSplit { text, mode, .. } => {
                 self.append_expr(text, entity);
@@ -301,7 +536,7 @@ impl<'a> ByteCodeBuilder<'a> {
                         Instruction::BinaryOp { op: BinaryOp::SplitCustom }
                     }
                 };
-                self.ins.push(ins);
+                self.ins.push(ins.into());
             }
             x => unimplemented!("{:?}", x),
         }
@@ -309,34 +544,36 @@ impl<'a> ByteCodeBuilder<'a> {
     fn append_stmt(&mut self, stmt: &'a ast::Stmt, entity: Option<&'a ast::Entity>) {
         match stmt {
             ast::Stmt::VarDecl { vars, .. } => {
-                self.ins.push(Instruction::DeclareLocals { vars: vars.iter().map(|x| x.trans_name.clone()).collect() });
+                for var in vars {
+                    self.ins.push(Instruction::DeclareLocal { var: &var.trans_name }.into());
+                }
             }
             ast::Stmt::Assign { var, value, .. } => {
                 self.append_expr(value, entity);
-                self.ins.push(Instruction::Assign { var: var.trans_name.clone() })
+                self.ins.push(Instruction::Assign { var: &var.trans_name }.into())
             }
             ast::Stmt::AddAssign { var, value, .. } => {
                 self.append_expr(value, entity);
-                self.ins.push(Instruction::BinaryOpAssign { var: var.trans_name.clone(), op: BinaryOp::Add })
+                self.ins.push(Instruction::BinaryOpAssign { var: &var.trans_name, op: BinaryOp::Add }.into())
             }
             ast::Stmt::Push { list, value, .. } => {
                 self.append_expr(list, entity);
                 self.append_expr(value, entity);
-                self.ins.push(Instruction::ListPush);
+                self.ins.push(Instruction::ListPush.into());
             }
             ast::Stmt::IndexAssign { list, index, value, .. } => {
                 self.append_expr(list, entity);
                 self.append_expr(index, entity);
                 self.append_expr(value, entity);
-                self.ins.push(Instruction::ListIndexAssign);
+                self.ins.push(Instruction::ListIndexAssign.into());
             }
             ast::Stmt::RunFn { function, args, .. } => {
                 for arg in args {
                     self.append_expr(arg, entity);
                 }
                 let call_hole_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
-                self.ins.push(Instruction::PopValues { count: 1 });
+                self.ins.push(InternalInstruction::Illegal);
+                self.ins.push(Instruction::PopValue.into());
 
                 self.call_holes.push((call_hole_pos, function, entity));
             }
@@ -345,184 +582,188 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.append_expr(arg, entity);
                 }
                 self.append_expr(closure, entity);
-                self.ins.push(Instruction::CallClosure { args: args.len() });
-                self.ins.push(Instruction::PopValues { count: 1 });
+                self.ins.push(Instruction::CallClosure { args: args.len() }.into());
+                self.ins.push(Instruction::PopValue.into());
             }
             ast::Stmt::Return { value, .. } => {
                 self.append_expr(value, entity);
-                self.ins.push(Instruction::Return);
+                self.ins.push(Instruction::Return.into());
             }
             ast::Stmt::Warp { stmts, .. } => {
-                self.ins.push(Instruction::WarpStart);
+                self.ins.push(Instruction::WarpStart.into());
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
-                self.ins.push(Instruction::WarpStop);
+                self.ins.push(Instruction::WarpStop.into());
             }
             ast::Stmt::InfLoop { stmts, .. } => {
                 let top = self.ins.len();
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
-                self.ins.push(Instruction::Yield);
-                self.ins.push(Instruction::Jump { to: top });
+                self.ins.push(Instruction::Yield.into());
+                self.ins.push(Instruction::Jump { to: top }.into());
             }
             ast::Stmt::UntilLoop { condition, stmts, .. } => {
                 let top = self.ins.len();
                 self.append_expr(condition, entity);
                 let exit_jump_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
 
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
-                self.ins.push(Instruction::Jump { to: top });
+                self.ins.push(Instruction::Jump { to: top }.into());
                 let aft = self.ins.len();
 
-                self.ins[exit_jump_pos] = Instruction::ConditionalJump { to: aft, when: true };
+                self.ins[exit_jump_pos] = Instruction::ConditionalJump { to: aft, when: true }.into();
             }
             ast::Stmt::Repeat { times, stmts, .. } => {
                 self.append_expr(times, entity);
 
                 let top = self.ins.len();
-                self.ins.push(Instruction::DupeValue { top_index: 0 });
-                self.ins.push(Instruction::PushValue { value: 0.0.into() });
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Greater });
+                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
+                self.ins.push(Instruction::PushNumber { value: 0.0 }.into());
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Greater }.into());
                 let aft_jump_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
 
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
 
-                self.ins.push(Instruction::PushValue { value: 1.0.into() });
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Sub });
-                self.ins.push(Instruction::Yield);
-                self.ins.push(Instruction::Jump { to: top });
+                self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Sub }.into());
+                self.ins.push(Instruction::Yield.into());
+                self.ins.push(Instruction::Jump { to: top }.into());
                 let aft = self.ins.len();
 
-                self.ins[aft_jump_pos] = Instruction::ConditionalJump { to: aft, when: false };
+                self.ins[aft_jump_pos] = Instruction::ConditionalJump { to: aft, when: false }.into();
 
-                self.ins.push(Instruction::PopValues { count: 1 });
+                self.ins.push(Instruction::PopValue.into());
             }
             ast::Stmt::ForLoop { var, start, stop, stmts, .. } => {
                 self.append_expr(start, entity);
                 self.append_expr(stop, entity);
 
-                self.ins.push(Instruction::DupeValue { top_index: 1 });
-                self.ins.push(Instruction::DupeValue { top_index: 1 });
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Greater });
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Greater }.into());
                 let delta_jump_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
 
-                self.ins.push(Instruction::PushValue { value: 1.0.into() });
+                self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
                 let positive_delta_end = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
                 let negative_delta_pos = self.ins.len();
-                self.ins.push(Instruction::PushValue { value: (-1.0).into() });
+                self.ins.push(Instruction::PushNumber { value: -1.0 }.into());
                 let aft_delta = self.ins.len();
 
-                self.ins[delta_jump_pos] = Instruction::ConditionalJump { to: negative_delta_pos, when: true };
-                self.ins[positive_delta_end] = Instruction::Jump { to: aft_delta };
+                self.ins[delta_jump_pos] = Instruction::ConditionalJump { to: negative_delta_pos, when: true }.into();
+                self.ins[positive_delta_end] = Instruction::Jump { to: aft_delta }.into();
 
-                self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 });
-                self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 1 });
-                self.ins.push(Instruction::DupeValue { top_index: 1 });
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Sub });
-                self.ins.push(Instruction::UnaryOp { op: UnaryOp::Abs });
+                self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 }.into());
+                self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 1 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Sub }.into());
+                self.ins.push(Instruction::UnaryOp { op: UnaryOp::Abs }.into());
 
                 let top = self.ins.len();
-                self.ins.push(Instruction::DupeValue { top_index: 0 });
-                self.ins.push(Instruction::PushValue { value: 0.0.into() });
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Less });
+                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
+                self.ins.push(Instruction::PushNumber { value: 0.0 }.into());
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Less }.into());
                 let exit_jump_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
 
-                self.ins.push(Instruction::DupeValue { top_index: 1 });
-                self.ins.push(Instruction::Assign { var: var.trans_name.clone() });
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::Assign { var: &var.trans_name }.into());
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
 
-                self.ins.push(Instruction::PushValue { value: 1.0.into() });
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Sub });
-                self.ins.push(Instruction::DupeValue { top_index: 1 });
-                self.ins.push(Instruction::DupeValue { top_index: 3 });
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Add });
-                self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 });
-                self.ins.push(Instruction::PopValues { count: 1 });
-                self.ins.push(Instruction::Yield);
-                self.ins.push(Instruction::Jump { to: top });
+                self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Sub }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 3 }.into());
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Add }.into());
+                self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 }.into());
+                self.ins.push(Instruction::PopValue.into());
+                self.ins.push(Instruction::Yield.into());
+                self.ins.push(Instruction::Jump { to: top }.into());
                 let aft = self.ins.len();
 
-                self.ins[exit_jump_pos] = Instruction::ConditionalJump { to: aft, when: true };
+                self.ins[exit_jump_pos] = Instruction::ConditionalJump { to: aft, when: true }.into();
 
-                self.ins.push(Instruction::PopValues { count: 3 });
+                for _ in 0..3 {
+                    self.ins.push(Instruction::PopValue.into());
+                }
             }
             ast::Stmt::ForeachLoop { var, items, stmts, .. } => {
                 self.append_expr(items, entity);
-                self.ins.push(Instruction::ShallowCopy);
-                self.ins.push(Instruction::PushValue { value: 1.0.into() });
+                self.ins.push(Instruction::ShallowCopy.into());
+                self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
 
                 let top = self.ins.len();
-                self.ins.push(Instruction::DupeValue { top_index: 0 });
-                self.ins.push(Instruction::DupeValue { top_index: 2 });
-                self.ins.push(Instruction::ListLen);
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Greater });
+                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 2 }.into());
+                self.ins.push(Instruction::ListLen.into());
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Greater }.into());
                 let exit_jump_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
 
-                self.ins.push(Instruction::DupeValue { top_index: 1 });
-                self.ins.push(Instruction::DupeValue { top_index: 1 });
-                self.ins.push(Instruction::ListIndex);
-                self.ins.push(Instruction::Assign { var: var.trans_name.clone() });
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::ListIndex.into());
+                self.ins.push(Instruction::Assign { var: &var.trans_name }.into());
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
-                self.ins.push(Instruction::PushValue { value: 1.0.into() });
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Add });
-                self.ins.push(Instruction::Yield);
-                self.ins.push(Instruction::Jump { to: top });
+                self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
+                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Add }.into());
+                self.ins.push(Instruction::Yield.into());
+                self.ins.push(Instruction::Jump { to: top }.into());
                 let aft = self.ins.len();
 
-                self.ins[exit_jump_pos] = Instruction::ConditionalJump { to: aft, when: true };
+                self.ins[exit_jump_pos] = Instruction::ConditionalJump { to: aft, when: true }.into();
 
-                self.ins.push(Instruction::PopValues { count: 2 });
+                for _ in 0..2 {
+                    self.ins.push(Instruction::PopValue.into());
+                }
             }
             ast::Stmt::If { condition, then, .. } => {
                 self.append_expr(condition, entity);
                 let patch_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
                 for stmt in then {
                     self.append_stmt(stmt, entity);
                 }
                 let else_pos = self.ins.len();
 
-                self.ins[patch_pos] = Instruction::ConditionalJump { to: else_pos, when: false };
+                self.ins[patch_pos] = Instruction::ConditionalJump { to: else_pos, when: false }.into();
             }
             ast::Stmt::IfElse { condition, then, otherwise, .. } => {
                 self.append_expr(condition, entity);
                 let check_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
                 for stmt in then {
                     self.append_stmt(stmt, entity);
                 }
                 let jump_pos = self.ins.len();
-                self.ins.push(Instruction::Illegal);
+                self.ins.push(InternalInstruction::Illegal);
                 let else_pos = self.ins.len();
                 for stmt in otherwise {
                     self.append_stmt(stmt, entity);
                 }
                 let aft = self.ins.len();
 
-                self.ins[check_pos] = Instruction::ConditionalJump { to: else_pos, when: false };
-                self.ins[jump_pos] = Instruction::Jump { to: aft };
+                self.ins[check_pos] = Instruction::ConditionalJump { to: else_pos, when: false }.into();
+                self.ins[jump_pos] = Instruction::Jump { to: aft }.into();
             }
             ast::Stmt::SendLocalMessage { target, msg_type, wait, .. } => match target {
                 Some(_) => unimplemented!(),
                 None => {
                     self.append_expr(msg_type, entity);
-                    self.ins.push(Instruction::Broadcast { wait: *wait });
+                    self.ins.push(Instruction::Broadcast { wait: *wait }.into());
                 }
             }
             x => unimplemented!("{:?}", x),
@@ -532,8 +773,8 @@ impl<'a> ByteCodeBuilder<'a> {
         for stmt in stmts {
             self.append_stmt(stmt, entity);
         }
-        self.ins.push(Instruction::PushValue { value: "".into() });
-        self.ins.push(Instruction::Return);
+        self.ins.push(Instruction::PushString { value: "".into() }.into());
+        self.ins.push(Instruction::Return.into());
     }
     fn link(mut self, locations: Locations<'a>) -> (ByteCode, Locations<'a>) {
         assert!(self.closure_holes.is_empty());
@@ -561,17 +802,57 @@ impl<'a> ByteCodeBuilder<'a> {
         for (hole_pos, hole_fn, hole_ent) in self.call_holes.iter() {
             let sym = &*hole_fn.trans_name;
             let &(pos, params) = entity_fn_to_info.get(&get_ptr(*hole_ent)).and_then(|tab| tab.get(sym)).or_else(|| global_fn_to_info.get(sym)).unwrap();
-            self.ins[*hole_pos] = Instruction::Call { pos, params: params.iter().map(|x| x.trans_name.clone()).collect() };
+
+            let mut ins_pack = Vec::with_capacity(params.len() + 1);
+            for param in params {
+                ins_pack.push(Instruction::MetaPush { value: &param.trans_name });
+            }
+            ins_pack.push(Instruction::Call { pos, params: params.len() });
+
+            self.ins[*hole_pos] = InternalInstruction::Packed(ins_pack);
         }
 
-        #[cfg(debug_assertions)]
+        self.finalize(locations)
+    }
+    fn finalize(self, mut locations: Locations<'a>) -> (ByteCode, Locations<'a>) {
+        let mut bin = Vec::with_capacity(self.ins.len() * 4);
+        let mut final_ins_pos = Vec::with_capacity(self.ins.len());
+        let mut pointer_positions = Vec::with_capacity(64);
         for ins in self.ins.iter() {
-            if let Instruction::Illegal = ins {
-                panic!();
+            final_ins_pos.push(bin.len());
+            match ins {
+                InternalInstruction::Illegal => unreachable!(),
+                InternalInstruction::Packed(vals) => for val in vals {
+                    Binary::append(val, &mut bin, &mut pointer_positions);
+                }
+                InternalInstruction::Valid(val) => Binary::append(val, &mut bin, &mut pointer_positions),
             }
         }
 
-        (ByteCode(self.ins), locations)
+        let mut buf = Vec::with_capacity(mem::size_of::<UsizeRepr>());
+        let mut discard = vec![];
+        for pos in pointer_positions {
+            let ins_pos: usize = Binary::read(&bin, pos).0;
+            buf.clear();
+            Binary::append(&final_ins_pos[ins_pos], &mut buf, &mut discard);
+            debug_assert_eq!(discard.len(), 0);
+            debug_assert_eq!(buf.len(), mem::size_of::<UsizeRepr>());
+            bin[pos..pos + buf.len()].copy_from_slice(&buf);
+        }
+
+        for func in locations.funcs.iter_mut() {
+            func.1 = final_ins_pos[func.1];
+        }
+        for entity in locations.entities.iter_mut() {
+            for func in entity.1.funcs.iter_mut() {
+                func.1 = final_ins_pos[func.1];
+            }
+            for script in entity.1.scripts.iter_mut() {
+                script.1 = final_ins_pos[script.1];
+            }
+        }
+
+        (ByteCode(bin.into_boxed_slice()), locations)
     }
 }
 
@@ -608,13 +889,23 @@ impl ByteCode {
         while let Some((hole_pos, params, captures, stmts, entity)) = code.closure_holes.pop_front() {
             let pos = code.ins.len();
             code.append_stmts_ret(stmts, entity);
-            code.ins[hole_pos] = Instruction::MakeClosure {
-                pos,
-                params: params.iter().map(|s| s.trans_name.clone()).collect(),
-                captures: captures.iter().map(|s| s.trans_name.clone()).collect(),
-            };
+
+            let mut ins_pack = Vec::with_capacity(params.len() + captures.len() + 1);
+            for param in params {
+                ins_pack.push(Instruction::MetaPush { value: &param.trans_name });
+            }
+            for param in captures {
+                ins_pack.push(Instruction::MetaPush { value: &param.trans_name });
+            }
+            ins_pack.push(Instruction::MakeClosure { pos, params: params.len(), captures: captures.len() }.into());
+
+            code.ins[hole_pos] = InternalInstruction::Packed(ins_pack);
         }
 
         code.link(Locations { funcs, entities })
+    }
+    /// Get a reference to the raw bytecode.
+    pub fn raw(&self) -> &[u8] {
+        &self.0
     }
 }

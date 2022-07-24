@@ -2,6 +2,7 @@
     "cSpell.ignoreWords": [
         "Deque",
         "Listlen",
+        "Repr",
         "bytecode",
         "consts",
         "dealloc",
