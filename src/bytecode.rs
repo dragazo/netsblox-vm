@@ -135,6 +135,9 @@ pub(crate) enum Instruction<'a> {
     /// to assign to the parameters of `closure` before executing the closure's stored code.
     /// It is an error if the number of supplied arguments does not match the number of parameters.
     CallClosure { args: usize },
+    /// Consumes `args` values from the meta stack and value stack, representing arguments.
+    /// Then calls the given RPC, awaits the result, and pushes the return value onto the value stack.
+    CallRpc { service: &'a str, rpc: &'a str, args: usize },
     /// Pops a return address from the call stack and jumps to it.
     /// The return value is left on the top of the value stack.
     /// If the call stack is empty, this instead terminates the process
@@ -276,10 +279,11 @@ impl<'a> Binary<'a> for Instruction<'a> {
             30 => read_prefixed!(Instruction::Call {} : pos, params),
             31 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
             32 => read_prefixed!(Instruction::CallClosure {} : args),
-            33 => read_prefixed!(Instruction::Return),
+            33 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
+            34 => read_prefixed!(Instruction::Return),
 
-            34 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            35 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            35 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            36 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
             _ => unreachable!(),
         }
@@ -340,10 +344,11 @@ impl<'a> Binary<'a> for Instruction<'a> {
             Instruction::Call { pos, params } => append_prefixed!(30: move pos, params),
             Instruction::MakeClosure { pos, params, captures } => append_prefixed!(31: move pos, params, captures),
             Instruction::CallClosure { args } => append_prefixed!(32: args),
-            Instruction::Return => append_prefixed!(33),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(33: service, rpc, args),
+            Instruction::Return => append_prefixed!(34),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(34),
-            Instruction::Broadcast { wait: true } => append_prefixed!(35),
+            Instruction::Broadcast { wait: false } => append_prefixed!(35),
+            Instruction::Broadcast { wait: true } => append_prefixed!(36),
         }
     }
 }
@@ -509,6 +514,13 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
                 self.append_expr(closure, entity);
                 self.ins.push(Instruction::CallClosure { args: args.len() }.into());
+            }
+            ast::Expr::CallRpc { service, rpc, args, .. } => {
+                for (arg_name, arg) in args {
+                    self.ins.push(Instruction::MetaPush { value: arg_name }.into());
+                    self.append_expr(arg, entity);
+                }
+                self.ins.push(Instruction::CallRpc { service, rpc, args: args.len() }.into());
             }
             ast::Expr::Closure { params, captures, stmts, .. } => {
                 let closure_hole_pos = self.ins.len();

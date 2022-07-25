@@ -24,7 +24,7 @@ macro_rules! new_key {
         #[collect(require_static)]
         $(#[doc = $doc])?
         $vis struct $name(usize, usize);
-        impl Key for $name {
+        impl $crate::slotmap::Key for $name {
             fn new(slot: usize, generation: usize) -> Self { Self(slot, generation) }
             fn get_slot(&self) -> usize { self.0 }
             fn get_generation(&self) -> usize { self.1 }

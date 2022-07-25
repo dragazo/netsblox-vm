@@ -157,7 +157,7 @@ impl<'gc, S: System> Project<'gc, S> {
             }
         }
     }
-    pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &mut S) -> ProjectStep {
+    pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> ProjectStep {
         let (proc_key, proc) = loop {
             match self.state.process_queue.pop_front() {
                 None => return ProjectStep::Idle,

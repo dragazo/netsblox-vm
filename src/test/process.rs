@@ -36,15 +36,14 @@ fn get_running_proc(xml: &str) -> EnvArena {
     })
 }
 
-fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc>>, usize), ExecError>) {
+fn run_till_term<F>(env: &mut EnvArena, system: &StdSystem, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc>>, usize), ExecError>) {
     env.mutate(|mc, env| {
         let mut proc = env.proc.write(mc);
         assert!(proc.is_running());
 
         let mut yields = 0;
-        let mut system = StdSystem::new();
         let ret = loop {
-            match proc.step(mc, &mut system) {
+            match proc.step(mc, &system) {
                 Ok(ProcessStep::Idle) => panic!(),
                 Ok(ProcessStep::Normal) => (),
                 Ok(ProcessStep::Yield) => yields += 1,
@@ -61,6 +60,7 @@ fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(Mu
 
 #[test]
 fn test_proc_ret() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -68,7 +68,7 @@ fn test_proc_ret() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
+    run_till_term(&mut env, &system, |_, _, res| match res.unwrap().0.unwrap() {
         Value::String(x) => assert_eq!(&*x, ""),
         x => panic!("{:?}", x),
     });
@@ -76,6 +76,7 @@ fn test_proc_ret() {
 
 #[test]
 fn test_proc_sum_123n() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -89,7 +90,7 @@ fn test_proc_sum_123n() {
             locals.redefine_or_define("n", Shared::Unique(n.into()));
             env.proc.write(mc).initialize(locals, None);
         });
-        run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
+        run_till_term(&mut env, &system, |_, _, res| match res.unwrap().0.unwrap() {
             Value::Number(ret) => assert_eq!(ret, expect),
             x => panic!("{:?}", x),
         });
@@ -98,6 +99,7 @@ fn test_proc_sum_123n() {
 
 #[test]
 fn test_proc_recursive_factorial() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -111,7 +113,7 @@ fn test_proc_recursive_factorial() {
             locals.redefine_or_define("n", Shared::Unique(n.into()));
             env.proc.write(mc).initialize(locals, None);
         });
-        run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
+        run_till_term(&mut env, &system, |_, _, res| match res.unwrap().0.unwrap() {
             Value::Number(ret) => assert_eq!(ret, expect),
             x => panic!("{:?}", x),
         });
@@ -120,6 +122,7 @@ fn test_proc_recursive_factorial() {
 
 #[test]
 fn test_proc_loops_lists_basic() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -127,7 +130,7 @@ fn test_proc_loops_lists_basic() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |mc, _, res| {
+    run_till_term(&mut env, &system, |mc, _, res| {
         let expected = Value::from_simple(mc, simple_value!([
             [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
             [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
@@ -159,6 +162,7 @@ fn test_proc_loops_lists_basic() {
 
 #[test]
 fn test_proc_recursively_self_containing_lists() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -166,7 +170,7 @@ fn test_proc_recursively_self_containing_lists() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |mc, _, res| match res.unwrap().0.unwrap() {
+    run_till_term(&mut env, &system, |mc, _, res| match res.unwrap().0.unwrap() {
         Value::List(res) => {
             let res = res.read();
             assert_eq!(res.len(), 4);
@@ -203,6 +207,7 @@ fn test_proc_recursively_self_containing_lists() {
 
 #[test]
 fn test_proc_sieve_of_eratosthenes() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -220,7 +225,7 @@ fn test_proc_sieve_of_eratosthenes() {
         assert!(proc.is_running());
     });
 
-    run_till_term(&mut env, |mc, _, res| {
+    run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "primes");
     });
@@ -228,6 +233,7 @@ fn test_proc_sieve_of_eratosthenes() {
 
 #[test]
 fn test_proc_early_return() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -235,7 +241,7 @@ fn test_proc_early_return() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |mc, _, res| {
+    run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([1,3]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "res");
     });
@@ -243,6 +249,7 @@ fn test_proc_early_return() {
 
 #[test]
 fn test_proc_short_circuit() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -250,7 +257,7 @@ fn test_proc_short_circuit() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |mc, _, res| {
+    run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([
             [true, "xed"],
             [false, "sergb"],
@@ -270,6 +277,7 @@ fn test_proc_short_circuit() {
 
 #[test]
 fn test_proc_all_arithmetic() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -277,7 +285,7 @@ fn test_proc_all_arithmetic() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |mc, _, res| {
+    run_till_term(&mut env, &system, |mc, _, res| {
         let inf = std::f64::INFINITY;
         let expect = Value::from_simple(mc, simple_value!([
             [8.5, 2.9, -2.9, -8.5],
@@ -313,6 +321,7 @@ fn test_proc_all_arithmetic() {
 
 #[test]
 fn test_proc_lambda_local_shadow_capture() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -320,7 +329,7 @@ fn test_proc_lambda_local_shadow_capture() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |mc, _, res| {
+    run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([1.0, 0.0, 1.0]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "local shadow capture");
     });
@@ -328,6 +337,7 @@ fn test_proc_lambda_local_shadow_capture() {
 
 #[test]
 fn test_proc_generators_nested() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -335,7 +345,7 @@ fn test_proc_generators_nested() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |mc, _, res| {
+    run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "nested generators");
     });
@@ -343,6 +353,7 @@ fn test_proc_generators_nested() {
 
 #[test]
 fn test_proc_call_in_closure() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -350,7 +361,7 @@ fn test_proc_call_in_closure() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |mc, _, res| {
+    run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([
             [2, 4, 6, 8, 10],
             [1, 3, 5, 7, 9],
@@ -361,6 +372,7 @@ fn test_proc_call_in_closure() {
 
 #[test]
 fn test_proc_warp_yields() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="counter"><l>0</l></variable>"#,
         fields = "",
@@ -375,7 +387,7 @@ fn test_proc_warp_yields() {
             env.proc.write(mc).initialize(locals, None);
         });
 
-        run_till_term(&mut env, |_, env, res| {
+        run_till_term(&mut env, &system, |_, env, res| {
             let yields = res.unwrap().1;
             let counter = env.glob.read().globals.lookup("counter").unwrap().get();
             assert_values_eq(&counter, &(expected_counter as f64).into(), 1e-20, &format!("yield test (mode {}) value", mode));
@@ -386,6 +398,7 @@ fn test_proc_warp_yields() {
 
 #[test]
 fn test_proc_string_ops() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -393,7 +406,7 @@ fn test_proc_string_ops() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |mc, _, res| {
+    run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([
             "hello 5 world",
             [ "these", "are", "some", "words" ],
@@ -444,6 +457,7 @@ fn test_proc_string_ops() {
 
 #[test]
 fn test_proc_str_cmp_case_insensitive() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -451,7 +465,7 @@ fn test_proc_str_cmp_case_insensitive() {
         methods = "",
     ));
 
-    run_till_term(&mut env, |mc, _, res| {
+    run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([
             false, true, true, true, false,
             [
@@ -461,4 +475,28 @@ fn test_proc_str_cmp_case_insensitive() {
         ]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "str cmp case insensitive");
     });
+}
+
+#[test]
+fn test_proc_rpc_call_basic() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/rpc-call-basic.xml"),
+        methods = "",
+    ));
+
+    for (lat, long, city) in [(36.1627, -86.7816, "Nashville"), (40.8136, -96.7026, "Lincoln"), (40.7608, -111.8910, "Salt Lake City")] {
+        env.mutate(|mc, env| {
+            let mut locals = SymbolTable::default();
+            locals.redefine_or_define("lat", Shared::Unique(lat.into()));
+            locals.redefine_or_define("long", Shared::Unique(long.into()));
+            env.proc.write(mc).initialize(locals, None);
+        });
+        run_till_term(&mut env, &system, |_, _, res| match res.unwrap().0.unwrap() {
+            Value::String(ret) => assert_eq!(&*ret, city),
+            x => panic!("{:?}", x),
+        });
+    }
 }

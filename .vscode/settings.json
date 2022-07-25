@@ -15,6 +15,7 @@
         "netsblox",
         "numerify",
         "peekable",
+        "reqwest",
         "rustc",
         "sandboxed",
         "slotmap",

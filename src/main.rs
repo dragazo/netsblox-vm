@@ -3,8 +3,18 @@ use std::io::Read;
 
 use clap::Parser;
 
-use netsblox_vm::bytecode::*;
-use netsblox_vm::ast;
+use netsblox_vm::*;
+use netsblox_vm::gc::{GcCell, Collect, make_arena};
+use netsblox_vm::runtime::*;
+use netsblox_vm::process::*;
+use netsblox_vm::project::*;
+
+#[derive(Collect)]
+#[collect(no_drop)]
+struct Env<'gc> {
+    proj: GcCell<'gc, Project<'gc, StdSystem>>,
+}
+make_arena!(EnvArena, Env);
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -12,6 +22,9 @@ struct Args {
 
     #[clap(long)]
     role: Option<String>,
+
+    #[clap(long, default_value_t = String::from("https://editor.netsblox.org"))]
+    server: String,
 }
 
 fn main() {
@@ -21,6 +34,12 @@ fn main() {
             std::process::exit($ret);
         }}
     }
+
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        hook(panic_info);
+        crash!(666: "unrecoverable error");
+    }));
 
     let args = Args::parse();
     let content = match File::open(&args.src) {
@@ -46,7 +65,21 @@ fn main() {
             _ => crash!(5: "project has multiple roles and a specific role was not specified"),
         }
     };
-    let (code, locations) = ByteCode::compile(role);
+    let mut env = EnvArena::new(Default::default(), |mc| {
+        let settings = SettingsBuilder::default().build().unwrap();
+        let mut proj = Project::from_ast(mc, role, settings);
+        proj.input(Input::Start);
+        Env { proj: GcCell::allocate(mc, proj) }
+    });
+    let system = StdSystem::new(args.server, Some(&parsed.name));
 
-    println!("{:#?}", locations);
+    env.mutate(|mc, env| {
+        let mut proj = env.proj.write(mc);
+        loop {
+            match proj.step(mc, &system) {
+                ProjectStep::Idle => return,
+                ProjectStep::Normal => (),
+            }
+        }
+    });
 }

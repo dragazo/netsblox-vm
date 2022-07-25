@@ -1,5 +1,5 @@
 use std::prelude::v1::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::fmt;
@@ -7,6 +7,15 @@ use std::fmt;
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
+
+#[derive(Debug)]
+pub enum FromJsonError {
+    HadNull, HadBadNumber,
+}
+#[derive(Debug)]
+pub enum ToJsonError {
+    HadBadNumber(f64),
+}
 
 #[derive(Debug, PartialEq)]
 pub enum SimpleValue {
@@ -21,20 +30,37 @@ impl From<i64> for SimpleValue { fn from(v: i64) -> Self { Self::Number(v as f64
 impl From<String> for SimpleValue { fn from(v: String) -> Self { Self::String(v) } }
 impl From<Vec<SimpleValue>> for SimpleValue { fn from(v: Vec<SimpleValue>) -> Self { Self::List(v) } }
 impl TryFrom<Json> for SimpleValue {
-    type Error = JsonError;
+    type Error = FromJsonError;
     /// Create a new [`SimpleValue`] from a [`Json`] value.
     /// 
-    /// NetsBlox does not allow a concept of null, so [`Json`] values containing [`Json::Null`] will result in [`JsonError::HadNull`].
-    /// Additionally, `serde_json`'s interface states that [`Json::Number`] values might not be able to be encoded as [`f64`], in which case [`JsonError::HadBadNumber`] is returned;
+    /// NetsBlox does not allow a concept of null, so [`Json`] values containing [`Json::Null`] will result in [`FromJsonError::HadNull`].
+    /// Additionally, `serde_json`'s interface states that [`Json::Number`] values might not be able to be encoded as [`f64`], in which case [`FromJsonError::HadBadNumber`] is returned;
     /// however, based on their source code, this should only be possible with special feature flags passed in to allow arbitrary precision floating point.
-    fn try_from(value: Json) -> Result<Self, JsonError> {
+    fn try_from(value: Json) -> Result<Self, Self::Error> {
         Ok(match value {
-            Json::Null => return Err(JsonError::HadNull),
+            Json::Null => return Err(Self::Error::HadNull),
             Json::Bool(x) => x.into(),
-            Json::Number(x) => x.as_f64().ok_or(JsonError::HadBadNumber)?.into(),
+            Json::Number(x) => x.as_f64().ok_or(Self::Error::HadBadNumber)?.into(),
             Json::String(x) => x.into(),
             Json::Array(x) => x.into_iter().map(|x| SimpleValue::try_from(x)).collect::<Result<Vec<_>,_>>()?.into(),
             Json::Object(x) => x.into_iter().map(|(k, v)| Ok(vec![ k.into(), SimpleValue::try_from(v)? ].into())).collect::<Result<Vec<_>,_>>()?.into(),
+        })
+    }
+}
+impl TryInto<Json> for SimpleValue {
+    type Error = ToJsonError;
+    /// Convert a [`SimpleValue`] into [`Json`].
+    /// 
+    /// [`Json`] does not allow numbers to be infinite or nan, which is the only failure case for this conversion.
+    fn try_into(self) -> Result<Json, Self::Error> {
+        Ok(match self {
+            SimpleValue::Bool(x) => Json::Bool(x),
+            SimpleValue::Number(x) => match serde_json::Number::from_f64(x) {
+                Some(x) => Json::Number(x),
+                None => return Err(Self::Error::HadBadNumber(x)),
+            }
+            SimpleValue::String(x) => Json::String(x),
+            SimpleValue::List(x) => Json::Array(x.into_iter().map(TryInto::try_into).collect::<Result<_,_>>()?),
         })
     }
 }
@@ -156,9 +182,13 @@ pub struct ConversionError {
     pub expected: Type,
 }
 
+/// An error from converting a [`Value`] to a [`SimpleValue`].
 #[derive(Debug)]
-pub enum JsonError {
-    HadNull, HadBadNumber,
+pub enum SimplifyError {
+    /// The value was or contained a type that cannot be exported as a [`SimpleValue`].
+    HadComplexType(Type),
+    /// The value contained a cycle, which [`SimpleValue`] forbids.
+    HadCycle,
 }
 
 /// A value representing the identity of a [`Value`].
@@ -210,6 +240,19 @@ impl<'gc> Value<'gc> {
             SimpleValue::String(x) => Value::String(Gc::allocate(mc, x)),
             SimpleValue::List(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|x| Value::from_simple(mc, x)).collect())),
         }
+    }
+    pub fn to_simple(&self) -> Result<SimpleValue, SimplifyError> {
+        fn simplify<'gc>(value: &Value<'gc>, cache: &mut BTreeSet<Identity<'gc>>) -> Result<SimpleValue, SimplifyError> {
+            if !cache.insert(value.identity()) { return Err(SimplifyError::HadCycle) }
+            Ok(match value {
+                Value::Bool(x) => SimpleValue::Bool(*x),
+                Value::Number(x) => SimpleValue::Number(*x),
+                Value::String(x) => SimpleValue::String(x.as_str().to_owned()),
+                Value::List(x) => SimpleValue::List(x.read().iter().map(|x| simplify(x, cache)).collect::<Result<_,_>>()?),
+                Value::Closure(_) | Value::Entity(_) => return Err(SimplifyError::HadComplexType(value.get_type())),
+            })
+        }
+        simplify(self, &mut Default::default())
     }
     /// Creates a shallow copy of this value.
     pub fn shallow_copy(&self, mc: MutationContext<'gc, '_>) -> Value<'gc> {
@@ -525,9 +568,9 @@ impl BarrierCondition {
 }
 
 /// The result of a successful call to [`System::poll_async`].
-pub enum AsyncPoll<'gc> {
+pub enum AsyncPoll<T> {
     /// The async operation completed with the given value.
-    Completed(Value<'gc>),
+    Completed(T),
     /// The async operation is still pending and has not completed.
     Pending,
 }
@@ -553,44 +596,161 @@ pub enum SystemError {
 /// When implementing [`System`] for some type, you may prefer to not support one or more features.
 /// This can be accomplished by returning the [`SystemError::NotSupported`] variant for the relevant [`SystemFeature`].
 pub trait System: 'static {
-    /// Key type used to refer to the result of an async operation.
-    type AsyncKey: Collect + 'static;
-
-    /// Polls for the completion of an async operation.
-    /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
-    fn poll_async<'gc>(&mut self, mc: MutationContext<'gc, '_>, key: &Self::AsyncKey) -> Result<AsyncPoll<'gc>, SystemError>;
+    /// Key type used to await the result of an RPC request.
+    type RpcKey: Collect + 'static;
 
     /// Gets the current time in milliseconds.
     /// This is not required to represent the actual real-world time; e.g., this could simply measure uptime.
     /// Subsequent values are required to be non-decreasing.
     fn time_ms(&self) -> Result<u64, SystemError>;
+
+    /// Requests the system to execute the given RPC.
+    /// Returns a key that can be passed to [`System::poll_rpc`] to poll for the result.
+    fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<Self::RpcKey, SystemError>;
+    /// Polls for the completion of an RPC call.
+    /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
+    fn poll_rpc(&self, key: &Self::RpcKey) -> Result<AsyncPoll<Result<Json, String>>, SystemError>;
 }
 
 #[cfg(any(test, feature = "std"))]
 mod std_system {
     extern crate std as real_std;
-    use real_std::time::Instant;
+    use real_std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use real_std::sync::{Arc, Mutex};
+    use real_std::sync::mpsc::{Sender, Receiver, channel};
+    use real_std::thread;
+
     use super::*;
+    use crate::slotmap::SlotMap;
+
+    new_key! {
+        pub struct RpcKey;
+    }
+
+    struct Context {
+        base_url: String,
+        client_id: String,
+
+        project_name: String,
+        project_id: String,
+        role_name: String,
+        role_id: String,
+    }
+    struct RpcRequest {
+        service: String,
+        rpc: String,
+        args: Vec<(String, Json)>,
+        result_key: RpcKey,
+    }
+
+    type RpcResults = SlotMap<RpcKey, Option<Result<Json, String>>>;
 
     /// A type implementing the [`System`] trait which supports all features.
     /// This requires the [`std`](crate) feature flag.
     pub struct StdSystem {
         start_time: Instant,
+        context: Arc<Context>,
+
+        rpc_results: Arc<Mutex<RpcResults>>,
+        rpc_request_pipe: Sender<RpcRequest>,
     }
     impl StdSystem {
-        pub fn new() -> Self {
+        #[tokio::main(flavor = "current_thread")]
+        pub async fn new(base_url: String, project_name: Option<&str>) -> Self {
+            let mut context = Context {
+                base_url,
+                client_id: format!("vm-{}", names::Generator::default().next().unwrap()),
+
+                project_name: String::new(),
+                project_id: String::new(),
+                role_name: String::new(),
+                role_id: String::new(),
+            };
+
+            let client = reqwest::Client::builder().build().unwrap();
+            let meta = client.post(format!("{}/api/newProject", context.base_url))
+                .json(&json!({ "clientId": context.client_id, "roleName": "monad" }))
+                .send().await.unwrap()
+                .json::<BTreeMap<String, Json>>().await.unwrap();
+            context.project_id = meta["projectId"].as_str().unwrap().to_owned();
+            context.role_id = meta["roleId"].as_str().unwrap().to_owned();
+            context.role_name = meta["roleName"].as_str().unwrap().to_owned();
+
+            let meta = client.post(format!("{}/api/setProjectName", context.base_url))
+                .json(&json!({ "projectId": context.project_id, "name": project_name.unwrap_or("untitled") }))
+                .send().await.unwrap()
+                .json::<BTreeMap<String, Json>>().await.unwrap();
+            context.project_name = meta["name"].as_str().unwrap().to_owned();
+
+            let context = Arc::new(context);
+            let rpc_results = Arc::new(Mutex::new(Default::default()));
+
+            let rpc_request_pipe = {
+                let context = context.clone();
+                let rpc_results = rpc_results.clone();
+                let (sender, receiver) = channel();
+
+                #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
+                async fn handler(client: reqwest::Client, context: Arc<Context>, rpc_results: Arc<Mutex<RpcResults>>, receiver: Receiver<RpcRequest>) {
+                    while let Ok(request) = receiver.recv() {
+                        let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+                        let url = format!("{base_url}/services/{service}/{rpc}?uuid={client_id}&projectId={project_id}&roleId={role_id}&t={time}",
+                            service = request.service, rpc = request.rpc,
+                            base_url = context.base_url, client_id = context.client_id, project_id = context.project_id, role_id = context.role_id);
+                        let args: BTreeMap<String, Json> = request.args.into_iter().collect();
+
+                        let req = client.post(url).json(&args);
+                        let context = context.clone();
+                        let rpc_results = rpc_results.clone();
+                        let result_key = request.result_key;
+                        tokio::spawn(async move {
+                            let res = match req.send().await {
+                                Ok(res) => {
+                                    let status = res.status();
+                                    match res.text().await {
+                                        Ok(text) => match status.is_success() {
+                                            true => Ok(serde_json::from_str(&text).unwrap_or(Json::String(text))),
+                                            false => Err(text),
+                                        }
+                                        Err(_) => Err("Failed to read response body".to_owned()),
+                                    }
+                                }
+                                Err(_) => Err(format!("Failed to reach {}", context.base_url)),
+                            };
+                            assert!(rpc_results.lock().unwrap().get_mut(result_key).unwrap().replace(res).is_none());
+                        });
+                    }
+                }
+                thread::spawn(move || handler(client, context, rpc_results, receiver));
+
+                sender
+            };
+
             Self {
                 start_time: Instant::now(),
+                context,
+                rpc_results, rpc_request_pipe,
             }
         }
     }
     impl System for StdSystem {
-        type AsyncKey = ();
-        fn poll_async<'gc>(&mut self, _mc: MutationContext<'gc, '_>, _key: &Self::AsyncKey) -> Result<AsyncPoll<'gc>, SystemError> {
-            unimplemented!();
-        }
+        type RpcKey = RpcKey;
+
         fn time_ms(&self) -> Result<u64, SystemError> {
             Ok(self.start_time.elapsed().as_millis() as u64)
+        }
+
+        fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<Self::RpcKey, SystemError> {
+            let result_key = self.rpc_results.lock().unwrap().insert(None);
+            self.rpc_request_pipe.send(RpcRequest { service, rpc, args, result_key }).unwrap();
+            Ok(result_key)
+        }
+        fn poll_rpc(&self, key: &Self::RpcKey) -> Result<AsyncPoll<Result<Json, String>>, SystemError> {
+            let mut rpc_results = self.rpc_results.lock().unwrap();
+            Ok(match rpc_results.get(*key).unwrap().is_some() {
+                true => AsyncPoll::Completed(rpc_results.remove(*key).unwrap().unwrap()),
+                false => AsyncPoll::Pending,
+            })
         }
     }
 }

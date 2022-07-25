@@ -28,10 +28,9 @@ fn get_running_project(xml: &str) -> EnvArena {
     })
 }
 
-fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdSystem>) {
-    let mut system = StdSystem::new();
+fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdSystem>, system: &StdSystem) {
     loop {
-        match proj.step(mc, &mut system) {
+        match proj.step(mc, &system) {
             ProjectStep::Idle => return,
             ProjectStep::Normal => (),
         }
@@ -40,9 +39,10 @@ fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdS
 
 #[test]
 fn test_proj_counting() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut proj = get_running_project(include_str!("projects/counting.xml"));
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc));
+        run_till_term(mc, &mut *proj.proj.write(mc), &system);
         let global_context = proj.proj.read().global_context();
         let global_context = global_context.read();
 
@@ -56,9 +56,10 @@ fn test_proj_counting() {
 
 #[test]
 fn test_proj_broadcast() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
     let mut proj = get_running_project(include_str!("projects/broadcast.xml"));
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc));
+        run_till_term(mc, &mut *proj.proj.write(mc), &system);
         let global_context = proj.proj.read().global_context();
         let global_context = global_context.read();
 

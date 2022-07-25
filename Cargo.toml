@@ -7,7 +7,7 @@ edition = "2021"
 
 [features]
 default = ["std"]
-std = ["no-std-compat/std", "reqwest", "tokio", "clap"]
+std = ["no-std-compat/std", "tokio", "reqwest", "clap", "names"]
 
 [dependencies]
 no-std-compat = { version = "0.4.1", features = ["alloc"] }
@@ -19,6 +19,7 @@ num-traits = { version = "0.2.15", default-features = false }
 num-derive = { version = "0.3.3", default-features = false }
 libm = "0.2.2"
 
-reqwest = { version = "0.11", features = ["json"], optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
+reqwest = { version = "0.11", features = ["json"], optional = true }
 clap = { version = "3.2.14", features = ["derive"], optional = true }
+names = { version = "0.14.0", default-features = false, optional = true }
