@@ -327,9 +327,9 @@ impl<'gc, S: System> Process<'gc, S> {
             }
 
             Instruction::ListInsert => {
+                let list = self.value_stack.pop().unwrap().to_list(mc)?;
                 let val = self.value_stack.pop().unwrap();
                 let index = self.value_stack.pop().unwrap();
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
                 let mut list = list.write(mc);
 
                 let index = ops::prep_list_index(&index, list.len() + 1)?;
@@ -337,8 +337,8 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::ListInsertLast => {
-                let val = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let val = self.value_stack.pop().unwrap();
                 list.write(mc).push(val);
                 self.pos = aft_pos;
             }
@@ -347,8 +347,8 @@ impl<'gc, S: System> Process<'gc, S> {
             }
 
             Instruction::ListGet => {
-                let index = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap();
+                let index = self.value_stack.pop().unwrap();
                 self.value_stack.push(ops::index_list(mc, &list, &index)?);
                 self.pos = aft_pos;
             }
@@ -366,8 +366,8 @@ impl<'gc, S: System> Process<'gc, S> {
 
             Instruction::ListAssign => {
                 let value = self.value_stack.pop().unwrap();
-                let index = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let index = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
                 let index = ops::prep_list_index(&index, list.len())?;
                 list[index] = value;
@@ -386,8 +386,8 @@ impl<'gc, S: System> Process<'gc, S> {
             }
 
             Instruction::ListRemove => {
-                let index = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let index = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
                 let index = ops::prep_list_index(&index, list.len())?;
                 list.remove(index);

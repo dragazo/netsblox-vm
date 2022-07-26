@@ -30,6 +30,9 @@ pub(crate) enum UnaryOp {
     UnicodeToChar, CharToUnicode,
 }
 
+impl From<BinaryOp> for Instruction<'_> { fn from(op: BinaryOp) -> Self { Self::BinaryOp { op } } }
+impl From<UnaryOp> for Instruction<'_> { fn from(op: UnaryOp) -> Self { Self::UnaryOp { op } } }
+
 pub(crate) enum InternalInstruction<'a> {
     /// Triggers an error when encountered.
     /// This is an internal value that is only used to denote incomplete linking results for better testing.
@@ -87,28 +90,28 @@ pub(crate) enum Instruction<'a> {
     /// Consumes 1 value, `list`, from the value stack and pushes a bool representing if the list is empty onto the value stack.
     ListIsEmpty,
 
-    /// Consumes three values, `value, `index`, and `list`, from the value stack and inserts `value` at position `index` of `list`.
+    /// Consumes three values, `list`, `value, and `index`, from the value stack and inserts `value` at position `index` of `list`.
     ListInsert,
-    /// Consumes two values, `value` and `list`, from the value stack and inserts `value` at the end of `list`.
+    /// Consumes two values, `list` and `value`, from the value stack and inserts `value` at the end of `list`.
     ListInsertLast,
-    /// Consumes two values, `value` and `list`, from the values stack and inserts `value` at a random position in the list.
+    /// Consumes two values, `list` and `value`, from the values stack and inserts `value` at a random position in the list.
     ListInsertRandom,
 
-    /// Consumes two values, `index` and `list`, from the value stack and pushes the value `list[index]` onto the value stack.
+    /// Consumes two values, `list` and `index`, from the value stack and pushes the value `list[index]` onto the value stack.
     ListGet,
     /// Consumes 1 value, `list`, from the value stack and pushes the last item in the list onto the value stack.
     ListGetLast,
     /// Consumes 1 value, `list`, from the value stack and pushes a random item from the list onto the value stack.
     ListGetRandom,
 
-    /// Consumes three values, `value`, `index`, and `list`, from the value stack and assigns `list[index] = value`.
+    /// Consumes three values, `value`, `list`, and `index`, from the value stack and assigns `list[index] = value`.
     ListAssign,
     /// Consumes two values, `value` and `list`, from the value stack and assigns `value` to the last position in the list.
     ListAssignLast,
     /// Consumes two values, `value` and `list`, from the value stack and assigns `value` to a random position in the list.
     ListAssignRandom,
 
-    /// Consumes two values, `index` and `list`, from the value stack and deletes item `index` from `list`.
+    /// Consumes two values, `list` and `index`, from the value stack and deletes item `index` from `list`.
     ListRemove,
     /// Consumes one value, `list`, from the value stack and deletes the last item from it.
     ListRemoveLast,
@@ -427,14 +430,11 @@ struct ByteCodeBuilder<'a> {
     closure_holes: VecDeque<(usize, &'a [ast::VariableDef], &'a [ast::VariableRef], &'a [ast::Stmt], Option<&'a ast::Entity>)>, // (hole pos, params, captures, stmts, entity)
 }
 impl<'a> ByteCodeBuilder<'a> {
-    fn append_expr_binary_op(&mut self, left: &'a ast::Expr, right: &'a ast::Expr, op: BinaryOp, entity: Option<&'a ast::Entity>) {
-        self.append_expr(left, entity);
-        self.append_expr(right, entity);
-        self.ins.push(Instruction::BinaryOp { op }.into());
-    }
-    fn append_expr_unary_op(&mut self, value: &'a ast::Expr, op: UnaryOp, entity: Option<&'a ast::Entity>) {
-        self.append_expr(value, entity);
-        self.ins.push(Instruction::UnaryOp { op }.into());
+    fn append_simple_ins(&mut self, entity: Option<&'a ast::Entity>, values: &[&'a ast::Expr], op: Instruction<'a>) {
+        for value in values {
+            self.append_expr(value, entity);
+        }
+        self.ins.push(op.into());
     }
     fn append_expr(&mut self, expr: &'a ast::Expr, entity: Option<&'a ast::Entity>) {
         match expr {
@@ -451,67 +451,43 @@ impl<'a> ByteCodeBuilder<'a> {
                 ast::Value::List(_) => unreachable!(),
             }.into()),
             ast::Expr::Variable { var, .. } => self.ins.push(Instruction::PushVariable { var: &var.trans_name }.into()),
-            ast::Expr::Add { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Add, entity),
-            ast::Expr::Sub { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Sub, entity),
-            ast::Expr::Mul { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Mul, entity),
-            ast::Expr::Div { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Div, entity),
-            ast::Expr::Pow { base, power, .. } => self.append_expr_binary_op(&*base, &*power, BinaryOp::Pow, entity),
-            ast::Expr::Greater { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Greater, entity),
-            ast::Expr::Less { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Less, entity),
-            ast::Expr::Mod { left, right, .. } => self.append_expr_binary_op(&*left, &*right, BinaryOp::Mod, entity),
-            ast::Expr::Log { base, value, .. } => self.append_expr_binary_op(&*base, &*value, BinaryOp::Log, entity),
-            ast::Expr::Neg { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Neg, entity),
-            ast::Expr::Abs { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Abs, entity),
-            ast::Expr::Sqrt { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Sqrt, entity),
-            ast::Expr::Sin { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Sin, entity),
-            ast::Expr::Cos { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Cos, entity),
-            ast::Expr::Tan { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Tan, entity),
-            ast::Expr::Asin { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Asin, entity),
-            ast::Expr::Acos { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Acos, entity),
-            ast::Expr::Atan { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Atan, entity),
-            ast::Expr::Round { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Round, entity),
-            ast::Expr::Floor { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Floor, entity),
-            ast::Expr::Ceil { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Ceil, entity),
-            ast::Expr::Not { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Not, entity),
-            ast::Expr::Strlen { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::Strlen, entity),
-            ast::Expr::UnicodeToChar { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::UnicodeToChar, entity),
-            ast::Expr::CharToUnicode { value, .. } => self.append_expr_unary_op(&*value, UnaryOp::CharToUnicode, entity),
-            ast::Expr::Eq { left, right, .. } => {
-                self.append_expr(left, entity);
-                self.append_expr(right, entity);
-                self.ins.push(Instruction::Eq.into());
-            }
+            ast::Expr::Add { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Add.into()),
+            ast::Expr::Sub { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Sub.into()),
+            ast::Expr::Mul { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Mul.into()),
+            ast::Expr::Div { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Div.into()),
+            ast::Expr::Pow { base, power, .. } => self.append_simple_ins(entity, &[base, power], BinaryOp::Pow.into()),
+            ast::Expr::Greater { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Greater.into()),
+            ast::Expr::Less { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Less.into()),
+            ast::Expr::Mod { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Mod.into()),
+            ast::Expr::Log { base, value, .. } => self.append_simple_ins(entity, &[base, value], BinaryOp::Log.into()),
+            ast::Expr::Neg { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Neg.into()),
+            ast::Expr::Abs { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Abs.into()),
+            ast::Expr::Sqrt { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Sqrt.into()),
+            ast::Expr::Sin { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Sin.into()),
+            ast::Expr::Cos { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Cos.into()),
+            ast::Expr::Tan { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Tan.into()),
+            ast::Expr::Asin { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Asin.into()),
+            ast::Expr::Acos { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Acos.into()),
+            ast::Expr::Atan { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Atan.into()),
+            ast::Expr::Round { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Round.into()),
+            ast::Expr::Floor { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Floor.into()),
+            ast::Expr::Ceil { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Ceil.into()),
+            ast::Expr::Not { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Not.into()),
+            ast::Expr::Strlen { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Strlen.into()),
+            ast::Expr::UnicodeToChar { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::UnicodeToChar.into()),
+            ast::Expr::CharToUnicode { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::CharToUnicode.into()),
+            ast::Expr::Eq { left, right, .. } => self.append_simple_ins(entity, &[left, right], Instruction::Eq),
+            ast::Expr::ListIndex { list, index, .. } => self.append_simple_ins(entity, &[index, list], Instruction::ListGet),
+            ast::Expr::ListLastIndex { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListGetLast),
+            ast::Expr::ListRandIndex { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListGetRandom),
+            ast::Expr::Listlen { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListLen),
+            ast::Expr::ListIsEmpty { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListIsEmpty),
+            ast::Expr::RangeInclusive { start, stop, .. } => self.append_simple_ins(entity, &[start, stop], Instruction::MakeListRange),
             ast::Expr::MakeList { values, .. } => {
                 for value in values {
                     self.append_expr(value, entity);
                 }
                 self.ins.push(Instruction::MakeList { len: values.len() }.into());
-            }
-            ast::Expr::ListIndex { list, index, .. } => {
-                self.append_expr(list, entity);
-                self.append_expr(index, entity);
-                self.ins.push(Instruction::ListGet.into());
-            }
-            ast::Expr::ListLastIndex { list, .. } => {
-                self.append_expr(list, entity);
-                self.ins.push(Instruction::ListGetLast.into());
-            }
-            ast::Expr::ListRandIndex { list, .. } => {
-                self.append_expr(list, entity);
-                self.ins.push(Instruction::ListGetRandom.into());
-            }
-            ast::Expr::Listlen { value, .. } => {
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::ListLen.into());
-            }
-            ast::Expr::ListIsEmpty { value, .. } => {
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::ListIsEmpty.into());
-            }
-            ast::Expr::RangeInclusive { start, stop, .. } => {
-                self.append_expr(start, entity);
-                self.append_expr(stop, entity);
-                self.ins.push(Instruction::MakeListRange.into());
             }
             ast::Expr::Conditional { condition, then, otherwise, .. } => {
                 self.append_expr(condition, entity);
@@ -540,7 +516,7 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: true }.into();
 
-                self.ins.push(Instruction::UnaryOp { op: UnaryOp::ToBool }.into());
+                self.ins.push(Instruction::from(UnaryOp::ToBool).into());
             }
             ast::Expr::And { left, right, .. } => {
                 self.append_expr(left, entity);
@@ -553,7 +529,7 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: false }.into();
 
-                self.ins.push(Instruction::UnaryOp { op: UnaryOp::ToBool }.into());
+                self.ins.push(Instruction::from(UnaryOp::ToBool).into());
             }
             ast::Expr::CallFn { function, args, .. } => {
                 for arg in args {
@@ -591,17 +567,17 @@ impl<'a> ByteCodeBuilder<'a> {
             }
             ast::Expr::TextSplit { text, mode, .. } => {
                 self.append_expr(text, entity);
-                let ins = match mode {
-                    ast::TextSplitMode::Letter => Instruction::UnaryOp { op: UnaryOp::SplitLetter },
-                    ast::TextSplitMode::Word => Instruction::UnaryOp { op: UnaryOp::SplitWord },
-                    ast::TextSplitMode::Tab => Instruction::UnaryOp { op: UnaryOp::SplitTab },
-                    ast::TextSplitMode::CR => Instruction::UnaryOp { op: UnaryOp::SplitCR },
-                    ast::TextSplitMode::LF => Instruction::UnaryOp { op: UnaryOp::SplitLF },
-                    ast::TextSplitMode::Csv => Instruction::UnaryOp { op: UnaryOp::SplitCsv },
-                    ast::TextSplitMode::Json => Instruction::UnaryOp { op: UnaryOp::SplitJson },
+                let ins: Instruction = match mode {
+                    ast::TextSplitMode::Letter => UnaryOp::SplitLetter.into(),
+                    ast::TextSplitMode::Word => UnaryOp::SplitWord.into(),
+                    ast::TextSplitMode::Tab => UnaryOp::SplitTab.into(),
+                    ast::TextSplitMode::CR => UnaryOp::SplitCR.into(),
+                    ast::TextSplitMode::LF => UnaryOp::SplitLF.into(),
+                    ast::TextSplitMode::Csv => UnaryOp::SplitCsv.into(),
+                    ast::TextSplitMode::Json => UnaryOp::SplitJson.into(),
                     ast::TextSplitMode::Custom(pattern) => {
                         self.append_expr(pattern, entity);
-                        Instruction::BinaryOp { op: BinaryOp::SplitCustom }
+                        BinaryOp::SplitCustom.into()
                     }
                 };
                 self.ins.push(ins.into());
@@ -611,55 +587,20 @@ impl<'a> ByteCodeBuilder<'a> {
     }
     fn append_stmt(&mut self, stmt: &'a ast::Stmt, entity: Option<&'a ast::Entity>) {
         match stmt {
+            ast::Stmt::Assign { var, value, .. } => self.append_simple_ins(entity, &[value], Instruction::Assign { var: &var.trans_name }),
+            ast::Stmt::AddAssign { var, value, .. } => self.append_simple_ins(entity, &[value], Instruction::BinaryOpAssign { var: &var.trans_name, op: BinaryOp::Add }),
+            ast::Stmt::InsertAt { list, value, index, .. } => self.append_simple_ins(entity, &[value, index, list], Instruction::ListInsert),
+            ast::Stmt::Push { list, value, .. } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertLast),
+            ast::Stmt::InsertAtRand { list, value, .. } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertRandom),
+            ast::Stmt::RemoveAt { list, index, .. } => self.append_simple_ins(entity, &[index, list], Instruction::ListRemove),
+            ast::Stmt::IndexAssign { list, index, value, .. } => self.append_simple_ins(entity, &[index, list, value], Instruction::ListAssign),
+            ast::Stmt::LastIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignLast),
+            ast::Stmt::RandIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignRandom),
+            ast::Stmt::Return { value, .. } => self.append_simple_ins(entity, &[value], Instruction::Return),
             ast::Stmt::VarDecl { vars, .. } => {
                 for var in vars {
                     self.ins.push(Instruction::DeclareLocal { var: &var.trans_name }.into());
                 }
-            }
-            ast::Stmt::Assign { var, value, .. } => {
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::Assign { var: &var.trans_name }.into())
-            }
-            ast::Stmt::AddAssign { var, value, .. } => {
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::BinaryOpAssign { var: &var.trans_name, op: BinaryOp::Add }.into())
-            }
-            ast::Stmt::Push { list, value, .. } => {
-                self.append_expr(list, entity);
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::ListInsertLast.into());
-            }
-            ast::Stmt::InsertAt { list, value, index, .. } => {
-                self.append_expr(list, entity);
-                self.append_expr(index, entity);
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::ListInsert.into());
-            }
-            ast::Stmt::InsertAtRand { list, value, .. } => {
-                self.append_expr(list, entity);
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::ListInsertRandom.into());
-            }
-            ast::Stmt::RemoveAt { list, index, .. } => {
-                self.append_expr(list, entity);
-                self.append_expr(index, entity);
-                self.ins.push(Instruction::ListRemove.into());
-            }
-            ast::Stmt::IndexAssign { list, index, value, .. } => {
-                self.append_expr(list, entity);
-                self.append_expr(index, entity);
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::ListAssign.into());
-            }
-            ast::Stmt::LastIndexAssign { list, value, .. } => {
-                self.append_expr(list, entity);
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::ListAssignLast.into());
-            }
-            ast::Stmt::RandIndexAssign { list, value, .. } => {
-                self.append_expr(list, entity);
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::ListAssignRandom.into());
             }
             ast::Stmt::RunFn { function, args, .. } => {
                 for arg in args {
@@ -678,10 +619,6 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.append_expr(closure, entity);
                 self.ins.push(Instruction::CallClosure { args: args.len() }.into());
                 self.ins.push(Instruction::PopValue.into());
-            }
-            ast::Stmt::Return { value, .. } => {
-                self.append_expr(value, entity);
-                self.ins.push(Instruction::Return.into());
             }
             ast::Stmt::Warp { stmts, .. } => {
                 self.ins.push(Instruction::WarpStart.into());
@@ -718,7 +655,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 let top = self.ins.len();
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
                 self.ins.push(Instruction::PushNumber { value: 0.0 }.into());
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Greater }.into());
+                self.ins.push(Instruction::from(BinaryOp::Greater).into());
                 let aft_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
 
@@ -727,7 +664,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
 
                 self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Sub }.into());
+                self.ins.push(Instruction::from(BinaryOp::Sub).into());
                 self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
                 let aft = self.ins.len();
@@ -742,7 +679,7 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Greater }.into());
+                self.ins.push(Instruction::from(BinaryOp::Greater).into());
                 let delta_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
 
@@ -759,13 +696,13 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 }.into());
                 self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 1 }.into());
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Sub }.into());
-                self.ins.push(Instruction::UnaryOp { op: UnaryOp::Abs }.into());
+                self.ins.push(Instruction::from(BinaryOp::Sub).into());
+                self.ins.push(Instruction::from(UnaryOp::Abs).into());
 
                 let top = self.ins.len();
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
                 self.ins.push(Instruction::PushNumber { value: 0.0 }.into());
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Less }.into());
+                self.ins.push(Instruction::from(BinaryOp::Less).into());
                 let exit_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
 
@@ -776,10 +713,10 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
 
                 self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Sub }.into());
+                self.ins.push(Instruction::from(BinaryOp::Sub).into());
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 self.ins.push(Instruction::DupeValue { top_index: 3 }.into());
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Add }.into());
+                self.ins.push(Instruction::from(BinaryOp::Add).into());
                 self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 }.into());
                 self.ins.push(Instruction::PopValue.into());
                 self.ins.push(Instruction::Yield.into());
@@ -801,19 +738,19 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
                 self.ins.push(Instruction::DupeValue { top_index: 2 }.into());
                 self.ins.push(Instruction::ListLen.into());
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Greater }.into());
+                self.ins.push(Instruction::from(BinaryOp::Greater).into());
                 let exit_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
 
-                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
-                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 2 }.into());
                 self.ins.push(Instruction::ListGet.into());
                 self.ins.push(Instruction::Assign { var: &var.trans_name }.into());
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
                 self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
-                self.ins.push(Instruction::BinaryOp { op: BinaryOp::Add }.into());
+                self.ins.push(Instruction::from(BinaryOp::Add).into());
                 self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
                 let aft = self.ins.len();
