@@ -90,7 +90,7 @@ pub(crate) enum Instruction<'a> {
     /// Consumes 1 value, `list`, from the value stack and pushes a bool representing if the list is empty onto the value stack.
     ListIsEmpty,
 
-    /// Consumes three values, `list`, `value, and `index`, from the value stack and inserts `value` at position `index` of `list`.
+    /// Consumes three values, `list`, `index`, and `value, from the value stack and inserts `value` at position `index` of `list`.
     ListInsert,
     /// Consumes two values, `list` and `value`, from the value stack and inserts `value` at the end of `list`.
     ListInsertLast,
@@ -117,6 +117,8 @@ pub(crate) enum Instruction<'a> {
     ListRemoveLast,
     /// Consumes one value, `list`, from the value stack and deletes a random item from it.
     ListRemoveRandom,
+    /// Consumes one value, `list`, from the value stack and deletes all elements from it.
+    ListRemoveAll,
 
     /// Consumes `args` values from the value stack in reverse order and concatenates them into a single string, which is then pushed onto the value stack.
     Strcat { args: usize },
@@ -297,31 +299,32 @@ impl<'a> Binary<'a> for Instruction<'a> {
             25 => read_prefixed!(Instruction::ListRemove),
             26 => read_prefixed!(Instruction::ListRemoveLast),
             27 => read_prefixed!(Instruction::ListRemoveRandom),
+            28 => read_prefixed!(Instruction::ListRemoveAll),
 
-            28 => read_prefixed!(Instruction::Strcat {} : args),
+            29 => read_prefixed!(Instruction::Strcat {} : args),
 
-            29 => read_prefixed!(Instruction::BinaryOp {} : op),
-            30 => read_prefixed!(Instruction::Eq),
-            31 => read_prefixed!(Instruction::UnaryOp {} : op),
+            30 => read_prefixed!(Instruction::BinaryOp {} : op),
+            31 => read_prefixed!(Instruction::Eq),
+            32 => read_prefixed!(Instruction::UnaryOp {} : op),
 
-            32 => read_prefixed!(Instruction::DeclareLocal {} : var),
-            33 => read_prefixed!(Instruction::Assign {} : var),
-            34 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
+            33 => read_prefixed!(Instruction::DeclareLocal {} : var),
+            34 => read_prefixed!(Instruction::Assign {} : var),
+            35 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
 
-            35 => read_prefixed!(Instruction::Jump {} : to),
-            36 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
-            37 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
+            36 => read_prefixed!(Instruction::Jump {} : to),
+            37 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
+            38 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
 
-            38 => read_prefixed!(Instruction::MetaPush {} : value),
+            39 => read_prefixed!(Instruction::MetaPush {} : value),
 
-            39 => read_prefixed!(Instruction::Call {} : pos, params),
-            40 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
-            41 => read_prefixed!(Instruction::CallClosure {} : args),
-            42 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
-            43 => read_prefixed!(Instruction::Return),
+            40 => read_prefixed!(Instruction::Call {} : pos, params),
+            41 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
+            42 => read_prefixed!(Instruction::CallClosure {} : args),
+            43 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
+            44 => read_prefixed!(Instruction::Return),
 
-            44 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            45 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            45 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            46 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
             _ => unreachable!(),
         }
@@ -375,31 +378,32 @@ impl<'a> Binary<'a> for Instruction<'a> {
             Instruction::ListRemove => append_prefixed!(25),
             Instruction::ListRemoveLast => append_prefixed!(26),
             Instruction::ListRemoveRandom => append_prefixed!(27),
+            Instruction::ListRemoveAll => append_prefixed!(28),
 
-            Instruction::Strcat { args } => append_prefixed!(28: args),
+            Instruction::Strcat { args } => append_prefixed!(29: args),
 
-            Instruction::BinaryOp { op } => append_prefixed!(29: op),
-            Instruction::Eq => append_prefixed!(30),
-            Instruction::UnaryOp { op } => append_prefixed!(31: op),
+            Instruction::BinaryOp { op } => append_prefixed!(30: op),
+            Instruction::Eq => append_prefixed!(31),
+            Instruction::UnaryOp { op } => append_prefixed!(32: op),
 
-            Instruction::DeclareLocal { var } => append_prefixed!(32: var),
-            Instruction::Assign { var } => append_prefixed!(33: var),
-            Instruction::BinaryOpAssign { var, op } => append_prefixed!(34: var, op),
+            Instruction::DeclareLocal { var } => append_prefixed!(33: var),
+            Instruction::Assign { var } => append_prefixed!(34: var),
+            Instruction::BinaryOpAssign { var, op } => append_prefixed!(35: var, op),
 
-            Instruction::Jump { to } => append_prefixed!(35: move to),
-            Instruction::ConditionalJump { to, when: false } => append_prefixed!(36: move to),
-            Instruction::ConditionalJump { to, when: true } => append_prefixed!(37: move to),
+            Instruction::Jump { to } => append_prefixed!(36: move to),
+            Instruction::ConditionalJump { to, when: false } => append_prefixed!(37: move to),
+            Instruction::ConditionalJump { to, when: true } => append_prefixed!(38: move to),
 
-            Instruction::MetaPush { value } => append_prefixed!(38: value),
+            Instruction::MetaPush { value } => append_prefixed!(39: value),
 
-            Instruction::Call { pos, params } => append_prefixed!(39: move pos, params),
-            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(40: move pos, params, captures),
-            Instruction::CallClosure { args } => append_prefixed!(41: args),
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(42: service, rpc, args),
-            Instruction::Return => append_prefixed!(43),
+            Instruction::Call { pos, params } => append_prefixed!(40: move pos, params),
+            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(41: move pos, params, captures),
+            Instruction::CallClosure { args } => append_prefixed!(42: args),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(43: service, rpc, args),
+            Instruction::Return => append_prefixed!(44),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(44),
-            Instruction::Broadcast { wait: true } => append_prefixed!(45),
+            Instruction::Broadcast { wait: false } => append_prefixed!(45),
+            Instruction::Broadcast { wait: true } => append_prefixed!(46),
         }
     }
 }
@@ -593,6 +597,8 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Stmt::Push { list, value, .. } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertLast),
             ast::Stmt::InsertAtRand { list, value, .. } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertRandom),
             ast::Stmt::RemoveAt { list, index, .. } => self.append_simple_ins(entity, &[index, list], Instruction::ListRemove),
+            ast::Stmt::Pop { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListRemoveLast),
+            ast::Stmt::RemoveAll { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListRemoveAll),
             ast::Stmt::IndexAssign { list, index, value, .. } => self.append_simple_ins(entity, &[index, list, value], Instruction::ListAssign),
             ast::Stmt::LastIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignLast),
             ast::Stmt::RandIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignRandom),

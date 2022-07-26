@@ -328,8 +328,8 @@ impl<'gc, S: System> Process<'gc, S> {
 
             Instruction::ListInsert => {
                 let list = self.value_stack.pop().unwrap().to_list(mc)?;
-                let val = self.value_stack.pop().unwrap();
                 let index = self.value_stack.pop().unwrap();
+                let val = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
 
                 let index = ops::prep_list_index(&index, list.len() + 1)?;
@@ -398,10 +398,14 @@ impl<'gc, S: System> Process<'gc, S> {
                 let mut list = list.write(mc);
                 if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }) }
                 list.pop().unwrap();
-                self.pos= aft_pos;
+                self.pos = aft_pos;
             }
             Instruction::ListRemoveRandom => {
                 unimplemented!()
+            }
+            Instruction::ListRemoveAll => {
+                self.value_stack.pop().unwrap().to_list(mc)?.write(mc).clear();
+                self.pos = aft_pos;
             }
 
             Instruction::Strcat { args } => {

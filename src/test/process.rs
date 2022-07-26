@@ -500,3 +500,36 @@ fn test_proc_rpc_call_basic() {
         });
     }
 }
+
+#[test]
+fn test_proc_list_index_blocks() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/list-index-blocks.xml"),
+        methods = "",
+    ));
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            [2, 3, 4, 5, 6, 7, 8, 9, 10],
+            [2, 3, 4, 5, 6, 7, 8, 9],
+            [2, 3, 4, 5, 7, 8, 9],
+            [17, 2, 3, 4, 5, 7, 8, 9],
+            [17, 2, 3, 4, 5, 7, 8, 9, 18],
+            [17, 2, 19, 3, 4, 5, 7, 8, 9, 18],
+            [17, 2, 19, 3, 4, 5, 7, 8, 9, 18, 20],
+            [30, 2, 19, 3, 4, 5, 7, 8, 9, 18, 20],
+            [30, 2, 19, 3, 4, 5, 7, 8, 9, 18, 32],
+            [30, 2, 19, 3, 4, 5, 33, 8, 9, 18, 32],
+            [30, 32, 4],
+            [],
+            [50],
+            [],
+            [51],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "index ops");
+    });
+}
