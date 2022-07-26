@@ -82,16 +82,38 @@ pub(crate) enum Instruction<'a> {
     /// The new list is placed back onto the value stack.
     MakeListRange,
 
-    /// Pops a value, `x`, and a list, `list`, from the value stack and adds `x` to the end of `list`.
-    ListPush,
-    /// Consumes 1 value, `list`, from the value stack and pushes the the length of the list onto the value stack.
+    /// Consumes 1 value, `list`, from the value stack and pushes the length of the list onto the value stack.
     ListLen,
+    /// Consumes 1 value, `list`, from the value stack and pushes a bool representing if the list is empty onto the value stack.
+    ListIsEmpty,
+
+    /// Consumes three values, `value, `index`, and `list`, from the value stack and inserts `value` at position `index` of `list`.
+    ListInsert,
+    /// Consumes two values, `value` and `list`, from the value stack and inserts `value` at the end of `list`.
+    ListInsertLast,
+    /// Consumes two values, `value` and `list`, from the values stack and inserts `value` at a random position in the list.
+    ListInsertRandom,
+
     /// Consumes two values, `index` and `list`, from the value stack and pushes the value `list[index]` onto the value stack.
-    ListIndex,
+    ListGet,
     /// Consumes 1 value, `list`, from the value stack and pushes the last item in the list onto the value stack.
-    ListLastIndex,
-    /// Pops three values, `value`, `index`, and `list`, from the value stack and assigns `list[index] = value`.
-    ListIndexAssign,
+    ListGetLast,
+    /// Consumes 1 value, `list`, from the value stack and pushes a random item from the list onto the value stack.
+    ListGetRandom,
+
+    /// Consumes three values, `value`, `index`, and `list`, from the value stack and assigns `list[index] = value`.
+    ListAssign,
+    /// Consumes two values, `value` and `list`, from the value stack and assigns `value` to the last position in the list.
+    ListAssignLast,
+    /// Consumes two values, `value` and `list`, from the value stack and assigns `value` to a random position in the list.
+    ListAssignRandom,
+
+    /// Consumes two values, `index` and `list`, from the value stack and deletes item `index` from `list`.
+    ListRemove,
+    /// Consumes one value, `list`, from the value stack and deletes the last item from it.
+    ListRemoveLast,
+    /// Consumes one value, `list`, from the value stack and deletes a random item from it.
+    ListRemoveRandom,
 
     /// Consumes `args` values from the value stack in reverse order and concatenates them into a single string, which is then pushed onto the value stack.
     Strcat { args: usize },
@@ -254,36 +276,49 @@ impl<'a> Binary<'a> for Instruction<'a> {
             12 => read_prefixed!(Instruction::MakeList {} : len),
             13 => read_prefixed!(Instruction::MakeListRange),
 
-            14 => read_prefixed!(Instruction::ListPush),
-            15 => read_prefixed!(Instruction::ListLen),
-            16 => read_prefixed!(Instruction::ListIndex),
-            17 => read_prefixed!(Instruction::ListLastIndex),
-            18 => read_prefixed!(Instruction::ListIndexAssign),
+            14 => read_prefixed!(Instruction::ListLen),
+            15 => read_prefixed!(Instruction::ListIsEmpty),
 
-            19 => read_prefixed!(Instruction::Strcat {} : args),
+            16 => read_prefixed!(Instruction::ListInsert),
+            17 => read_prefixed!(Instruction::ListInsertLast),
+            18 => read_prefixed!(Instruction::ListInsertRandom),
 
-            20 => read_prefixed!(Instruction::BinaryOp {} : op),
-            21 => read_prefixed!(Instruction::Eq),
-            22 => read_prefixed!(Instruction::UnaryOp {} : op),
+            19 => read_prefixed!(Instruction::ListGet),
+            20 => read_prefixed!(Instruction::ListGetLast),
+            21 => read_prefixed!(Instruction::ListGetRandom),
 
-            23 => read_prefixed!(Instruction::DeclareLocal {} : var),
-            24 => read_prefixed!(Instruction::Assign {} : var),
-            25 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
+            22 => read_prefixed!(Instruction::ListAssign),
+            23 => read_prefixed!(Instruction::ListAssignLast),
+            24 => read_prefixed!(Instruction::ListAssignRandom),
 
-            26 => read_prefixed!(Instruction::Jump {} : to),
-            27 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
-            28 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
+            25 => read_prefixed!(Instruction::ListRemove),
+            26 => read_prefixed!(Instruction::ListRemoveLast),
+            27 => read_prefixed!(Instruction::ListRemoveRandom),
 
-            29 => read_prefixed!(Instruction::MetaPush {} : value),
+            28 => read_prefixed!(Instruction::Strcat {} : args),
 
-            30 => read_prefixed!(Instruction::Call {} : pos, params),
-            31 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
-            32 => read_prefixed!(Instruction::CallClosure {} : args),
-            33 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
-            34 => read_prefixed!(Instruction::Return),
+            29 => read_prefixed!(Instruction::BinaryOp {} : op),
+            30 => read_prefixed!(Instruction::Eq),
+            31 => read_prefixed!(Instruction::UnaryOp {} : op),
 
-            35 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            36 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            32 => read_prefixed!(Instruction::DeclareLocal {} : var),
+            33 => read_prefixed!(Instruction::Assign {} : var),
+            34 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
+
+            35 => read_prefixed!(Instruction::Jump {} : to),
+            36 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
+            37 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
+
+            38 => read_prefixed!(Instruction::MetaPush {} : value),
+
+            39 => read_prefixed!(Instruction::Call {} : pos, params),
+            40 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
+            41 => read_prefixed!(Instruction::CallClosure {} : args),
+            42 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
+            43 => read_prefixed!(Instruction::Return),
+
+            44 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            45 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
             _ => unreachable!(),
         }
@@ -319,36 +354,49 @@ impl<'a> Binary<'a> for Instruction<'a> {
             Instruction::MakeList { len } => append_prefixed!(12: len),
             Instruction::MakeListRange => append_prefixed!(13),
 
-            Instruction::ListPush => append_prefixed!(14),
-            Instruction::ListLen => append_prefixed!(15),
-            Instruction::ListIndex => append_prefixed!(16),
-            Instruction::ListLastIndex => append_prefixed!(17),
-            Instruction::ListIndexAssign => append_prefixed!(18),
+            Instruction::ListLen => append_prefixed!(14),
+            Instruction::ListIsEmpty => append_prefixed!(15),
 
-            Instruction::Strcat { args } => append_prefixed!(19: args),
+            Instruction::ListInsert => append_prefixed!(16),
+            Instruction::ListInsertLast => append_prefixed!(17),
+            Instruction::ListInsertRandom => append_prefixed!(18),
 
-            Instruction::BinaryOp { op } => append_prefixed!(20: op),
-            Instruction::Eq => append_prefixed!(21),
-            Instruction::UnaryOp { op } => append_prefixed!(22: op),
+            Instruction::ListGet => append_prefixed!(19),
+            Instruction::ListGetLast => append_prefixed!(20),
+            Instruction::ListGetRandom => append_prefixed!(21),
 
-            Instruction::DeclareLocal { var } => append_prefixed!(23: var),
-            Instruction::Assign { var } => append_prefixed!(24: var),
-            Instruction::BinaryOpAssign { var, op } => append_prefixed!(25: var, op),
+            Instruction::ListAssign => append_prefixed!(22),
+            Instruction::ListAssignLast => append_prefixed!(23),
+            Instruction::ListAssignRandom => append_prefixed!(24),
 
-            Instruction::Jump { to } => append_prefixed!(26: move to),
-            Instruction::ConditionalJump { to, when: false } => append_prefixed!(27: move to),
-            Instruction::ConditionalJump { to, when: true } => append_prefixed!(28: move to),
+            Instruction::ListRemove => append_prefixed!(25),
+            Instruction::ListRemoveLast => append_prefixed!(26),
+            Instruction::ListRemoveRandom => append_prefixed!(27),
 
-            Instruction::MetaPush { value } => append_prefixed!(29: value),
+            Instruction::Strcat { args } => append_prefixed!(28: args),
 
-            Instruction::Call { pos, params } => append_prefixed!(30: move pos, params),
-            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(31: move pos, params, captures),
-            Instruction::CallClosure { args } => append_prefixed!(32: args),
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(33: service, rpc, args),
-            Instruction::Return => append_prefixed!(34),
+            Instruction::BinaryOp { op } => append_prefixed!(29: op),
+            Instruction::Eq => append_prefixed!(30),
+            Instruction::UnaryOp { op } => append_prefixed!(31: op),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(35),
-            Instruction::Broadcast { wait: true } => append_prefixed!(36),
+            Instruction::DeclareLocal { var } => append_prefixed!(32: var),
+            Instruction::Assign { var } => append_prefixed!(33: var),
+            Instruction::BinaryOpAssign { var, op } => append_prefixed!(34: var, op),
+
+            Instruction::Jump { to } => append_prefixed!(35: move to),
+            Instruction::ConditionalJump { to, when: false } => append_prefixed!(36: move to),
+            Instruction::ConditionalJump { to, when: true } => append_prefixed!(37: move to),
+
+            Instruction::MetaPush { value } => append_prefixed!(38: value),
+
+            Instruction::Call { pos, params } => append_prefixed!(39: move pos, params),
+            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(40: move pos, params, captures),
+            Instruction::CallClosure { args } => append_prefixed!(41: args),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(42: service, rpc, args),
+            Instruction::Return => append_prefixed!(43),
+
+            Instruction::Broadcast { wait: false } => append_prefixed!(44),
+            Instruction::Broadcast { wait: true } => append_prefixed!(45),
         }
     }
 }
@@ -442,15 +490,23 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::ListIndex { list, index, .. } => {
                 self.append_expr(list, entity);
                 self.append_expr(index, entity);
-                self.ins.push(Instruction::ListIndex.into());
+                self.ins.push(Instruction::ListGet.into());
             }
             ast::Expr::ListLastIndex { list, .. } => {
                 self.append_expr(list, entity);
-                self.ins.push(Instruction::ListLastIndex.into());
+                self.ins.push(Instruction::ListGetLast.into());
+            }
+            ast::Expr::ListRandIndex { list, .. } => {
+                self.append_expr(list, entity);
+                self.ins.push(Instruction::ListGetRandom.into());
             }
             ast::Expr::Listlen { value, .. } => {
                 self.append_expr(value, entity);
                 self.ins.push(Instruction::ListLen.into());
+            }
+            ast::Expr::ListIsEmpty { value, .. } => {
+                self.append_expr(value, entity);
+                self.ins.push(Instruction::ListIsEmpty.into());
             }
             ast::Expr::RangeInclusive { start, stop, .. } => {
                 self.append_expr(start, entity);
@@ -571,13 +627,39 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Stmt::Push { list, value, .. } => {
                 self.append_expr(list, entity);
                 self.append_expr(value, entity);
-                self.ins.push(Instruction::ListPush.into());
+                self.ins.push(Instruction::ListInsertLast.into());
+            }
+            ast::Stmt::InsertAt { list, value, index, .. } => {
+                self.append_expr(list, entity);
+                self.append_expr(index, entity);
+                self.append_expr(value, entity);
+                self.ins.push(Instruction::ListInsert.into());
+            }
+            ast::Stmt::InsertAtRand { list, value, .. } => {
+                self.append_expr(list, entity);
+                self.append_expr(value, entity);
+                self.ins.push(Instruction::ListInsertRandom.into());
+            }
+            ast::Stmt::RemoveAt { list, index, .. } => {
+                self.append_expr(list, entity);
+                self.append_expr(index, entity);
+                self.ins.push(Instruction::ListRemove.into());
             }
             ast::Stmt::IndexAssign { list, index, value, .. } => {
                 self.append_expr(list, entity);
                 self.append_expr(index, entity);
                 self.append_expr(value, entity);
-                self.ins.push(Instruction::ListIndexAssign.into());
+                self.ins.push(Instruction::ListAssign.into());
+            }
+            ast::Stmt::LastIndexAssign { list, value, .. } => {
+                self.append_expr(list, entity);
+                self.append_expr(value, entity);
+                self.ins.push(Instruction::ListAssignLast.into());
+            }
+            ast::Stmt::RandIndexAssign { list, value, .. } => {
+                self.append_expr(list, entity);
+                self.append_expr(value, entity);
+                self.ins.push(Instruction::ListAssignRandom.into());
             }
             ast::Stmt::RunFn { function, args, .. } => {
                 for arg in args {
@@ -725,7 +807,7 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
-                self.ins.push(Instruction::ListIndex.into());
+                self.ins.push(Instruction::ListGet.into());
                 self.ins.push(Instruction::Assign { var: &var.trans_name }.into());
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);

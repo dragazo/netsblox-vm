@@ -76,3 +76,45 @@ fn test_proj_broadcast() {
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-20, "res")
     });
 }
+
+#[test]
+fn test_proj_parallel_rpcs() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
+    let mut proj = get_running_project(include_str!("projects/parallel-rpcs.xml"));
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc), &system);
+        let global_context = proj.proj.read().global_context();
+        let global_context = global_context.read();
+
+        assert_eq!(global_context.globals.lookup("input").unwrap().get().to_list(mc).unwrap().read().len(), 0);
+
+        let meta: Vec<_> = global_context.globals.lookup("meta").unwrap().get().to_simple().unwrap().into_list().unwrap().into_iter().map(|x| x.as_number().unwrap()).collect();
+        if meta.len() != 4 || meta.iter().sum::<f64>() != 1000.0 || !meta.iter().all(|&x| x >= 200.0) {
+            panic!("{meta:?}");
+        }
+
+        let mut output: Vec<_> = global_context.globals.lookup("output").unwrap().get().to_simple().unwrap().into_list().unwrap().into_iter().map(|row| {
+            let vals: Vec<_> = row.into_list().unwrap().into_iter().map(|x| {
+                let v = x.as_number().unwrap();
+                assert_eq!(v as i64 as f64, v);
+                v as i64
+            }).collect();
+            assert_eq!(vals.len(), 4);
+            (vals[0], vals[1], vals[2], vals[3])
+        }).collect();
+        output.sort();
+        assert_eq!(output.len(), 1000);
+        let mut res = output.iter().copied();
+        for r in 1..=10u32 {
+            for g in 1..=10u32 {
+                for b in 1..=10u32 {
+                    let encoded = ((0xff << 24) | (r << 16) | (g << 8) | b) as i32 as i64;
+                    let vals = res.next().unwrap();
+                    if vals.0 != r as i64 || vals.1 != g as i64 || vals.2 != b as i64 || vals.3 != encoded {
+                        panic!("got {vals:?} - expected {:?}", (r, g, b, encoded));
+                    }
+                }
+            }
+        }
+    });
+}

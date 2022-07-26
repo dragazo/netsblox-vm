@@ -24,6 +24,32 @@ pub enum SimpleValue {
     String(String),
     List(Vec<SimpleValue>),
 }
+impl SimpleValue {
+    /// Retrieves the value of the [`SimpleValue::Bool`] variant, or [`None`] if that is not the current variant.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self { SimpleValue::Bool(x) => Some(*x), _ => None }
+    }
+    /// Retrieves the value of the [`SimpleValue::Number`] variant, or [`None`] if that is not the current variant.
+    pub fn as_number(&self) -> Option<f64> {
+        match self { SimpleValue::Number(x) => Some(*x), _ => None }
+    }
+    /// Retrieves the value of the [`SimpleValue::String`] variant, or [`None`] if that is not the current variant.
+    pub fn as_str(&self) -> Option<&str> {
+        match self { SimpleValue::String(x) => Some(x), _ => None }
+    }
+    /// Retrieves the value of the [`SimpleValue::List`] variant, or [`None`] if that is not the current variant.
+    pub fn as_list(&self) -> Option<&[SimpleValue]> {
+        match self { SimpleValue::List(x) => Some(x), _ => None }
+    }
+    /// Retrieves the value of the [`SimpleValue::String`] variant, or [`None`] if that is not the current variant.
+    pub fn into_string(self) -> Option<String> {
+        match self { SimpleValue::String(x) => Some(x), _ => None }
+    }
+    /// Retrieves the value of the [`SimpleValue::List`] variant, or [`None`] if that is not the current variant.
+    pub fn into_list(self) -> Option<Vec<SimpleValue>> {
+        match self { SimpleValue::List(x) => Some(x), _ => None }
+    }
+}
 impl From<bool> for SimpleValue { fn from(v: bool) -> Self { Self::Bool(v) } }
 impl From<f64> for SimpleValue { fn from(v: f64) -> Self { Self::Number(v) } }
 impl From<i64> for SimpleValue { fn from(v: i64) -> Self { Self::Number(v as f64) } }

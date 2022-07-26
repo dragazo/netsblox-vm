@@ -262,6 +262,11 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.push(lookup_var!(var).get());
                 self.pos = aft_pos;
             }
+            Instruction::PopValue => {
+                self.value_stack.pop().unwrap();
+                self.pos = aft_pos;
+            }
+
             Instruction::DupeValue { top_index } => {
                 let val = self.value_stack[self.value_stack.len() - 1 - top_index as usize];
                 self.value_stack.push(val);
@@ -272,11 +277,6 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.swap(len - 1 - top_index_1 as usize, len - 1 - top_index_2 as usize);
                 self.pos = aft_pos;
             }
-            Instruction::PopValue => {
-                self.value_stack.pop().unwrap();
-                self.pos = aft_pos;
-            }
-
             Instruction::ShallowCopy => {
                 let val = self.value_stack.pop().unwrap();
                 self.value_stack.push(val.shallow_copy(mc));
@@ -290,25 +290,6 @@ impl<'gc, S: System> Process<'gc, S> {
                 }
                 vals.reverse();
                 self.value_stack.push(GcCell::allocate(mc, vals).into());
-                self.pos = aft_pos;
-            }
-            Instruction::ListLen => {
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
-                self.value_stack.push((list.read().len() as f64).into());
-                self.pos = aft_pos;
-            }
-            Instruction::ListIndex => {
-                let index = self.value_stack.pop().unwrap();
-                let list = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::index_list(mc, &list, &index)?);
-                self.pos = aft_pos;
-            }
-            Instruction::ListLastIndex => {
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
-                self.value_stack.push(match list.read().last() {
-                    Some(x) => *x,
-                    None => return Err(ErrorCause::IndexOutOfBounds { index: 0.0, list_len: 0 }),
-                });
                 self.pos = aft_pos;
             }
             Instruction::MakeListRange => {
@@ -333,13 +314,57 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.push(GcCell::allocate(mc, res).into());
                 self.pos = aft_pos;
             }
-            Instruction::ListPush => {
+
+            Instruction::ListLen => {
+                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                self.value_stack.push((list.read().len() as f64).into());
+                self.pos = aft_pos;
+            }
+            Instruction::ListIsEmpty => {
+                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                self.value_stack.push(list.read().is_empty().into());
+                self.pos = aft_pos;
+            }
+
+            Instruction::ListInsert => {
+                let val = self.value_stack.pop().unwrap();
+                let index = self.value_stack.pop().unwrap();
+                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let mut list = list.write(mc);
+
+                let index = ops::prep_list_index(&index, list.len() + 1)?;
+                list.insert(index, val);
+                self.pos = aft_pos;
+            }
+            Instruction::ListInsertLast => {
                 let val = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().to_list(mc)?;
                 list.write(mc).push(val);
                 self.pos = aft_pos;
             }
-            Instruction::ListIndexAssign => {
+            Instruction::ListInsertRandom => {
+                unimplemented!()
+            }
+
+            Instruction::ListGet => {
+                let index = self.value_stack.pop().unwrap();
+                let list = self.value_stack.pop().unwrap();
+                self.value_stack.push(ops::index_list(mc, &list, &index)?);
+                self.pos = aft_pos;
+            }
+            Instruction::ListGetLast => {
+                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                self.value_stack.push(match list.read().last() {
+                    Some(x) => *x,
+                    None => return Err(ErrorCause::IndexOutOfBounds { index: 0.0, list_len: 0 }),
+                });
+                self.pos = aft_pos;
+            }
+            Instruction::ListGetRandom => {
+                unimplemented!()
+            }
+
+            Instruction::ListAssign => {
                 let value = self.value_stack.pop().unwrap();
                 let index = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().to_list(mc)?;
@@ -347,6 +372,36 @@ impl<'gc, S: System> Process<'gc, S> {
                 let index = ops::prep_list_index(&index, list.len())?;
                 list[index] = value;
                 self.pos = aft_pos;
+            }
+            Instruction::ListAssignLast => {
+                let value = self.value_stack.pop().unwrap();
+                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let mut list = list.write(mc);
+                if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }); }
+                *list.last_mut().unwrap() = value;
+                self.pos = aft_pos;
+            }
+            Instruction::ListAssignRandom => {
+                unimplemented!()
+            }
+
+            Instruction::ListRemove => {
+                let index = self.value_stack.pop().unwrap();
+                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let mut list = list.write(mc);
+                let index = ops::prep_list_index(&index, list.len())?;
+                list.remove(index);
+                self.pos = aft_pos;
+            }
+            Instruction::ListRemoveLast => {
+                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let mut list = list.write(mc);
+                if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }) }
+                list.pop().unwrap();
+                self.pos= aft_pos;
+            }
+            Instruction::ListRemoveRandom => {
+                unimplemented!()
             }
 
             Instruction::Strcat { args } => {
