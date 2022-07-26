@@ -84,15 +84,15 @@ fn test_proc_sum_123n() {
         methods = "",
     ));
 
-    for (n, expect) in [(0.0, 0.0), (1.0, 1.0), (2.0, 3.0), (3.0, 6.0), (4.0, 10.0), (5.0, 15.0), (6.0, 21.0)] {
+    for (n, expect) in [(0, simple_value!("0")), (1, simple_value!(1)), (2, simple_value!(3)), (3, simple_value!(6)), (4, simple_value!(10)), (5, simple_value!(15)), (6, simple_value!(21))] {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
-            locals.redefine_or_define("n", Shared::Unique(n.into()));
+            locals.redefine_or_define("n", Shared::Unique((n as f64).into()));
             env.proc.write(mc).initialize(locals, None);
         });
-        run_till_term(&mut env, &system, |_, _, res| match res.unwrap().0.unwrap() {
-            Value::Number(ret) => assert_eq!(ret, expect),
-            x => panic!("{:?}", x),
+        run_till_term(&mut env, &system, |mc, _, res| {
+            let expect = Value::from_simple(mc, expect);
+            assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "sum 123n");
         });
     }
 }
@@ -107,15 +107,15 @@ fn test_proc_recursive_factorial() {
         methods = "",
     ));
 
-    for (n, expect) in [(0.0, 1.0), (1.0, 1.0), (2.0, 2.0), (3.0, 6.0), (4.0, 24.0), (5.0, 120.0), (6.0, 720.0), (7.0, 5040.0)] {
+    for (n, expect) in [(0, simple_value!("1")), (1, simple_value!("1")), (2, simple_value!(2)), (3, simple_value!(6)), (4, simple_value!(24)), (5, simple_value!(120)), (6, simple_value!(720)), (7, simple_value!(5040))] {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
-            locals.redefine_or_define("n", Shared::Unique(n.into()));
+            locals.redefine_or_define("n", Shared::Unique((n as f64).into()));
             env.proc.write(mc).initialize(locals, None);
         });
-        run_till_term(&mut env, &system, |_, _, res| match res.unwrap().0.unwrap() {
-            Value::Number(ret) => assert_eq!(ret, expect),
-            x => panic!("{:?}", x),
+        run_till_term(&mut env, &system, |mc, _, res| {
+            let expect = Value::from_simple(mc, expect);
+            assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "recursive factorial");
         });
     }
 }
@@ -132,18 +132,18 @@ fn test_proc_loops_lists_basic() {
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expected = Value::from_simple(mc, simple_value!([
-            [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
-            [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
-            [1.0,2.0,3.0,4.0,5.0,6.0,7.0],
-            [2.0,3.0,4.0,5.0,6.0,7.0],
-            [3.0,4.0,5.0,6.0,7.0],
-            [4.0,5.0,6.0,7.0],
-            [5.0,6.0,7.0],
-            [6.0,7.0],
-            [7.0],
-            [8.0],
-            [9.0,8.0],
-            [10.0,9.0,8.0],
+            [1,2,3,4,5,6,7,8,9,10],
+            [1,2,3,4,5,6,7,8,9,10],
+            [1,2,3,4,5,6,7],
+            [2,3,4,5,6,7],
+            [3,4,5,6,7],
+            [4,5,6,7],
+            [5,6,7],
+            [6,7],
+            [7],
+            [8],
+            [9,8],
+            [10,9,8],
             [6.5,7.5,8.5,9.5],
             [6.5,7.5,8.5],
             [6.5,7.5],
@@ -154,7 +154,7 @@ fn test_proc_loops_lists_basic() {
             [6.5,5.5,4.5,3.5],
             [6.5,5.5,4.5,3.5,2.5],
             [6.5,5.5,4.5,3.5,2.5,1.5],
-            [56.0,44.0,176.0],
+            ["56","44","176"],
         ]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expected, 1e-10, "loops lists");
     });
@@ -196,10 +196,10 @@ fn test_proc_recursively_self_containing_lists() {
                 }
             }
 
-            check("left mode", mc, &res[0], &Value::from_simple(mc, simple_value!([1.0,4.0,9.0,16.0,25.0,36.0,49.0,64.0,81.0,100.0])));
-            check("right mode", mc, &res[1], &Value::from_simple(mc, simple_value!([2.0,4.0,8.0,16.0,32.0,64.0,128.0,256.0,512.0,1024.0])));
-            check("both mode", mc, &res[2], &Value::from_simple(mc, simple_value!([1.0,4.0,27.0,256.0,3125.0,46656.0,823543.0,16777216.0,387420489.0,10000000000.0])));
-            check("unary mode", mc, &res[3], &Value::from_simple(mc, simple_value!([-1.0,-2.0,-3.0,-4.0,-5.0,-6.0,-7.0,-8.0,-9.0,-10.0])));
+            check("left mode", mc, &res[0], &Value::from_simple(mc, simple_value!([1,4,9,16,25,36,49,64,81,100])));
+            check("right mode", mc, &res[1], &Value::from_simple(mc, simple_value!([2,4,8,16,32,64,128,256,512,1024])));
+            check("both mode", mc, &res[2], &Value::from_simple(mc, simple_value!([1,4,27,256,3125,46656,823543,16777216,387420489,10000000000])));
+            check("unary mode", mc, &res[3], &Value::from_simple(mc, simple_value!([-1,-2,-3,-4,-5,-6,-7,-8,-9,-10])));
         }
         x => panic!("{:?}", x),
     });
@@ -295,25 +295,25 @@ fn test_proc_all_arithmetic() {
             [inf, -inf, -inf, inf],
             [130.75237792066878, 0.007648044463151016],
             [0.1, -2.7, 2.7, -0.1, 5.8, -1.3, 1.3, -5.8],
-            [7.0, 8.0, -7.0, -8.0],
+            [7, 8, -7, -8],
             [56.8, 6.3, inf, inf],
             [-56.8, 6.3, -inf, inf],
-            [8.0, 8.0, -7.0, -7.0, inf, -inf],
-            [7.0, 7.0, -8.0, -8.0, inf, -inf],
+            [8, 8, -7, -7, inf, -inf],
+            [7, 7, -8, -8, inf, -inf],
             [2.701851217221259, inf],
             [0.12706460860135046, 0.7071067811865475],
             [0.9918944425900297, 0.7071067811865476],
-            [0.12810295445305653, 1.0],
-            [0.0, 30.0, -30.0],
-            [90.0, 60.0, 120.0],
-            [0.0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779],
-            [-0.6931471805599453, 0.0, 2.186051276738094, inf],
-            [-0.3010299956639812, 0.0, 0.9493900066449128, inf],
-            [-1.0, 0.0, 3.1538053360790355, inf],
-            [1.0, 3.3201169227365472, 0.0001363889264820114, inf, 0.0],
-            [1.0, 15.848931924611133, 1.2589254117941663e-9, inf, 0.0],
-            [1.0, 2.2973967099940698, 0.002093307544016197, inf, 0.0],
-            [0.0, 1.2, -8.9, inf, -inf],
+            [0.12810295445305653, 1],
+            [0, 30, -30],
+            [90, 60, 120],
+            [0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779],
+            [-0.6931471805599453, 0, 2.186051276738094, inf],
+            [-0.3010299956639812, 0, 0.9493900066449128, inf],
+            [-1, 0, 3.1538053360790355, inf],
+            [1, 3.3201169227365472, 0.0001363889264820114, inf, 0],
+            [1, 15.848931924611133, 1.2589254117941663e-9, inf, 0],
+            [1, 2.2973967099940698, 0.002093307544016197, inf, 0],
+            ["0", "1.2", "-8.9", inf, -inf],
         ]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-7, "short circuit test");
     });
@@ -330,7 +330,7 @@ fn test_proc_lambda_local_shadow_capture() {
     ));
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([1.0, 0.0, 1.0]));
+        let expect = Value::from_simple(mc, simple_value!(["1", 0, "1"]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "local shadow capture");
     });
 }
@@ -517,19 +517,35 @@ fn test_proc_list_index_blocks() {
             [2, 3, 4, 5, 6, 7, 8, 9, 10],
             [2, 3, 4, 5, 6, 7, 8, 9],
             [2, 3, 4, 5, 7, 8, 9],
-            [17, 2, 3, 4, 5, 7, 8, 9],
-            [17, 2, 3, 4, 5, 7, 8, 9, 18],
-            [17, 2, 19, 3, 4, 5, 7, 8, 9, 18],
-            [17, 2, 19, 3, 4, 5, 7, 8, 9, 18, 20],
-            [30, 2, 19, 3, 4, 5, 7, 8, 9, 18, 20],
-            [30, 2, 19, 3, 4, 5, 7, 8, 9, 18, 32],
-            [30, 2, 19, 3, 4, 5, 33, 8, 9, 18, 32],
-            [30, 32, 4],
+            ["17", 2, 3, 4, 5, 7, 8, 9],
+            ["17", 2, 3, 4, 5, 7, 8, 9, "18"],
+            ["17", 2, "19", 3, 4, 5, 7, 8, 9, "18"],
+            ["17", 2, "19", 3, 4, 5, 7, 8, 9, "18", "20"],
+            ["30", 2, "19", 3, 4, 5, 7, 8, 9, "18", "20"],
+            ["30", 2, "19", 3, 4, 5, 7, 8, 9, "18", "32"],
+            ["30", 2, "19", 3, 4, 5, "33", 8, 9, "18", "32"],
+            ["30", "32", 4],
             [],
-            [50],
+            ["50"],
             [],
-            [51],
+            ["51"],
         ]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "index ops");
+    });
+}
+
+#[test]
+fn test_proc_literal_types() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/literal-types.xml"),
+        methods = "",
+    ));
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([ "50e4", "50e4s" ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "literal types check");
     });
 }

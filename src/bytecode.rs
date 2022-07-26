@@ -19,7 +19,8 @@ pub(crate) enum BinaryOp {
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
 pub(crate) enum UnaryOp {
-    ToBool, Not,
+    ToBool, ToNumber,
+    Not,
     Abs, Neg,
     Sqrt,
     Round, Floor, Ceil,
@@ -681,7 +682,9 @@ impl<'a> ByteCodeBuilder<'a> {
             }
             ast::Stmt::ForLoop { var, start, stop, stmts, .. } => {
                 self.append_expr(start, entity);
+                self.ins.push(Instruction::from(UnaryOp::ToNumber).into());
                 self.append_expr(stop, entity);
+                self.ins.push(Instruction::from(UnaryOp::ToNumber).into());
 
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());

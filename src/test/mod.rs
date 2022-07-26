@@ -20,7 +20,7 @@ fn assert_values_eq<'gc>(got: &Value<'gc>, expected: &Value<'gc>, epsilon: f64, 
             if !good { panic!("{} - number error - got {} expected {}", path, got, expected) }
         }
         (Value::String(got), Value::String(expected)) => {
-            if got.as_str() != expected.as_str() { panic!("{} - string error - got {:?} expected {:?}", path, got, expected) }
+            if got.as_str() != expected.as_str() { panic!("{} - string error - got {:?} expected {:?}", path, got.as_str(), expected.as_str()) }
         }
         (Value::List(got), Value::List(expected)) => {
             let got = got.read();

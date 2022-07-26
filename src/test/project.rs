@@ -89,7 +89,7 @@ fn test_proj_parallel_rpcs() {
         assert_eq!(global_context.globals.lookup("input").unwrap().get().to_list(mc).unwrap().read().len(), 0);
 
         let meta: Vec<_> = global_context.globals.lookup("meta").unwrap().get().to_simple().unwrap().into_list().unwrap().into_iter().map(|x| x.as_number().unwrap()).collect();
-        if meta.len() != 4 || meta.iter().sum::<f64>() != 1000.0 || !meta.iter().all(|&x| x >= 200.0) {
+        if meta.len() != 4 || meta.iter().sum::<f64>() != 216.0 || !meta.iter().all(|&x| x >= 30.0) {
             panic!("{meta:?}");
         }
 
@@ -103,11 +103,11 @@ fn test_proj_parallel_rpcs() {
             (vals[0], vals[1], vals[2], vals[3])
         }).collect();
         output.sort();
-        assert_eq!(output.len(), 1000);
+        assert_eq!(output.len(), 216);
         let mut res = output.iter().copied();
-        for r in 1..=10u32 {
-            for g in 1..=10u32 {
-                for b in 1..=10u32 {
+        for r in 1..=6u32 {
+            for g in 1..=6u32 {
+                for b in 1..=6u32 {
                     let encoded = ((0xff << 24) | (r << 16) | (g << 8) | b) as i32 as i64;
                     let vals = res.next().unwrap();
                     if vals.0 != r as i64 || vals.1 != g as i64 || vals.2 != b as i64 || vals.3 != encoded {

@@ -210,7 +210,7 @@ pub enum SimplifyError {
 pub struct Identity<'gc>(*const (), PhantomData<&'gc Value<'gc>>);
 
 /// Any primitive value.
-#[derive(Debug, Clone, Copy, Collect)]
+#[derive(Clone, Copy, Collect)]
 #[collect(no_drop)]
 pub enum Value<'gc> {
     /// A primitive boolean value.
@@ -227,6 +227,18 @@ pub enum Value<'gc> {
     Closure(GcCell<'gc, Closure<'gc>>),
     /// A reference to an [`Entity`] in the environment.
     Entity(GcCell<'gc, Entity<'gc>>),
+}
+impl fmt::Debug for Value<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Bool(x) => write!(f, "Bool({x})"),
+            Value::Number(x) => write!(f, "Number({x})"),
+            Value::String(x) => write!(f, "String({:?})", x.as_str()),
+            Value::List(x) => write!(f, "List({:?})", x.read().as_slice()),
+            Value::Closure(x) => write!(f, "Closure({:?})", x.read()),
+            Value::Entity(x) => write!(f, "Entity({:?})", x.read()),
+        }
+    }
 }
 impl<'gc> From<bool> for Value<'gc> { fn from(v: bool) -> Self { Value::Bool(v) } }
 impl<'gc> From<f64> for Value<'gc> { fn from(v: f64) -> Self { Value::Number(v) } }
@@ -257,14 +269,18 @@ impl<'gc> Value<'gc> {
     }
     pub fn to_simple(&self) -> Result<SimpleValue, SimplifyError> {
         fn simplify<'gc>(value: &Value<'gc>, cache: &mut BTreeSet<Identity<'gc>>) -> Result<SimpleValue, SimplifyError> {
-            if !cache.insert(value.identity()) { return Err(SimplifyError::HadCycle) }
-            Ok(match value {
+            let identity = value.identity();
+            if !cache.insert(identity) { return Err(SimplifyError::HadCycle) }
+            let res = match value {
                 Value::Bool(x) => SimpleValue::Bool(*x),
                 Value::Number(x) => SimpleValue::Number(*x),
                 Value::String(x) => SimpleValue::String(x.as_str().to_owned()),
                 Value::List(x) => SimpleValue::List(x.read().iter().map(|x| simplify(x, cache)).collect::<Result<_,_>>()?),
                 Value::Closure(_) | Value::Entity(_) => return Err(SimplifyError::HadComplexType(value.get_type())),
-            })
+            };
+            debug_assert!(cache.contains(&identity));
+            cache.remove(&identity);
+            Ok(res)
         }
         simplify(self, &mut Default::default())
     }

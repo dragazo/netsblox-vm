@@ -689,21 +689,22 @@ mod ops {
     pub(super) fn unary_op<'gc>(mc: MutationContext<'gc, '_>, x: &Value<'gc>, op: UnaryOp) -> Result<Value<'gc>, ErrorCause> {
         let mut cache = Default::default();
         match op {
-            UnaryOp::ToBool => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_bool()?.into())),
-            UnaryOp::Not    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((!x.to_bool()?).into())),
-            UnaryOp::Abs    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::fabs(x.to_number()?).into())),
-            UnaryOp::Neg    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((-x.to_number()?).into())),
-            UnaryOp::Sqrt   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::sqrt(x.to_number()?).into())),
-            UnaryOp::Round  => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::round(x.to_number()?).into())),
-            UnaryOp::Floor  => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::floor(x.to_number()?).into())),
-            UnaryOp::Ceil   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::ceil(x.to_number()?).into())),
-            UnaryOp::Sin    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::sin(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Cos    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::cos(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Tan    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::tan(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Asin   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::asin(x.to_number()?) / DEG_TO_RAD).into())),
-            UnaryOp::Acos   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::acos(x.to_number()?) / DEG_TO_RAD).into())),
-            UnaryOp::Atan   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::atan(x.to_number()?) / DEG_TO_RAD).into())),
-            UnaryOp::Strlen => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((x.to_string(mc)?.chars().count() as f64).into())),
+            UnaryOp::ToBool   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_bool()?.into())),
+            UnaryOp::ToNumber => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.into())),
+            UnaryOp::Not      => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((!x.to_bool()?).into())),
+            UnaryOp::Abs      => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::fabs(x.to_number()?).into())),
+            UnaryOp::Neg      => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((-x.to_number()?).into())),
+            UnaryOp::Sqrt     => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::sqrt(x.to_number()?).into())),
+            UnaryOp::Round    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::round(x.to_number()?).into())),
+            UnaryOp::Floor    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::floor(x.to_number()?).into())),
+            UnaryOp::Ceil     => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::ceil(x.to_number()?).into())),
+            UnaryOp::Sin      => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::sin(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::Cos      => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::cos(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::Tan      => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::tan(x.to_number()? * DEG_TO_RAD).into())),
+            UnaryOp::Asin     => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::asin(x.to_number()?) / DEG_TO_RAD).into())),
+            UnaryOp::Acos     => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::acos(x.to_number()?) / DEG_TO_RAD).into())),
+            UnaryOp::Atan     => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::atan(x.to_number()?) / DEG_TO_RAD).into())),
+            UnaryOp::Strlen   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((x.to_string(mc)?.chars().count() as f64).into())),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, x, &mut cache, &|mc, x| {
                 Ok(GcCell::allocate(mc, x.to_string(mc)?.chars().map(|x| Gc::allocate(mc, x.to_string()).into()).collect::<Vec<_>>()).into())
