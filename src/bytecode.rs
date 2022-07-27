@@ -172,9 +172,12 @@ pub(crate) enum Instruction<'a> {
     /// with the reported value being the (only) value remaining in the value stack.
     Return,
 
-    /// Pops 1 value from the value stack, `msg_type`, and broadcasts a message to all scripts.
+    /// Consumes 1 value from the value stack, `msg_type`, and broadcasts a message to all scripts.
     /// The `wait` flag can be set to denote that the broadcasting script should wait until all receiving scripts have terminated.
     Broadcast { wait: bool },
+
+    /// Consumes 1 value `msg` from the value stack and prints it to the stored printer.
+    Print,
 }
 
 pub(crate) trait Binary<'a>: Sized {
@@ -327,6 +330,8 @@ impl<'a> Binary<'a> for Instruction<'a> {
             45 => read_prefixed!(Instruction::Broadcast { wait: false }),
             46 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
+            47 => read_prefixed!(Instruction::Print),
+
             _ => unreachable!(),
         }
     }
@@ -405,6 +410,8 @@ impl<'a> Binary<'a> for Instruction<'a> {
 
             Instruction::Broadcast { wait: false } => append_prefixed!(45),
             Instruction::Broadcast { wait: true } => append_prefixed!(46),
+
+            Instruction::Print => append_prefixed!(47),
         }
     }
 }
@@ -604,6 +611,10 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Stmt::LastIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignLast),
             ast::Stmt::RandIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignRandom),
             ast::Stmt::Return { value, .. } => self.append_simple_ins(entity, &[value], Instruction::Return),
+            ast::Stmt::Say { content, duration, .. } | ast::Stmt::Think { content, duration, .. } => match duration {
+                Some(_) => unimplemented!(),
+                None => self.append_simple_ins(entity, &[content], Instruction::Print),
+            }
             ast::Stmt::VarDecl { vars, .. } => {
                 for var in vars {
                     self.ins.push(Instruction::DeclareLocal { var: &var.trans_name }.into());

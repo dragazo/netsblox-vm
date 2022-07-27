@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::rc::Rc;
 use std::io::Read;
 
 use clap::Parser;
@@ -66,7 +67,10 @@ fn main() {
         }
     };
     let mut env = EnvArena::new(Default::default(), |mc| {
-        let settings = SettingsBuilder::default().build().unwrap();
+        let settings = SettingsBuilder::default()
+            .printer(Rc::new(|value, entity| if let Some(value) = value { println!("{:?} > {:?}", entity, value) }))
+            .build().unwrap();
+
         let mut proj = Project::from_ast(mc, role, settings);
         proj.input(Input::Start);
         Env { proj: GcCell::allocate(mc, proj) }

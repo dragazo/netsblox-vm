@@ -230,14 +230,35 @@ pub enum Value<'gc> {
 }
 impl fmt::Debug for Value<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Value::Bool(x) => write!(f, "Bool({x})"),
-            Value::Number(x) => write!(f, "Number({x})"),
-            Value::String(x) => write!(f, "String({:?})", x.as_str()),
-            Value::List(x) => write!(f, "List({:?})", x.read().as_slice()),
-            Value::Closure(x) => write!(f, "Closure({:?})", x.read()),
-            Value::Entity(x) => write!(f, "Entity({:?})", x.read()),
+        fn print<'gc>(value: &Value<'gc>, cache: &mut BTreeSet<Identity<'gc>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match value {
+                Value::Bool(x) => write!(f, "{x}"),
+                Value::Number(x) => write!(f, "{x}"),
+                Value::String(x) => write!(f, "{:?}", x.as_str()),
+                Value::Closure(x) => write!(f, "{:?}", &*x.read()),
+                Value::Entity(x) => write!(f, "{:?}", &*x.read()),
+                Value::List(x) => {
+                    let identity = value.identity();
+                    if !cache.insert(identity) { return write!(f, "[...]") }
+
+                    let x = x.read();
+                    write!(f, "[")?;
+                    for (i, val) in x.iter().enumerate() {
+                        print(val, cache, f)?;
+                        if i != x.len() - 1 { write!(f, ",")? }
+                    }
+                    write!(f, "]")?;
+
+                    debug_assert!(cache.contains(&identity));
+                    cache.remove(&identity);
+                    Ok(())
+                }
+            }
         }
+        let mut cache = Default::default();
+        let res = print(self, &mut cache, f);
+        debug_assert_eq!(cache.len(), 0);
+        res
     }
 }
 impl<'gc> From<bool> for Value<'gc> { fn from(v: bool) -> Self { Value::Bool(v) } }
@@ -269,20 +290,25 @@ impl<'gc> Value<'gc> {
     }
     pub fn to_simple(&self) -> Result<SimpleValue, SimplifyError> {
         fn simplify<'gc>(value: &Value<'gc>, cache: &mut BTreeSet<Identity<'gc>>) -> Result<SimpleValue, SimplifyError> {
-            let identity = value.identity();
-            if !cache.insert(identity) { return Err(SimplifyError::HadCycle) }
-            let res = match value {
+            Ok(match value {
                 Value::Bool(x) => SimpleValue::Bool(*x),
                 Value::Number(x) => SimpleValue::Number(*x),
                 Value::String(x) => SimpleValue::String(x.as_str().to_owned()),
-                Value::List(x) => SimpleValue::List(x.read().iter().map(|x| simplify(x, cache)).collect::<Result<_,_>>()?),
                 Value::Closure(_) | Value::Entity(_) => return Err(SimplifyError::HadComplexType(value.get_type())),
-            };
-            debug_assert!(cache.contains(&identity));
-            cache.remove(&identity);
-            Ok(res)
+                Value::List(x) => {
+                    let identity = value.identity();
+                    if !cache.insert(identity) { return Err(SimplifyError::HadCycle) }
+                    let res = SimpleValue::List(x.read().iter().map(|x| simplify(x, cache)).collect::<Result<_,_>>()?);
+                    debug_assert!(cache.contains(&identity));
+                    cache.remove(&identity);
+                    res
+                }
+            })
         }
-        simplify(self, &mut Default::default())
+        let mut cache = Default::default();
+        let res = simplify(self, &mut cache);
+        debug_assert_eq!(cache.len(), 0);
+        res
     }
     /// Creates a shallow copy of this value.
     pub fn shallow_copy(&self, mc: MutationContext<'gc, '_>) -> Value<'gc> {
@@ -323,7 +349,6 @@ impl<'gc> Value<'gc> {
     pub fn to_bool(&self) -> Result<bool, ConversionError> {
         Ok(match self {
             Value::Bool(x) => *x,
-            Value::Number(x) => *x != 0.0 && !x.is_nan(),
             Value::String(x) => !x.is_empty(),
             x => return Err(ConversionError { got: x.get_type(), expected: Type::Bool }),
         })
@@ -345,21 +370,21 @@ impl<'gc> Value<'gc> {
         })
     }
     /// Attempts to interpret this value as a list.
-    pub fn to_list(&self, _mc: MutationContext<'gc, '_>) -> Result<GcCell<'gc, Vec<Value<'gc>>>, ConversionError> {
+    pub fn as_list(&self) -> Result<GcCell<'gc, Vec<Value<'gc>>>, ConversionError> {
         match self {
             Value::List(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::List }.into()),
         }
     }
     /// Attempts to interpret this value as a closure.
-    pub fn to_closure(&self, _mc: MutationContext<'gc, '_>) -> Result<GcCell<'gc, Closure<'gc>>, ConversionError> {
+    pub fn as_closure(&self) -> Result<GcCell<'gc, Closure<'gc>>, ConversionError> {
         match self {
             Value::Closure(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Closure }.into()),
         }
     }
     /// Attempts to interpret this value as an entity.
-    pub fn to_entity(&self, _mc: MutationContext<'gc, '_>) -> Result<GcCell<'gc, Entity<'gc>>, ConversionError> {
+    pub fn as_entity(&self) -> Result<GcCell<'gc, Entity<'gc>>, ConversionError> {
         match self {
             Value::Entity(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Entity }.into()),
@@ -377,7 +402,7 @@ pub struct Closure<'gc> {
 }
 impl fmt::Debug for Closure<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[Closure({})]", self.pos)
+        write!(f, "Closure {:#08x}", self.pos)
     }
 }
 
@@ -391,7 +416,7 @@ pub struct Entity<'gc> {
 }
 impl fmt::Debug for Entity<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[Entity({}, {})]", self.name, if self.alive { "alive" } else { "dead" })
+        write!(f, "{}Entity {:?}", if self.alive { "" } else { "Dead " }, self.name)
     }
 }
 

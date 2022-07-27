@@ -85,13 +85,20 @@ pub enum ProcessStep<'gc> {
 }
 
 /// Settings to use for a [`Process`].
-#[derive(Builder, Clone, Copy, Collect)]
+#[derive(Builder, Clone, Collect)]
 #[builder(no_std)]
 #[collect(require_static)]
 pub struct Settings {
     /// The maximum depth of the call stack (default `1024`).
     #[builder(default = "1024")]
     max_call_depth: usize,
+
+    /// A function used to process all "say" and "think" blocks.
+    /// The first argument is the actual message value, or [`None`] to clear the output (Snap!-style).
+    /// The second argument is a reference to the entity making the request.
+    /// The default printer is no-op, effectively ignoring all output requests.
+    #[builder(default = "Rc::new(|_, _| ())")]
+    printer: Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>)>,
 }
 
 #[derive(Collect)]
@@ -316,18 +323,18 @@ impl<'gc, S: System> Process<'gc, S> {
             }
 
             Instruction::ListLen => {
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let list = self.value_stack.pop().unwrap().as_list()?;
                 self.value_stack.push((list.read().len() as f64).into());
                 self.pos = aft_pos;
             }
             Instruction::ListIsEmpty => {
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let list = self.value_stack.pop().unwrap().as_list()?;
                 self.value_stack.push(list.read().is_empty().into());
                 self.pos = aft_pos;
             }
 
             Instruction::ListInsert => {
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let list = self.value_stack.pop().unwrap().as_list()?;
                 let index = self.value_stack.pop().unwrap();
                 let val = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
@@ -337,7 +344,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::ListInsertLast => {
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let list = self.value_stack.pop().unwrap().as_list()?;
                 let val = self.value_stack.pop().unwrap();
                 list.write(mc).push(val);
                 self.pos = aft_pos;
@@ -353,7 +360,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::ListGetLast => {
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let list = self.value_stack.pop().unwrap().as_list()?;
                 self.value_stack.push(match list.read().last() {
                     Some(x) => *x,
                     None => return Err(ErrorCause::IndexOutOfBounds { index: 0.0, list_len: 0 }),
@@ -366,7 +373,7 @@ impl<'gc, S: System> Process<'gc, S> {
 
             Instruction::ListAssign => {
                 let value = self.value_stack.pop().unwrap();
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let list = self.value_stack.pop().unwrap().as_list()?;
                 let index = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
                 let index = ops::prep_list_index(&index, list.len())?;
@@ -375,7 +382,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::ListAssignLast => {
                 let value = self.value_stack.pop().unwrap();
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let list = self.value_stack.pop().unwrap().as_list()?;
                 let mut list = list.write(mc);
                 if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }); }
                 *list.last_mut().unwrap() = value;
@@ -386,7 +393,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
 
             Instruction::ListRemove => {
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let list = self.value_stack.pop().unwrap().as_list()?;
                 let index = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
                 let index = ops::prep_list_index(&index, list.len())?;
@@ -394,7 +401,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::ListRemoveLast => {
-                let list = self.value_stack.pop().unwrap().to_list(mc)?;
+                let list = self.value_stack.pop().unwrap().as_list()?;
                 let mut list = list.write(mc);
                 if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }) }
                 list.pop().unwrap();
@@ -404,7 +411,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 unimplemented!()
             }
             Instruction::ListRemoveAll => {
-                self.value_stack.pop().unwrap().to_list(mc)?.write(mc).clear();
+                self.value_stack.pop().unwrap().as_list()?.write(mc).clear();
                 self.pos = aft_pos;
             }
 
@@ -494,7 +501,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::CallClosure { args } => {
-                let closure = self.value_stack.pop().unwrap().to_closure(mc)?;
+                let closure = self.value_stack.pop().unwrap().as_closure()?;
                 let mut closure = closure.write(mc);
                 if closure.params.len() != args {
                     return Err(ErrorCause::ClosureArgCount { expected: closure.params.len(), got: args });
@@ -554,6 +561,12 @@ impl<'gc, S: System> Process<'gc, S> {
                     }
                 };
                 return Ok(ProcessStep::Broadcast { msg_type, barrier });
+            }
+            Instruction::Print => {
+                let value = self.value_stack.pop().unwrap();
+                let is_empty = match value { Value::String(x) => x.is_empty(), _ => false };
+                self.settings.printer.as_ref()(if is_empty { None } else { Some(value) }, &*entity);
+                self.pos = aft_pos;
             }
         }
 
@@ -757,7 +770,7 @@ mod ops {
         }
     }
     pub(super) fn index_list<'gc>(mc: MutationContext<'gc, '_>, list: &Value<'gc>, index: &Value<'gc>) -> Result<Value<'gc>, ErrorCause> {
-        let list = list.to_list(mc)?;
+        let list = list.as_list()?;
         let list = list.read();
         unary_op_impl(mc, index, &mut Default::default(), &|_, x| Ok(list[prep_list_index(x, list.len())?]))
     }

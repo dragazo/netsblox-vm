@@ -86,7 +86,7 @@ fn test_proj_parallel_rpcs() {
         let global_context = proj.proj.read().global_context();
         let global_context = global_context.read();
 
-        assert_eq!(global_context.globals.lookup("input").unwrap().get().to_list(mc).unwrap().read().len(), 0);
+        assert_eq!(global_context.globals.lookup("input").unwrap().get().as_list().unwrap().read().len(), 0);
 
         let meta: Vec<_> = global_context.globals.lookup("meta").unwrap().get().to_simple().unwrap().into_list().unwrap().into_iter().map(|x| x.as_number().unwrap()).collect();
         if meta.len() != 4 || meta.iter().sum::<f64>() != 216.0 || !meta.iter().all(|&x| x >= 30.0) {
