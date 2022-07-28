@@ -2,6 +2,7 @@
 
 use std::prelude::v1::*;
 use std::collections::{BTreeMap, VecDeque};
+use std::io::{self, Write};
 use std::mem;
 
 use num_traits::FromPrimitive;
@@ -421,7 +422,7 @@ impl<'a> Binary<'a> for Instruction<'a> {
 /// [`Process`](crate::runtime::Process) is an execution primitive that can be used to execute generated [`ByteCode`].
 #[derive(Debug, Collect)]
 #[collect(require_static)]
-pub struct ByteCode(Box<[u8]>);
+pub struct ByteCode(pub(crate) Box<[u8]>);
 /// Location info in a [`ByteCode`] object for a particular entity.
 #[derive(Debug)]
 pub struct EntityLocations<'a> {
@@ -955,8 +956,34 @@ impl ByteCode {
 
         code.link(Locations { funcs, entities })
     }
-    /// Get a reference to the raw bytecode.
-    pub fn raw(&self) -> &[u8] {
-        &self.0
+    /// Generates a hex dump of the stored bytecode, including instructions and addresses.
+    pub fn dump(&self, f: &mut dyn Write) -> io::Result<()> {
+        const BYTES_PER_LINE: usize = 12;
+
+        let mut pos = 0;
+        while pos < self.0.len() {
+            let (ins, aft) = Instruction::read(&self.0, pos);
+            for (i, bytes) in self.0[pos..aft].chunks(BYTES_PER_LINE).enumerate() {
+                if i == 0 {
+                    write!(f, "{pos:08}   ")?;
+                } else {
+                    write!(f, "           ")?;
+                }
+
+                for b in bytes.iter().copied() {
+                    write!(f, " {b:02x}")?;
+                }
+                for _ in bytes.len()..BYTES_PER_LINE {
+                    write!(f, "   ")?;
+                }
+
+                if i == 0 {
+                    write!(f, "    {ins:?}")?;
+                }
+                writeln!(f)?;
+            }
+            pos = aft;
+        }
+        Ok(())
     }
 }

@@ -238,7 +238,7 @@ impl<'gc, S: System> Process<'gc, S> {
             (mut $var:expr) => {lookup_var!($var => lookup_mut)};
         }
 
-        let (ins, aft_pos) = Instruction::read(&self.code.raw(), self.pos);
+        let (ins, aft_pos) = Instruction::read(&self.code.0, self.pos);
         match ins {
             Instruction::Yield => {
                 self.pos = aft_pos;
