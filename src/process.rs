@@ -257,6 +257,10 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.push(value.into());
                 self.pos = aft_pos;
             }
+            Instruction::PushInt { value } => {
+                self.value_stack.push((value as f64).into());
+                self.pos = aft_pos;
+            }
             Instruction::PushNumber { value } => {
                 self.value_stack.push(value.into());
                 self.pos = aft_pos;

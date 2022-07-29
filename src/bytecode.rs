@@ -65,6 +65,8 @@ pub(crate) enum Instruction<'a> {
 
     /// Pushes 1 bool value to the value stack.
     PushBool { value: bool },
+    /// Pushes 1 number value to the value stack. This is a more compact encoding than [`Instruction::PushNumber`].
+    PushInt { value: i32 },
     /// Pushes 1 number value to the value stack.
     PushNumber { value: f64 },
     /// Pushes 1 string value to the value stack.
@@ -289,6 +291,55 @@ fn test_binary_u64() {
     }
 }
 
+// stores the value as u64 by shifting up by one bit and storing a bitwise-not flag in the low order bit.
+// the u64 value is then stored using the variable width algorithm for u64.
+impl BinaryRead<'_> for i32 {
+    fn read(code: &[u8], data: &[u8], start: usize) -> (Self, usize) {
+        let (raw, aft) = <u64 as BinaryRead>::read(code, data, start);
+        let v = (raw >> 1) as u32;
+        (if raw & 1 == 0 { v } else { !v } as i32, aft)
+    }
+}
+impl BinaryWrite for i32 {
+    fn append(val: &Self, code: &mut Vec<u8>, data: &mut BinPool, relocate_info: &mut Vec<RelocateInfo>) {
+        let v: u64 = ((*val) as u64) << 1;
+        BinaryWrite::append(&if v & 0x8000000000000000 == 0 { v } else { !v }, code, data, relocate_info)
+    }
+}
+
+#[test]
+fn test_binary_i32() {
+    let mut buf = vec![];
+    let mut discard = (BinPool::new(), vec![]);
+    let tests = [
+        (0,         [0x00].as_slice()),
+        (-1,        [0x01].as_slice()),
+        (1,         [0x02].as_slice()),
+        (-2,        [0x03].as_slice()),
+        (2,         [0x04].as_slice()),
+        (0x543245,  [0x8a, 0xc9, 0xa1, 0x05].as_slice()),
+        (-0x376224, [0xc7, 0x88, 0xbb, 0x03].as_slice()),
+        (-i32::MAX, [0xfd, 0xff, 0xff, 0xff, 0x0f].as_slice()),
+        (i32::MAX,  [0xfe, 0xff, 0xff, 0xff, 0x0f].as_slice()),
+        (i32::MIN,  [0xff, 0xff, 0xff, 0xff, 0x0f].as_slice()),
+    ];
+    for (v, expect) in tests {
+        for prefix_bytes in 0..8 {
+            buf.clear();
+            buf.extend(std::iter::once(0x53).cycle().take(prefix_bytes));
+            BinaryWrite::append(&v, &mut buf, &mut discard.0, &mut discard.1);
+            assert_eq!(discard.0.len(), 0);
+            assert_eq!(discard.1.len(), 0);
+            assert!(buf[..prefix_bytes].iter().all(|&x| x == 0x53));
+            assert_eq!(&buf[prefix_bytes..], expect);
+            buf.extend(std::iter::once(0xff).cycle().take(8));
+            let (back, aft) = <i32 as BinaryRead>::read(&buf, &[], prefix_bytes);
+            assert_eq!(back, v);
+            assert_eq!(aft, prefix_bytes + expect.len());
+        }
+    }
+}
+
 impl BinaryRead<'_> for f64 {
     fn read(code: &[u8], data: &[u8], start: usize) -> (Self, usize) {
         let (v, aft) = <u64 as BinaryRead>::read(code, data, start);
@@ -346,64 +397,65 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
 
             3 => read_prefixed!(Instruction::PushBool { value: false }),
             4 => read_prefixed!(Instruction::PushBool { value: true }),
-            5 => read_prefixed!(Instruction::PushNumber {} : value),
-            6 => read_prefixed!(Instruction::PushString {} : value),
-            7 => read_prefixed!(Instruction::PushVariable {} : var),
-            8 => read_prefixed!(Instruction::PopValue),
+            5 => read_prefixed!(Instruction::PushInt {} : value),
+            6 => read_prefixed!(Instruction::PushNumber {} : value),
+            7 => read_prefixed!(Instruction::PushString {} : value),
+            8 => read_prefixed!(Instruction::PushVariable {} : var),
+            9 => read_prefixed!(Instruction::PopValue),
 
-            9 => read_prefixed!(Instruction::DupeValue {} : top_index),
-            10 => read_prefixed!(Instruction::SwapValues {} : top_index_1, top_index_2),
-            11 => read_prefixed!(Instruction::ShallowCopy),
+            10 => read_prefixed!(Instruction::DupeValue {} : top_index),
+            11 => read_prefixed!(Instruction::SwapValues {} : top_index_1, top_index_2),
+            12 => read_prefixed!(Instruction::ShallowCopy),
 
-            12 => read_prefixed!(Instruction::MakeList {} : len),
-            13 => read_prefixed!(Instruction::MakeListRange),
+            13 => read_prefixed!(Instruction::MakeList {} : len),
+            14 => read_prefixed!(Instruction::MakeListRange),
 
-            14 => read_prefixed!(Instruction::ListLen),
-            15 => read_prefixed!(Instruction::ListIsEmpty),
+            15 => read_prefixed!(Instruction::ListLen),
+            16 => read_prefixed!(Instruction::ListIsEmpty),
 
-            16 => read_prefixed!(Instruction::ListInsert),
-            17 => read_prefixed!(Instruction::ListInsertLast),
-            18 => read_prefixed!(Instruction::ListInsertRandom),
+            17 => read_prefixed!(Instruction::ListInsert),
+            18 => read_prefixed!(Instruction::ListInsertLast),
+            19 => read_prefixed!(Instruction::ListInsertRandom),
 
-            19 => read_prefixed!(Instruction::ListGet),
-            20 => read_prefixed!(Instruction::ListGetLast),
-            21 => read_prefixed!(Instruction::ListGetRandom),
+            20 => read_prefixed!(Instruction::ListGet),
+            21 => read_prefixed!(Instruction::ListGetLast),
+            22 => read_prefixed!(Instruction::ListGetRandom),
 
-            22 => read_prefixed!(Instruction::ListAssign),
-            23 => read_prefixed!(Instruction::ListAssignLast),
-            24 => read_prefixed!(Instruction::ListAssignRandom),
+            23 => read_prefixed!(Instruction::ListAssign),
+            24 => read_prefixed!(Instruction::ListAssignLast),
+            25 => read_prefixed!(Instruction::ListAssignRandom),
 
-            25 => read_prefixed!(Instruction::ListRemove),
-            26 => read_prefixed!(Instruction::ListRemoveLast),
-            27 => read_prefixed!(Instruction::ListRemoveRandom),
-            28 => read_prefixed!(Instruction::ListRemoveAll),
+            26 => read_prefixed!(Instruction::ListRemove),
+            27 => read_prefixed!(Instruction::ListRemoveLast),
+            28 => read_prefixed!(Instruction::ListRemoveRandom),
+            29 => read_prefixed!(Instruction::ListRemoveAll),
 
-            29 => read_prefixed!(Instruction::Strcat {} : args),
+            30 => read_prefixed!(Instruction::Strcat {} : args),
 
-            30 => read_prefixed!(Instruction::BinaryOp {} : op),
-            31 => read_prefixed!(Instruction::Eq),
-            32 => read_prefixed!(Instruction::UnaryOp {} : op),
+            31 => read_prefixed!(Instruction::BinaryOp {} : op),
+            32 => read_prefixed!(Instruction::Eq),
+            33 => read_prefixed!(Instruction::UnaryOp {} : op),
 
-            33 => read_prefixed!(Instruction::DeclareLocal {} : var),
-            34 => read_prefixed!(Instruction::Assign {} : var),
-            35 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
+            34 => read_prefixed!(Instruction::DeclareLocal {} : var),
+            35 => read_prefixed!(Instruction::Assign {} : var),
+            36 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
 
-            36 => read_prefixed!(Instruction::Jump {} : to),
-            37 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
-            38 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
+            37 => read_prefixed!(Instruction::Jump {} : to),
+            38 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
+            39 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
 
-            39 => read_prefixed!(Instruction::MetaPush {} : value),
+            40 => read_prefixed!(Instruction::MetaPush {} : value),
 
-            40 => read_prefixed!(Instruction::Call {} : pos, params),
-            41 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
-            42 => read_prefixed!(Instruction::CallClosure {} : args),
-            43 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
-            44 => read_prefixed!(Instruction::Return),
+            41 => read_prefixed!(Instruction::Call {} : pos, params),
+            42 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
+            43 => read_prefixed!(Instruction::CallClosure {} : args),
+            44 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
+            45 => read_prefixed!(Instruction::Return),
 
-            45 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            46 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            46 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            47 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
-            47 => read_prefixed!(Instruction::Print),
+            48 => read_prefixed!(Instruction::Print),
 
             _ => unreachable!(),
         }
@@ -435,64 +487,65 @@ impl BinaryWrite for Instruction<'_> {
 
             Instruction::PushBool { value: false } => append_prefixed!(3),
             Instruction::PushBool { value: true } => append_prefixed!(4),
-            Instruction::PushNumber { value } => append_prefixed!(5: value),
-            Instruction::PushString { value } => append_prefixed!(6: move str value),
-            Instruction::PushVariable { var } => append_prefixed!(7: move str var),
-            Instruction::PopValue => append_prefixed!(8),
+            Instruction::PushInt { value } => append_prefixed!(5: value),
+            Instruction::PushNumber { value } => append_prefixed!(6: value),
+            Instruction::PushString { value } => append_prefixed!(7: move str value),
+            Instruction::PushVariable { var } => append_prefixed!(8: move str var),
+            Instruction::PopValue => append_prefixed!(9),
 
-            Instruction::DupeValue { top_index } => append_prefixed!(9: top_index),
-            Instruction::SwapValues { top_index_1, top_index_2 } => append_prefixed!(10: top_index_1, top_index_2),
-            Instruction::ShallowCopy => append_prefixed!(11),
+            Instruction::DupeValue { top_index } => append_prefixed!(10: top_index),
+            Instruction::SwapValues { top_index_1, top_index_2 } => append_prefixed!(11: top_index_1, top_index_2),
+            Instruction::ShallowCopy => append_prefixed!(12),
 
-            Instruction::MakeList { len } => append_prefixed!(12: len),
-            Instruction::MakeListRange => append_prefixed!(13),
+            Instruction::MakeList { len } => append_prefixed!(13: len),
+            Instruction::MakeListRange => append_prefixed!(14),
 
-            Instruction::ListLen => append_prefixed!(14),
-            Instruction::ListIsEmpty => append_prefixed!(15),
+            Instruction::ListLen => append_prefixed!(15),
+            Instruction::ListIsEmpty => append_prefixed!(16),
 
-            Instruction::ListInsert => append_prefixed!(16),
-            Instruction::ListInsertLast => append_prefixed!(17),
-            Instruction::ListInsertRandom => append_prefixed!(18),
+            Instruction::ListInsert => append_prefixed!(17),
+            Instruction::ListInsertLast => append_prefixed!(18),
+            Instruction::ListInsertRandom => append_prefixed!(19),
 
-            Instruction::ListGet => append_prefixed!(19),
-            Instruction::ListGetLast => append_prefixed!(20),
-            Instruction::ListGetRandom => append_prefixed!(21),
+            Instruction::ListGet => append_prefixed!(20),
+            Instruction::ListGetLast => append_prefixed!(21),
+            Instruction::ListGetRandom => append_prefixed!(22),
 
-            Instruction::ListAssign => append_prefixed!(22),
-            Instruction::ListAssignLast => append_prefixed!(23),
-            Instruction::ListAssignRandom => append_prefixed!(24),
+            Instruction::ListAssign => append_prefixed!(23),
+            Instruction::ListAssignLast => append_prefixed!(24),
+            Instruction::ListAssignRandom => append_prefixed!(25),
 
-            Instruction::ListRemove => append_prefixed!(25),
-            Instruction::ListRemoveLast => append_prefixed!(26),
-            Instruction::ListRemoveRandom => append_prefixed!(27),
-            Instruction::ListRemoveAll => append_prefixed!(28),
+            Instruction::ListRemove => append_prefixed!(26),
+            Instruction::ListRemoveLast => append_prefixed!(27),
+            Instruction::ListRemoveRandom => append_prefixed!(28),
+            Instruction::ListRemoveAll => append_prefixed!(29),
 
-            Instruction::Strcat { args } => append_prefixed!(29: args),
+            Instruction::Strcat { args } => append_prefixed!(30: args),
 
-            Instruction::BinaryOp { op } => append_prefixed!(30: op),
-            Instruction::Eq => append_prefixed!(31),
-            Instruction::UnaryOp { op } => append_prefixed!(32: op),
+            Instruction::BinaryOp { op } => append_prefixed!(31: op),
+            Instruction::Eq => append_prefixed!(32),
+            Instruction::UnaryOp { op } => append_prefixed!(33: op),
 
-            Instruction::DeclareLocal { var } => append_prefixed!(33: move str var),
-            Instruction::Assign { var } => append_prefixed!(34: move str var),
-            Instruction::BinaryOpAssign { var, op } => append_prefixed!(35: move str var, op),
+            Instruction::DeclareLocal { var } => append_prefixed!(34: move str var),
+            Instruction::Assign { var } => append_prefixed!(35: move str var),
+            Instruction::BinaryOpAssign { var, op } => append_prefixed!(36: move str var, op),
 
-            Instruction::Jump { to } => append_prefixed!(36: move to),
-            Instruction::ConditionalJump { to, when: false } => append_prefixed!(37: move to),
-            Instruction::ConditionalJump { to, when: true } => append_prefixed!(38: move to),
+            Instruction::Jump { to } => append_prefixed!(37: move to),
+            Instruction::ConditionalJump { to, when: false } => append_prefixed!(38: move to),
+            Instruction::ConditionalJump { to, when: true } => append_prefixed!(39: move to),
 
-            Instruction::MetaPush { value } => append_prefixed!(39: move str value),
+            Instruction::MetaPush { value } => append_prefixed!(40: move str value),
 
-            Instruction::Call { pos, params } => append_prefixed!(40: move pos, params),
-            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(41: move pos, params, captures),
-            Instruction::CallClosure { args } => append_prefixed!(42: args),
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(43: move str service, move str rpc, args),
-            Instruction::Return => append_prefixed!(44),
+            Instruction::Call { pos, params } => append_prefixed!(41: move pos, params),
+            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(42: move pos, params, captures),
+            Instruction::CallClosure { args } => append_prefixed!(43: args),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(44: move str service, move str rpc, args),
+            Instruction::Return => append_prefixed!(45),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(45),
-            Instruction::Broadcast { wait: true } => append_prefixed!(46),
+            Instruction::Broadcast { wait: false } => append_prefixed!(46),
+            Instruction::Broadcast { wait: true } => append_prefixed!(47),
 
-            Instruction::Print => append_prefixed!(47),
+            Instruction::Print => append_prefixed!(48),
         }
     }
 }
@@ -756,7 +809,7 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 let top = self.ins.len();
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
-                self.ins.push(Instruction::PushNumber { value: 0.0 }.into());
+                self.ins.push(Instruction::PushInt { value: 0 }.into());
                 self.ins.push(Instruction::from(BinaryOp::Greater).into());
                 let aft_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
@@ -765,7 +818,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.append_stmt(stmt, entity);
                 }
 
-                self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
+                self.ins.push(Instruction::PushInt { value: 1 }.into());
                 self.ins.push(Instruction::from(BinaryOp::Sub).into());
                 self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
@@ -787,11 +840,11 @@ impl<'a> ByteCodeBuilder<'a> {
                 let delta_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
 
-                self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
+                self.ins.push(Instruction::PushInt { value: 1 }.into());
                 let positive_delta_end = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
                 let negative_delta_pos = self.ins.len();
-                self.ins.push(Instruction::PushNumber { value: -1.0 }.into());
+                self.ins.push(Instruction::PushInt { value: -1 }.into());
                 let aft_delta = self.ins.len();
 
                 self.ins[delta_jump_pos] = Instruction::ConditionalJump { to: negative_delta_pos, when: true }.into();
@@ -805,7 +858,7 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 let top = self.ins.len();
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
-                self.ins.push(Instruction::PushNumber { value: 0.0 }.into());
+                self.ins.push(Instruction::PushInt { value: 0 }.into());
                 self.ins.push(Instruction::from(BinaryOp::Less).into());
                 let exit_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
@@ -816,7 +869,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.append_stmt(stmt, entity);
                 }
 
-                self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
+                self.ins.push(Instruction::PushInt { value: 1 }.into());
                 self.ins.push(Instruction::from(BinaryOp::Sub).into());
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 self.ins.push(Instruction::DupeValue { top_index: 3 }.into());
@@ -836,7 +889,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Stmt::ForeachLoop { var, items, stmts, .. } => {
                 self.append_expr(items, entity);
                 self.ins.push(Instruction::ShallowCopy.into());
-                self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
+                self.ins.push(Instruction::PushInt { value: 1 }.into());
 
                 let top = self.ins.len();
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
@@ -853,7 +906,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
-                self.ins.push(Instruction::PushNumber { value: 1.0 }.into());
+                self.ins.push(Instruction::PushInt { value: 1 }.into());
                 self.ins.push(Instruction::from(BinaryOp::Add).into());
                 self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
