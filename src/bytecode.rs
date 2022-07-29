@@ -14,6 +14,9 @@ use crate::gc::*;
 /// Number of bytes to display on each line of a hex dump
 const BYTES_PER_LINE: usize = 12;
 
+/// Max number of shrinking cycles to apply to variable width encoded values in an output binary
+const SHRINK_CYCLES: usize = 3;
+
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
 pub(crate) enum BinaryOp {
@@ -1039,7 +1042,7 @@ impl<'a> ByteCodeBuilder<'a> {
             (data, data_backing_pos)
         };
 
-        fn apply_shrinking_plan(plan: &[(usize, usize, usize)], final_relocates: &[usize], code: &mut Vec<u8>, final_ins_pos: &mut Vec<usize>, locations: &mut Locations) {
+        fn apply_shrinking_plan(plan: &[(usize, usize, usize)], final_relocates: &mut [usize], code: &mut Vec<u8>, final_ins_pos: &mut [usize], locations: &mut Locations) -> usize {
             let old_pos_to_ins: BTreeMap<usize, usize> = final_ins_pos.iter().copied().enumerate().map(|(a, b)| (b, a)).collect();
             let orig_code_size = code.len();
 
@@ -1066,16 +1069,18 @@ impl<'a> ByteCodeBuilder<'a> {
             code.truncate(orig_code_size - total_shift);
 
             let mut buf = Vec::with_capacity(10);
-            for code_addr in final_relocates.iter() {
-                let new_code_addr = old_hole_pos_to_new_pos[code_addr];
-                let old_pos = <usize as BinaryRead>::read(code, &[], new_code_addr);
+            for code_addr in final_relocates.iter_mut() {
+                *code_addr = old_hole_pos_to_new_pos[code_addr];
+                let old_pos = <usize as BinaryRead>::read(code, &[], *code_addr);
                 buf.clear();
-                encode_u64(final_ins_pos[old_pos_to_ins[&old_pos.0]] as u64, &mut buf, Some(old_pos.1 - new_code_addr));
-                debug_assert_eq!(buf.len(), old_pos.1 - new_code_addr);
-                code[new_code_addr..old_pos.1].copy_from_slice(&buf);
+                encode_u64(final_ins_pos[old_pos_to_ins[&old_pos.0]] as u64, &mut buf, Some(old_pos.1 - *code_addr));
+                debug_assert_eq!(buf.len(), old_pos.1 - *code_addr);
+                code[*code_addr..old_pos.1].copy_from_slice(&buf);
             }
 
             update_locations(locations, |x| final_ins_pos[old_pos_to_ins[&x]]);
+
+            total_shift
         }
 
         let mut fmt_buf = Vec::with_capacity(10);
@@ -1102,7 +1107,21 @@ impl<'a> ByteCodeBuilder<'a> {
             code[code_addr..code_addr + fmt_buf.len()].copy_from_slice(&fmt_buf);
         }
 
-        apply_shrinking_plan(&shrinking_plan, &final_relocates, &mut code, &mut final_ins_pos, &mut locations);
+        apply_shrinking_plan(&shrinking_plan, &mut final_relocates, &mut code, &mut final_ins_pos, &mut locations);
+
+        for _ in 0..SHRINK_CYCLES {
+            shrinking_plan.clear();
+            for code_addr in final_relocates.iter().copied() {
+                let val = <usize as BinaryRead>::read(&code, &data, code_addr);
+                fmt_buf.clear();
+                encode_u64(val.0 as u64, &mut fmt_buf, None);
+                debug_assert!(fmt_buf.len() <= val.1 - code_addr);
+                code[code_addr..code_addr + fmt_buf.len()].copy_from_slice(&fmt_buf);
+                shrinking_plan.push((code_addr, val.1 - code_addr, fmt_buf.len()));
+            }
+            let delta = apply_shrinking_plan(&shrinking_plan, &mut final_relocates, &mut code, &mut final_ins_pos, &mut locations);
+            if delta == 0 { break }
+        }
 
         (ByteCode { code: code.into_boxed_slice(), data: data.into_boxed_slice() }, locations)
     }
