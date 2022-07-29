@@ -95,8 +95,12 @@ fn main() {
         }
         Mode::Dump { src, role } => {
             let (_, role) = open_project(&src, role.as_deref());
-            let (code, _) = ByteCode::compile(&role);
-            code.dump(&mut std::io::stdout().lock()).unwrap();
+            let (bytecode, _) = ByteCode::compile(&role);
+            println!("instructions:");
+            bytecode.dump_code(&mut std::io::stdout().lock()).unwrap();
+            println!("\ndata:");
+            bytecode.dump_data(&mut std::io::stdout().lock()).unwrap();
+            println!("\ntotal size: {}", bytecode.total_size());
         }
     }
 }

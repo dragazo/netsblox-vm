@@ -123,7 +123,7 @@ enum Defer<S: System> {
 #[derive(Collect)]
 #[collect(no_drop)]
 pub struct Process<'gc, S: System> {
-    code: Rc<ByteCode>,
+    bytecode: Rc<ByteCode>,
     start_pos: usize,
     global_context: GcCell<'gc, GlobalContext<'gc>>,
     entity: GcCell<'gc, Entity<'gc>>,
@@ -141,9 +141,9 @@ pub struct Process<'gc, S: System> {
 impl<'gc, S: System> Process<'gc, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity`.
     /// The created process is initialized to an idle (non-running) state; use [`Process::initialize`] to begin execution.
-    pub fn new(code: Rc<ByteCode>, start_pos: usize, global_context: GcCell<'gc, GlobalContext<'gc>>, entity: GcCell<'gc, Entity<'gc>>, settings: Settings) -> Self {
+    pub fn new(bytecode: Rc<ByteCode>, start_pos: usize, global_context: GcCell<'gc, GlobalContext<'gc>>, entity: GcCell<'gc, Entity<'gc>>, settings: Settings) -> Self {
         Self {
-            code, start_pos, global_context, entity, settings,
+            bytecode, start_pos, global_context, entity, settings,
             running: false,
             barrier: None,
             pos: 0,
@@ -238,7 +238,7 @@ impl<'gc, S: System> Process<'gc, S> {
             (mut $var:expr) => {lookup_var!($var => lookup_mut)};
         }
 
-        let (ins, aft_pos) = Instruction::read(&self.code.0, self.pos);
+        let (ins, aft_pos) = Instruction::read(&self.bytecode.code, &self.bytecode.data, self.pos);
         match ins {
             Instruction::Yield => {
                 self.pos = aft_pos;

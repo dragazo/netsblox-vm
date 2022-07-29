@@ -6,9 +6,13 @@ use std::io::{self, Write};
 use std::mem;
 
 use num_traits::FromPrimitive;
+use bin_pool::BinPool;
 
 use crate::*;
 use crate::gc::*;
+
+/// Number of bytes to display on each line of a hex dump
+const BYTES_PER_LINE: usize = 12;
 
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
@@ -181,77 +185,156 @@ pub(crate) enum Instruction<'a> {
     Print,
 }
 
-pub(crate) trait Binary<'a>: Sized {
+pub(crate) enum RelocateInfo {
+    Code {
+        code_addr: usize,
+        pos: usize,
+    },
+    Data {
+        code_addr: usize,
+        pool_index: usize,
+    },
+}
+impl RelocateInfo {
+    pub(crate) fn code_addr(&self) -> usize {
+        match self {
+            RelocateInfo::Code { code_addr, .. } => *code_addr,
+            RelocateInfo::Data { code_addr, .. } => *code_addr,
+        }
+    }
+}
+
+pub(crate) trait BinaryRead<'a>: Sized {
     /// Reads a value from `src` starting at `start`.
     /// Returns the read value and the position of the first byte after the read segment.
-    fn read(src: &'a [u8], start: usize) -> (Self, usize);
-    /// Appends a binary representation of the value to the given binary buffer.
-    /// The addresses of any written pointers will be appended to `pointer_positions` (for relocation purposes).
+    fn read(code: &'a [u8], data: &'a [u8], start: usize) -> (Self, usize);
+}
+trait BinaryWrite: Sized {
+    /// Appends a binary representation of the value to the given buffers.
+    /// And address/relocation information that is written will be stored in `relocate_info` in strictly ascending order of code address.
     /// This function is not intended for use outside of [`ByteCode`] linking.
-    fn append(val: &Self, out: &mut Vec<u8>, pointer_positions: &mut Vec<usize>);
+    fn append(val: &Self, code: &mut Vec<u8>, data: &mut BinPool, relocate_info: &mut Vec<RelocateInfo>, expanded: bool);
 }
 
-macro_rules! binary_int_impl {
-    ($($t:ty),+$(,)?) => {$(
-        impl Binary<'_> for $t {
-            fn read(src: &[u8], start: usize) -> (Self, usize) {
-                let mut buf = [0u8; mem::size_of::<$t>()];
-                buf[..].copy_from_slice(&src[start..start + mem::size_of::<$t>()]);
-                (<$t>::from_le_bytes(buf), start + mem::size_of::<$t>())
-            }
-            fn append(val: &Self, out: &mut Vec<u8>, _: &mut Vec<usize>) {
-                out.extend_from_slice(&<$t>::to_le_bytes(*val))
+impl BinaryRead<'_> for u8 { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (code[start], start + 1) } }
+impl BinaryWrite for u8 { fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>, _: bool) { code.push(*val) } }
+
+impl BinaryRead<'_> for BinaryOp { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
+impl BinaryWrite for BinaryOp {
+    fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>, _: bool) {
+        debug_assert_eq!(mem::size_of::<Self>(), 1);
+        code.push((*val) as u8);
+    }
+}
+
+impl BinaryRead<'_> for UnaryOp { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
+impl BinaryWrite for UnaryOp {
+    fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>, _: bool) {
+        debug_assert_eq!(mem::size_of::<Self>(), 1);
+        code.push((*val) as u8)
+    }
+}
+
+// encodes values as a sequence of bytes of form [1: next][7: bits] in little-endian order.
+// if `relocate_info` is provided to `append`, expanded mode is used, which encodes the value with the maximum of 10 bytes.
+impl BinaryRead<'_> for u64 {
+    fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) {
+        let (mut val, mut aft) = (0, start);
+        for &b in &code[start..] {
+            aft += 1;
+            if b & 0x80 == 0 { break }
+        }
+        for &b in code[start..aft].iter().rev() {
+            val = (val << 7) | (b & 0x7f) as u64;
+        }
+        (val, aft)
+    }
+}
+impl BinaryWrite for u64 {
+    fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>, expanded: bool) {
+        let mut val = *val;
+        let blocks = if expanded { 10 } else { ((64 - val.leading_zeros() + 6) / 7).max(1) };
+        debug_assert!(blocks >= 1 && blocks <= 10);
+        for _ in 1..blocks {
+            code.push((val as u8 & 0x7f) | 0x80);
+            val >>= 7;
+        }
+        debug_assert!(val <= 0x7f);
+        code.push(val as u8);
+    }
+}
+
+#[test]
+fn test_binary_u64() {
+    let mut discard_data = BinPool::new();
+    let mut discard_relocate_info = vec![];
+    let mut buf = vec![];
+
+    let tests = [
+        (0,                 [0x00].as_slice(),                                                       [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00].as_slice()),
+        (1,                 [0x01].as_slice(),                                                       [0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00].as_slice()),
+        (2,                 [0x02].as_slice(),                                                       [0x82, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00].as_slice()),
+        (0x53,              [0x53].as_slice(),                                                       [0xd3, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00].as_slice()),
+        (0x7f,              [0x7f].as_slice(),                                                       [0xff, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00].as_slice()),
+        (0x80,              [0x80, 0x01].as_slice(),                                                 [0x80, 0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00].as_slice()),
+        (0x347462356236574, [0xf4, 0xca, 0x8d, 0xb1, 0xb5, 0xc4, 0xd1, 0xa3, 0x03].as_slice(),       [0xf4, 0xca, 0x8d, 0xb1, 0xb5, 0xc4, 0xd1, 0xa3, 0x83, 0x00].as_slice()),
+        (u64::MAX >> 1,     [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f].as_slice(),       [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00].as_slice()),
+        (u64::MAX,          [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01].as_slice(), [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01].as_slice()),
+    ];
+    for (v, expect_small, expect_large) in tests {
+        for (expect, expanded) in [(expect_small, false), (expect_large, true)] {
+            for prefix_bytes in 0..8 {
+                buf.clear();
+                buf.extend(std::iter::once(0x53).cycle().take(prefix_bytes));
+                BinaryWrite::append(&v, &mut buf, &mut discard_data, &mut discard_relocate_info, expanded);
+                assert_eq!(discard_data.len(), 0);
+                assert_eq!(discard_relocate_info.len(), 0);
+                assert!(buf[..prefix_bytes].iter().all(|&x| x == 0x53));
+                assert_eq!(&buf[prefix_bytes..], expect);
+                buf.extend(std::iter::once(0xff).cycle().take(8));
+                let (back, aft) = <u64 as BinaryRead>::read(&buf, &[], prefix_bytes);
+                assert_eq!(back, v);
+                assert_eq!(aft, prefix_bytes + expect.len());
             }
         }
-    )*}
-}
-binary_int_impl! { u64, u32, u16, u8, f64 }
-
-impl Binary<'_> for BinaryOp {
-    fn read(src: &[u8], start: usize) -> (Self, usize) {
-        (Self::from_u8(src[start]).unwrap(), start + 1)
-    }
-    fn append(val: &Self, out: &mut Vec<u8>, _: &mut Vec<usize>) {
-        debug_assert_eq!(mem::size_of::<Self>(), 1);
-        out.push((*val) as u8);
-    }
-}
-impl Binary<'_> for UnaryOp {
-    fn read(src: &[u8], start: usize) -> (Self, usize) {
-        (Self::from_u8(src[start]).unwrap(), start + 1)
-    }
-    fn append(val: &Self, out: &mut Vec<u8>, _: &mut Vec<usize>) {
-        debug_assert_eq!(mem::size_of::<Self>(), 1);
-        out.push((*val) as u8)
     }
 }
 
-type UsizeRepr = u32; // we'll assume projects don't include over 4GB of code, cause that's ridiculous
-impl Binary<'_> for usize {
-    fn read(src: &[u8], start: usize) -> (Self, usize) {
-        let x: (UsizeRepr, usize) = Binary::read(src, start);
-        debug_assert!(x.0 <= usize::MAX as UsizeRepr);
-        (x.0 as usize, x.1)
+impl BinaryRead<'_> for f64 {
+    fn read(code: &[u8], data: &[u8], start: usize) -> (Self, usize) {
+        let (v, aft) = BinaryRead::read(code, data, start);
+        (f64::from_bits(v), aft)
     }
-    fn append(val: &Self, out: &mut Vec<u8>, pointer_positions: &mut Vec<usize>) {
-        assert!(*val == *val as UsizeRepr as usize);
-        Binary::append(&((*val) as UsizeRepr), out, pointer_positions)
+}
+impl BinaryWrite for f64 {
+    fn append(val: &Self, code: &mut Vec<u8>, data: &mut BinPool, relocate_info: &mut Vec<RelocateInfo>, expanded: bool) {
+        BinaryWrite::append(&val.to_bits(), code, data, relocate_info, expanded)
     }
 }
 
-impl<'a> Binary<'a> for &'a str {
-    fn read(src: &'a [u8], start: usize) -> (Self, usize) {
-        let len: (usize, usize) = Binary::read(src, start);
-        (&std::str::from_utf8(&src[len.1..len.1 + len.0]).unwrap(), len.1 + len.0)
+impl BinaryRead<'_> for usize {
+    fn read(code: &[u8], data: &[u8], start: usize) -> (Self, usize) {
+        let (v, aft) = <u64 as BinaryRead>::read(code, data, start);
+        debug_assert!(v <= usize::MAX as u64);
+        (v as usize, aft)
     }
-    fn append(val: &Self, out: &mut Vec<u8>, pointer_positions: &mut Vec<usize>) {
-        Binary::append(&val.len(), out, pointer_positions);
-        out.extend_from_slice(val.as_bytes());
+}
+impl BinaryWrite for usize {
+    fn append(val: &Self, code: &mut Vec<u8>, data: &mut BinPool, relocate_info: &mut Vec<RelocateInfo>, expanded: bool) {
+        BinaryWrite::append(&(*val as u64), code, data, relocate_info, expanded)
     }
 }
 
-impl<'a> Binary<'a> for Instruction<'a> {
-    fn read(src: &'a [u8], start: usize) -> (Self, usize) {
+impl<'a> BinaryRead<'a> for &'a str {
+    fn read(code: &'a [u8], data: &'a [u8], start: usize) -> (Self, usize) {
+        let (data_pos, aft) = <usize as BinaryRead>::read(code, data, start);
+        let (data_len, aft) = <usize as BinaryRead>::read(code, data, aft);
+        (&std::str::from_utf8(&data[data_pos..data_pos + data_len]).unwrap(), aft)
+    }
+}
+
+impl<'a> BinaryRead<'a> for Instruction<'a> {
+    fn read(code: &'a [u8], data: &'a [u8], start: usize) -> (Self, usize) {
         macro_rules! read_prefixed {
             (Instruction::$root:ident) => {
                 (Instruction::$root, start + 1)
@@ -260,14 +343,14 @@ impl<'a> Binary<'a> for Instruction<'a> {
                 #[allow(unused_mut)]
                 let mut parsing_stop = start + 1;
                 $($(let $vals = {
-                    let x = Binary::read(src, parsing_stop);
+                    let x = BinaryRead::read(code, data, parsing_stop);
                     parsing_stop = x.1;
                     x.0
                 };)*)?
                 (Instruction::$root { $($tt)* $($($vals),+ )? }, parsing_stop)
             }};
         }
-        match src[start] {
+        match code[start] {
             0 => read_prefixed!(Instruction::Yield),
             1 => read_prefixed!(Instruction::WarpStart),
             2 => read_prefixed!(Instruction::WarpStop),
@@ -336,17 +419,25 @@ impl<'a> Binary<'a> for Instruction<'a> {
             _ => unreachable!(),
         }
     }
-    fn append(val: &Self, out: &mut Vec<u8>, pointer_positions: &mut Vec<usize>) {
+}
+impl BinaryWrite for Instruction<'_> {
+    fn append(val: &Self, code: &mut Vec<u8>, data: &mut BinPool, relocate_info: &mut Vec<RelocateInfo>, expanded: bool) {
         macro_rules! append_prefixed {
             ($op:literal $(: $($($vals:ident)+),+)?) => {{
-                out.push($op);
+                code.push($op);
                 $($( append_prefixed!(@single $($vals)+); )*)?
             }};
             (@single move $val:ident) => {{
-                pointer_positions.push(out.len());
-                append_prefixed!(@single $val);
+                relocate_info.push(RelocateInfo::Code { code_addr: code.len(), pos: *$val });
+                BinaryWrite::append(&usize::MAX, code, data, relocate_info, expanded);
             }};
-            (@single $val:ident) => { Binary::append($val, out, pointer_positions) };
+            (@single move str $val:ident) => {{
+                let pool_index = data.add($val.as_bytes());
+                relocate_info.push(RelocateInfo::Data { code_addr: code.len(), pool_index });
+                BinaryWrite::append(&usize::MAX, code, data, relocate_info, expanded);
+                BinaryWrite::append(&$val.len(), code, data, relocate_info, false);
+            }};
+            (@single $val:ident) => { BinaryWrite::append($val, code, data, relocate_info, expanded) };
         }
         match val {
             Instruction::Yield => append_prefixed!(0),
@@ -356,8 +447,8 @@ impl<'a> Binary<'a> for Instruction<'a> {
             Instruction::PushBool { value: false } => append_prefixed!(3),
             Instruction::PushBool { value: true } => append_prefixed!(4),
             Instruction::PushNumber { value } => append_prefixed!(5: value),
-            Instruction::PushString { value } => append_prefixed!(6: value),
-            Instruction::PushVariable { var } => append_prefixed!(7: var),
+            Instruction::PushString { value } => append_prefixed!(6: move str value),
+            Instruction::PushVariable { var } => append_prefixed!(7: move str var),
             Instruction::PopValue => append_prefixed!(8),
 
             Instruction::DupeValue { top_index } => append_prefixed!(9: top_index),
@@ -393,20 +484,20 @@ impl<'a> Binary<'a> for Instruction<'a> {
             Instruction::Eq => append_prefixed!(31),
             Instruction::UnaryOp { op } => append_prefixed!(32: op),
 
-            Instruction::DeclareLocal { var } => append_prefixed!(33: var),
-            Instruction::Assign { var } => append_prefixed!(34: var),
-            Instruction::BinaryOpAssign { var, op } => append_prefixed!(35: var, op),
+            Instruction::DeclareLocal { var } => append_prefixed!(33: move str var),
+            Instruction::Assign { var } => append_prefixed!(34: move str var),
+            Instruction::BinaryOpAssign { var, op } => append_prefixed!(35: move str var, op),
 
             Instruction::Jump { to } => append_prefixed!(36: move to),
             Instruction::ConditionalJump { to, when: false } => append_prefixed!(37: move to),
             Instruction::ConditionalJump { to, when: true } => append_prefixed!(38: move to),
 
-            Instruction::MetaPush { value } => append_prefixed!(39: value),
+            Instruction::MetaPush { value } => append_prefixed!(39: move str value),
 
             Instruction::Call { pos, params } => append_prefixed!(40: move pos, params),
             Instruction::MakeClosure { pos, params, captures } => append_prefixed!(41: move pos, params, captures),
             Instruction::CallClosure { args } => append_prefixed!(42: args),
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(43: service, rpc, args),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(43: move str service, move str rpc, args),
             Instruction::Return => append_prefixed!(44),
 
             Instruction::Broadcast { wait: false } => append_prefixed!(45),
@@ -422,7 +513,10 @@ impl<'a> Binary<'a> for Instruction<'a> {
 /// [`Process`](crate::runtime::Process) is an execution primitive that can be used to execute generated [`ByteCode`].
 #[derive(Debug, Collect)]
 #[collect(require_static)]
-pub struct ByteCode(pub(crate) Box<[u8]>);
+pub struct ByteCode {
+    pub(crate) code: Box<[u8]>,
+    pub(crate) data: Box<[u8]>,
+}
 /// Location info in a [`ByteCode`] object for a particular entity.
 #[derive(Debug)]
 pub struct EntityLocations<'a> {
@@ -867,29 +961,52 @@ impl<'a> ByteCodeBuilder<'a> {
         self.finalize(locations)
     }
     fn finalize(self, mut locations: Locations<'a>) -> (ByteCode, Locations<'a>) {
-        let mut bin = Vec::with_capacity(self.ins.len() * 4);
+        let mut code = Vec::with_capacity(self.ins.len() * 4);
+        let mut data = BinPool::new();
+        let mut relocate_info = Vec::with_capacity(64);
+
         let mut final_ins_pos = Vec::with_capacity(self.ins.len());
-        let mut pointer_positions = Vec::with_capacity(64);
         for ins in self.ins.iter() {
-            final_ins_pos.push(bin.len());
+            final_ins_pos.push(code.len());
             match ins {
                 InternalInstruction::Illegal => unreachable!(),
                 InternalInstruction::Packed(vals) => for val in vals {
-                    Binary::append(val, &mut bin, &mut pointer_positions);
+                    BinaryWrite::append(val, &mut code, &mut data, &mut relocate_info, true);
                 }
-                InternalInstruction::Valid(val) => Binary::append(val, &mut bin, &mut pointer_positions),
+                InternalInstruction::Valid(val) => BinaryWrite::append(val, &mut code, &mut data, &mut relocate_info, true),
             }
         }
 
-        let mut buf = Vec::with_capacity(mem::size_of::<UsizeRepr>());
-        let mut discard = vec![];
-        for pos in pointer_positions {
-            let ins_pos: usize = Binary::read(&bin, pos).0;
-            buf.clear();
-            Binary::append(&final_ins_pos[ins_pos], &mut buf, &mut discard);
-            debug_assert_eq!(discard.len(), 0);
-            debug_assert_eq!(buf.len(), mem::size_of::<UsizeRepr>());
-            bin[pos..pos + buf.len()].copy_from_slice(&buf);
+        let data_backing = data.into_backing();
+        let mut data = Vec::with_capacity(data_backing.0.iter().map(Vec::len).sum::<usize>());
+        let mut data_backing_pos = Vec::with_capacity(data_backing.0.len());
+        for backing in data_backing.0.iter() {
+            data_backing_pos.push(data.len());
+            data.extend_from_slice(backing);
+        }
+
+        let mut fmt_buf = Vec::with_capacity(10);
+        let mut discard = (BinPool::new(), vec![]);
+        for info in relocate_info {
+            match info {
+                RelocateInfo::Code { code_addr, pos } => {
+                    fmt_buf.clear();
+                    BinaryWrite::append(&final_ins_pos[pos], &mut fmt_buf, &mut discard.0, &mut discard.1, true);
+                    debug_assert_eq!(discard.0.len(), 0);
+                    debug_assert_eq!(discard.1.len(), 0);
+                    debug_assert_eq!(fmt_buf.len(), 10);
+                    code[code_addr..code_addr + 10].copy_from_slice(&fmt_buf);
+                }
+                RelocateInfo::Data { code_addr, pool_index } => {
+                    let slice = &data_backing.1[pool_index];
+                    fmt_buf.clear();
+                    BinaryWrite::append(&(data_backing_pos[slice.src] + slice.start), &mut fmt_buf, &mut discard.0, &mut discard.1, true);
+                    debug_assert_eq!(discard.0.len(), 0);
+                    debug_assert_eq!(discard.1.len(), 0);
+                    debug_assert_eq!(fmt_buf.len(), 10);
+                    code[code_addr..code_addr + 10].copy_from_slice(&fmt_buf);
+                }
+            }
         }
 
         for func in locations.funcs.iter_mut() {
@@ -904,7 +1021,7 @@ impl<'a> ByteCodeBuilder<'a> {
             }
         }
 
-        (ByteCode(bin.into_boxed_slice()), locations)
+        (ByteCode { code: code.into_boxed_slice(), data: data.into_boxed_slice() }, locations)
     }
 }
 
@@ -956,21 +1073,19 @@ impl ByteCode {
 
         code.link(Locations { funcs, entities })
     }
-    /// Generates a hex dump of the stored bytecode, including instructions and addresses.
-    pub fn dump(&self, f: &mut dyn Write) -> io::Result<()> {
-        const BYTES_PER_LINE: usize = 12;
-
+    /// Generates a hex dump of the stored code, including instructions and addresses.
+    pub fn dump_code(&self, f: &mut dyn Write) -> io::Result<()> {
         let mut pos = 0;
-        while pos < self.0.len() {
-            let (ins, aft) = Instruction::read(&self.0, pos);
-            for (i, bytes) in self.0[pos..aft].chunks(BYTES_PER_LINE).enumerate() {
+        while pos < self.code.len() {
+            let (ins, aft) = Instruction::read(&self.code, &self.data, pos);
+            for (i, bytes) in self.code[pos..aft].chunks(BYTES_PER_LINE).enumerate() {
                 if i == 0 {
                     write!(f, "{pos:08}   ")?;
                 } else {
                     write!(f, "           ")?;
                 }
 
-                for b in bytes.iter().copied() {
+                for &b in bytes {
                     write!(f, " {b:02x}")?;
                 }
                 for _ in bytes.len()..BYTES_PER_LINE {
@@ -985,5 +1100,27 @@ impl ByteCode {
             pos = aft;
         }
         Ok(())
+    }
+    /// Generate a hex dump of the stored program data, including string literals and meta values.
+    pub fn dump_data(&self, f: &mut dyn Write) -> io::Result<()> {
+        for (i, bytes) in self.data.chunks(BYTES_PER_LINE).enumerate() {
+            write!(f, "{:08}   ", i * BYTES_PER_LINE)?;
+            for &b in bytes {
+                write!(f, " {b:02x}")?;
+            }
+            for _ in bytes.len()..BYTES_PER_LINE {
+                write!(f, "   ")?;
+            }
+            write!(f, "    ")?;
+            for &b in bytes {
+                write!(f, "{}", if (0x21..=0x7e).contains(&b) { b as char } else { '.' })?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
+    }
+    /// Returns the total size of the [`ByteCode`] object (in bytes).
+    pub fn total_size(&self) -> usize {
+        self.code.len() + self.data.len()
     }
 }
