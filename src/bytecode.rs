@@ -189,14 +189,6 @@ pub(crate) enum RelocateInfo {
     Code { code_addr: usize },
     Data { code_addr: usize },
 }
-impl RelocateInfo {
-    pub(crate) fn code_addr(&self) -> usize {
-        match self {
-            RelocateInfo::Code { code_addr } => *code_addr,
-            RelocateInfo::Data { code_addr } => *code_addr,
-        }
-    }
-}
 
 pub(crate) trait BinaryRead<'a>: Sized {
     /// Reads a value from `src` starting at `start`.
@@ -974,54 +966,90 @@ impl<'a> ByteCodeBuilder<'a> {
             }
         }
 
+        fn update_locations<F: Fn(usize) -> usize>(locations: &mut Locations, f: F) {
+            for func in locations.funcs.iter_mut() { func.1 = f(func.1); }
+            for entity in locations.entities.iter_mut() {
+                for func in entity.1.funcs.iter_mut() { func.1 = f(func.1); }
+                for script in entity.1.scripts.iter_mut() { script.1 = f(script.1); }
+            }
+        }
+        update_locations(&mut locations, |x| final_ins_pos[x]);
+
         let data_backing = data.into_backing();
-        let mut data = Vec::with_capacity(data_backing.0.iter().map(Vec::len).sum::<usize>());
-        let mut data_backing_pos = Vec::with_capacity(data_backing.0.len());
-        for backing in data_backing.0.iter() {
-            data_backing_pos.push(data.len());
-            data.extend_from_slice(backing);
+        let (data, data_backing_pos) = {
+            let mut data = Vec::with_capacity(data_backing.0.iter().map(Vec::len).sum::<usize>());
+            let mut data_backing_pos = Vec::with_capacity(data_backing.0.len());
+            for backing in data_backing.0.iter() {
+                data_backing_pos.push(data.len());
+                data.extend_from_slice(backing);
+            }
+            (data, data_backing_pos)
+        };
+
+        fn apply_shrinking_plan(plan: &[(usize, usize, usize)], final_relocates: &[usize], code: &mut Vec<u8>, final_ins_pos: &mut Vec<usize>, locations: &mut Locations) {
+            let old_pos_to_ins: BTreeMap<usize, usize> = final_ins_pos.iter().copied().enumerate().map(|(a, b)| (b, a)).collect();
+            let orig_code_size = code.len();
+
+            let mut final_ins_pos_update_iter = final_ins_pos.iter_mut().fuse().peekable();
+            let mut old_hole_pos_to_new_pos = BTreeMap::default();
+            let (mut dest_pos, mut src_pos, mut total_shift) = (0, 0, 0);
+            for (code_addr, prev_size, new_size) in plan.iter().copied() {
+                debug_assert!(prev_size >= new_size);
+                debug_assert!(code_addr >= src_pos);
+
+                while let Some(old) = final_ins_pos_update_iter.peek() {
+                    if **old > code_addr { break }
+                    *final_ins_pos_update_iter.next().unwrap() -= total_shift;
+                }
+
+                code.copy_within(src_pos..code_addr + new_size, dest_pos);
+                dest_pos += code_addr + new_size - src_pos;
+                src_pos = code_addr + prev_size;
+                old_hole_pos_to_new_pos.insert(code_addr, dest_pos - new_size);
+                total_shift += prev_size - new_size;
+            }
+            for old in final_ins_pos_update_iter { *old -= total_shift; }
+            code.copy_within(src_pos..src_pos + (orig_code_size - total_shift - dest_pos), dest_pos);
+            code.truncate(orig_code_size - total_shift);
+
+            let mut buf = Vec::with_capacity(10);
+            for code_addr in final_relocates.iter() {
+                let new_code_addr = old_hole_pos_to_new_pos[code_addr];
+                let old_pos = <usize as BinaryRead>::read(code, &[], new_code_addr);
+                buf.clear();
+                encode_u64(final_ins_pos[old_pos_to_ins[&old_pos.0]] as u64, &mut buf, Some(old_pos.1 - new_code_addr));
+                debug_assert_eq!(buf.len(), old_pos.1 - new_code_addr);
+                code[new_code_addr..old_pos.1].copy_from_slice(&buf);
+            }
+
+            update_locations(locations, |x| final_ins_pos[old_pos_to_ins[&x]]);
         }
 
         let mut fmt_buf = Vec::with_capacity(10);
-        // let (mut dest_pos, mut src_pos) = (0, 0);
+        let mut shrinking_plan = vec![];
+        let mut final_relocates = vec![];
         for info in relocate_info {
-            // let code_addr = info.code_addr();
-            // debug_assert!(code_addr >= src_pos);
-
-            // code.copy_within(src_pos..code_addr, dest_pos);
-            // dest_pos += code_addr - src_pos;
-            // src_pos = code_addr;
-
-            match info {
+            fmt_buf.clear();
+            let (code_addr, prev_size) = match info {
                 RelocateInfo::Code { code_addr } => {
+                    final_relocates.push(code_addr);
                     let pos = <usize as BinaryRead>::read(&code, &data, code_addr);
-                    fmt_buf.clear();
-                    encode_u64(final_ins_pos[pos.0] as u64, &mut fmt_buf, Some(pos.1 - code_addr));
-                    debug_assert_eq!(fmt_buf.len(), pos.1 - code_addr);
-                    code[code_addr..code_addr + fmt_buf.len()].copy_from_slice(&fmt_buf);
+                    encode_u64(final_ins_pos[pos.0] as u64, &mut fmt_buf, None);
+                    (code_addr, pos.1 - code_addr)
                 }
                 RelocateInfo::Data { code_addr } => {
                     let pool_index = <usize as BinaryRead>::read(&code, &data, code_addr);
                     let slice = &data_backing.1[pool_index.0];
-                    fmt_buf.clear();
-                    encode_u64((data_backing_pos[slice.src] + slice.start) as u64, &mut fmt_buf, Some(pool_index.1 - code_addr));
-                    debug_assert_eq!(fmt_buf.len(), pool_index.1 - code_addr);
-                    code[code_addr..code_addr + fmt_buf.len()].copy_from_slice(&fmt_buf);
+                    encode_u64((data_backing_pos[slice.src] + slice.start) as u64, &mut fmt_buf, None);
+                    (code_addr, pool_index.1 - code_addr)
                 }
-            }
+            };
+            debug_assert!(prev_size >= fmt_buf.len());
+            shrinking_plan.push((code_addr, prev_size, fmt_buf.len()));
+            code[code_addr..code_addr + fmt_buf.len()].copy_from_slice(&fmt_buf);
         }
 
-        for func in locations.funcs.iter_mut() {
-            func.1 = final_ins_pos[func.1];
-        }
-        for entity in locations.entities.iter_mut() {
-            for func in entity.1.funcs.iter_mut() {
-                func.1 = final_ins_pos[func.1];
-            }
-            for script in entity.1.scripts.iter_mut() {
-                script.1 = final_ins_pos[script.1];
-            }
-        }
+        apply_shrinking_plan(&shrinking_plan, &final_relocates, &mut code, &mut final_ins_pos, &mut locations);
 
         (ByteCode { code: code.into_boxed_slice(), data: data.into_boxed_slice() }, locations)
     }
