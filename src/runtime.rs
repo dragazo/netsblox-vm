@@ -721,10 +721,33 @@ mod std_system {
         pub fn builder() -> StdSystemConfigBuilder { Default::default() }
     }
 
+    async fn call_rpc_async(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<Json, String> {
+        let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+        let url = format!("{base_url}/services/{service}/{rpc}?uuid={client_id}&projectId={project_id}&roleId={role_id}&t={time}",
+            base_url = context.base_url, client_id = context.client_id, project_id = context.project_id, role_id = context.role_id);
+        let args: BTreeMap<&str, &Json> = args.iter().copied().collect();
+
+        match client.post(url).json(&args).send().await {
+            Ok(res) => {
+                let status = res.status();
+                match res.text().await {
+                    Ok(text) => match status.is_success() {
+                        true => Ok(serde_json::from_str(&text).unwrap_or(Json::String(text))),
+                        false => Err(text),
+                    }
+                    Err(_) => Err("Failed to read response body".to_owned()),
+                }
+            }
+            Err(_) => Err(format!("Failed to reach {}", context.base_url)),
+        }
+    }
+
     /// A type implementing the [`System`] trait which supports all features.
     /// This requires the [`std`](crate) feature flag.
     pub struct StdSystem {
         config: StdSystemConfig,
+        context: Arc<Context>,
+        client: Arc<reqwest::Client>,
         start_time: Instant,
 
         rpc_results: Arc<Mutex<RpcResults>>,
@@ -743,7 +766,7 @@ mod std_system {
                 role_id: String::new(),
             };
 
-            let client = reqwest::Client::builder().build().unwrap();
+            let client = Arc::new(reqwest::Client::builder().build().unwrap());
             let meta = client.post(format!("{}/api/newProject", context.base_url))
                 .json(&json!({ "clientId": context.client_id, "roleName": "monad" }))
                 .send().await.unwrap()
@@ -762,37 +785,16 @@ mod std_system {
             let rpc_results = Arc::new(Mutex::new(Default::default()));
 
             let rpc_request_pipe = {
-                let rpc_results = rpc_results.clone();
+                let (client, context, rpc_results) = (client.clone(), context.clone(), rpc_results.clone());
                 let (sender, receiver) = channel();
 
                 #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
-                async fn handler(client: reqwest::Client, context: Arc<Context>, rpc_results: Arc<Mutex<RpcResults>>, receiver: Receiver<RpcRequest>) {
+                async fn handler(client: Arc<reqwest::Client>, context: Arc<Context>, rpc_results: Arc<Mutex<RpcResults>>, receiver: Receiver<RpcRequest>) {
                     while let Ok(request) = receiver.recv() {
-                        let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-                        let url = format!("{base_url}/services/{service}/{rpc}?uuid={client_id}&projectId={project_id}&roleId={role_id}&t={time}",
-                            service = request.service, rpc = request.rpc,
-                            base_url = context.base_url, client_id = context.client_id, project_id = context.project_id, role_id = context.role_id);
-                        let args: BTreeMap<String, Json> = request.args.into_iter().collect();
-
-                        let req = client.post(url).json(&args);
-                        let context = context.clone();
-                        let rpc_results = rpc_results.clone();
-                        let result_key = request.result_key;
+                        let (client, context, rpc_results) = (client.clone(), context.clone(), rpc_results.clone());
                         tokio::spawn(async move {
-                            let res = match req.send().await {
-                                Ok(res) => {
-                                    let status = res.status();
-                                    match res.text().await {
-                                        Ok(text) => match status.is_success() {
-                                            true => Ok(serde_json::from_str(&text).unwrap_or(Json::String(text))),
-                                            false => Err(text),
-                                        }
-                                        Err(_) => Err("Failed to read response body".to_owned()),
-                                    }
-                                }
-                                Err(_) => Err(format!("Failed to reach {}", context.base_url)),
-                            };
-                            assert!(rpc_results.lock().unwrap().get_mut(result_key).unwrap().replace(res).is_none());
+                            let res = call_rpc_async(&context, &client, &request.service, &request.rpc, &request.args.iter().map(|x| (x.0.as_str(), &x.1)).collect::<Vec<_>>()).await;
+                            assert!(rpc_results.lock().unwrap().get_mut(request.result_key).unwrap().replace(res).is_none());
                         });
                     }
                 }
@@ -802,10 +804,15 @@ mod std_system {
             };
 
             Self {
-                config,
+                config, context, client,
                 start_time: Instant::now(),
                 rpc_results, rpc_request_pipe,
             }
+        }
+        /// Asynchronously calls an RPC and returns the result.
+        /// This function directly makes requests to NetsBlox, bypassing any RPC hook defined by [`StdSystemConfig`].
+        pub async fn call_rpc_async(&self, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<Json, String> {
+            call_rpc_async(&self.context, &self.client, service, rpc, args).await
         }
     }
     impl System for StdSystem {
