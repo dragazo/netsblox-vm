@@ -73,15 +73,15 @@ fn main() {
             let (project_name, role) = open_project(&src, role.as_deref());
 
             let mut env = EnvArena::new(Default::default(), |mc| {
-                let settings = SettingsBuilder::default()
-                    .printer(Rc::new(|value, entity| if let Some(value) = value { println!("{:?} > {:?}", entity, value) }))
-                    .build().unwrap();
-
+                let settings = Settings::builder().build().unwrap();
                 let mut proj = Project::from_ast(mc, &role, settings);
                 proj.input(Input::Start);
                 Env { proj: GcCell::allocate(mc, proj) }
             });
-            let system = StdSystem::new(server, Some(&project_name));
+            let config = StdSystemConfig::builder()
+                .printer(Rc::new(|value, entity| if let Some(value) = value { println!("{:?} > {:?}", entity, value) }))
+                .build().unwrap();
+            let system = StdSystem::new(server, Some(&project_name), config);
 
             env.mutate(|mc, env| {
                 let mut proj = env.proj.write(mc);

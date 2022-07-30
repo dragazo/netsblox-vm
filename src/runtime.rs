@@ -654,6 +654,11 @@ pub trait System: 'static {
     /// Key type used to await the result of an RPC request.
     type RpcKey: Collect + 'static;
 
+    /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
+    /// The [`Entity`] making the request is provided for context.
+    /// This operation should be infallible, but a no-op solution is sufficient.
+    fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>);
+
     /// Gets the current time in milliseconds.
     /// This is not required to represent the actual real-world time; e.g., this could simply measure uptime.
     /// Subsequent values are required to be non-decreasing.
@@ -674,6 +679,8 @@ mod std_system {
     use real_std::sync::{Arc, Mutex};
     use real_std::sync::mpsc::{Sender, Receiver, channel};
     use real_std::thread;
+
+    use derive_builder::Builder;
 
     use super::*;
     use crate::slotmap::SlotMap;
@@ -700,18 +707,32 @@ mod std_system {
 
     type RpcResults = SlotMap<RpcKey, Option<Result<Json, String>>>;
 
+    #[derive(Builder)]
+    pub struct StdSystemConfig {
+        /// A function used to process all "say" and "think" blocks.
+        /// The first argument is the actual message value, or [`None`] to clear the output (Snap!-style).
+        /// The second argument is a reference to the entity making the request.
+        /// The default printer is no-op, effectively ignoring all output requests.
+        #[builder(default = "Rc::new(|_, _| ())")]
+        printer: Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>)>,
+    }
+    impl StdSystemConfig {
+        /// Constructs a new default instance of [`StdSystemConfigBuilder`].
+        pub fn builder() -> StdSystemConfigBuilder { Default::default() }
+    }
+
     /// A type implementing the [`System`] trait which supports all features.
     /// This requires the [`std`](crate) feature flag.
     pub struct StdSystem {
+        config: StdSystemConfig,
         start_time: Instant,
-        context: Arc<Context>,
 
         rpc_results: Arc<Mutex<RpcResults>>,
         rpc_request_pipe: Sender<RpcRequest>,
     }
     impl StdSystem {
         #[tokio::main(flavor = "current_thread")]
-        pub async fn new(base_url: String, project_name: Option<&str>) -> Self {
+        pub async fn new(base_url: String, project_name: Option<&str>, config: StdSystemConfig) -> Self {
             let mut context = Context {
                 base_url,
                 client_id: format!("vm-{}", names::Generator::default().next().unwrap()),
@@ -782,14 +803,18 @@ mod std_system {
             };
 
             Self {
+                config,
                 start_time: Instant::now(),
-                context,
                 rpc_results, rpc_request_pipe,
             }
         }
     }
     impl System for StdSystem {
         type RpcKey = RpcKey;
+
+        fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>) {
+            self.config.printer.as_ref()(value, entity)
+        }
 
         fn time_ms(&self) -> Result<u64, SystemError> {
             Ok(self.start_time.elapsed().as_millis() as u64)

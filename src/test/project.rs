@@ -21,7 +21,7 @@ fn get_running_project(xml: &str) -> EnvArena {
         let ast = parser.parse(xml).unwrap();
         assert_eq!(ast.roles.len(), 1);
 
-        let settings = SettingsBuilder::default().build().unwrap();
+        let settings = Settings::builder().build().unwrap();
         let mut proj = Project::from_ast(mc, &ast.roles[0], settings);
         proj.input(Input::Start);
         Env { proj: GcCell::allocate(mc, proj) }
@@ -39,7 +39,7 @@ fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdS
 
 #[test]
 fn test_proj_counting() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfigBuilder::default().build().unwrap());
     let mut proj = get_running_project(include_str!("projects/counting.xml"));
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc), &system);
@@ -56,7 +56,7 @@ fn test_proj_counting() {
 
 #[test]
 fn test_proj_broadcast() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
     let mut proj = get_running_project(include_str!("projects/broadcast.xml"));
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc), &system);
@@ -79,7 +79,7 @@ fn test_proj_broadcast() {
 
 #[test]
 fn test_proj_parallel_rpcs() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None);
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
     let mut proj = get_running_project(include_str!("projects/parallel-rpcs.xml"));
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc), &system);

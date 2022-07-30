@@ -85,20 +85,17 @@ pub enum ProcessStep<'gc> {
 }
 
 /// Settings to use for a [`Process`].
-#[derive(Builder, Clone, Collect)]
+#[derive(Builder, Clone, Copy, Collect)]
 #[builder(no_std)]
 #[collect(require_static)]
 pub struct Settings {
     /// The maximum depth of the call stack (default `1024`).
     #[builder(default = "1024")]
     max_call_depth: usize,
-
-    /// A function used to process all "say" and "think" blocks.
-    /// The first argument is the actual message value, or [`None`] to clear the output (Snap!-style).
-    /// The second argument is a reference to the entity making the request.
-    /// The default printer is no-op, effectively ignoring all output requests.
-    #[builder(default = "Rc::new(|_, _| ())")]
-    printer: Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>)>,
+}
+impl Settings {
+    /// Constructs a new default instance of [`SettingsBuilder`].
+    pub fn builder() -> SettingsBuilder { Default::default() }
 }
 
 #[derive(Collect)]
@@ -569,7 +566,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::Print => {
                 let value = self.value_stack.pop().unwrap();
                 let is_empty = match value { Value::String(x) => x.is_empty(), _ => false };
-                self.settings.printer.as_ref()(if is_empty { None } else { Some(value) }, &*entity);
+                system.print(if is_empty { None } else { Some(value) }, &*entity);
                 self.pos = aft_pos;
             }
         }
