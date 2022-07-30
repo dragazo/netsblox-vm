@@ -56,7 +56,7 @@ impl TryFrom<Json> for SimpleValue {
             Json::Bool(x) => x.into(),
             Json::Number(x) => x.as_f64().ok_or(Self::Error::HadBadNumber)?.into(),
             Json::String(x) => x.into(),
-            Json::Array(x) => x.into_iter().map(|x| SimpleValue::try_from(x)).collect::<Result<Vec<_>,_>>()?.into(),
+            Json::Array(x) => x.into_iter().map(SimpleValue::try_from).collect::<Result<Vec<_>,_>>()?.into(),
             Json::Object(x) => x.into_iter().map(|(k, v)| Ok(vec![ k.into(), SimpleValue::try_from(v)? ].into())).collect::<Result<Vec<_>,_>>()?.into(),
         })
     }
@@ -373,21 +373,21 @@ impl<'gc> Value<'gc> {
     pub fn as_list(&self) -> Result<GcCell<'gc, Vec<Value<'gc>>>, ConversionError> {
         match self {
             Value::List(x) => Ok(*x),
-            x => Err(ConversionError { got: x.get_type(), expected: Type::List }.into()),
+            x => Err(ConversionError { got: x.get_type(), expected: Type::List }),
         }
     }
     /// Attempts to interpret this value as a closure.
     pub fn as_closure(&self) -> Result<GcCell<'gc, Closure<'gc>>, ConversionError> {
         match self {
             Value::Closure(x) => Ok(*x),
-            x => Err(ConversionError { got: x.get_type(), expected: Type::Closure }.into()),
+            x => Err(ConversionError { got: x.get_type(), expected: Type::Closure }),
         }
     }
     /// Attempts to interpret this value as an entity.
     pub fn as_entity(&self) -> Result<GcCell<'gc, Entity<'gc>>, ConversionError> {
         match self {
             Value::Entity(x) => Ok(*x),
-            x => Err(ConversionError { got: x.get_type(), expected: Type::Entity }.into()),
+            x => Err(ConversionError { got: x.get_type(), expected: Type::Entity }),
         }
     }
 }
@@ -597,7 +597,7 @@ impl<'gc> GlobalContext<'gc> {
 }
 
 /// A blocking handle for a [`BarrierCondition`].
-#[derive(Debug, Clone, Collect)]
+#[derive(Debug, Default, Clone, Collect)]
 #[collect(require_static)]
 pub struct Barrier(Rc<()>);
 /// Waits for the destruction of all associated [`Barrier`] handles.
@@ -762,7 +762,6 @@ mod std_system {
             let rpc_results = Arc::new(Mutex::new(Default::default()));
 
             let rpc_request_pipe = {
-                let context = context.clone();
                 let rpc_results = rpc_results.clone();
                 let (sender, receiver) = channel();
 

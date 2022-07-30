@@ -82,7 +82,7 @@ impl<'gc> Script<'gc> {
         match process {
             Some(process) => process.initialize(context, barrier),
             None => {
-                let mut process = Process::new(state.code.clone(), self.start_pos, state.global_context, self.entity, state.settings.clone());
+                let mut process = Process::new(state.code.clone(), self.start_pos, state.global_context, self.entity, state.settings);
                 process.initialize(context, barrier);
                 let key = state.processes.insert(process);
                 state.process_queue.push_back(key);
