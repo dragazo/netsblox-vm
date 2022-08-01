@@ -5,6 +5,7 @@
         "Repr",
         "bytecode",
         "consts",
+        "crossterm",
         "dealloc",
         "elems",
         "fabs",

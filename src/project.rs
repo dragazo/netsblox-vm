@@ -15,6 +15,7 @@ new_key! {
 }
 
 /// Simulates input from the user.
+#[derive(Debug)]
 pub enum Input {
     /// Simulate pressing the start (green flag) button.
     /// This has the effect of interrupting any running "on start" scripts and restarting them (with an empty context).
@@ -24,6 +25,13 @@ pub enum Input {
     /// This has the effect of stopping all currently-running processes.
     /// Note that some hat blocks could cause new processes to spin up after this operation.
     Stop,
+    /// Simulates a key down event from the keyboard.
+    /// This should be repeated if the button is held down.
+    KeyDown(KeyCode),
+    /// Simulates a key up event from the keyboard.
+    /// Due to the nature of the TTY interface, key up events are not always available, so this event does not need to be sent.
+    /// If not sent, a timeout is used to determine when a key is released (sending this event can short-circuit the timeout).
+    KeyUp(KeyCode),
 }
 
 /// Result of stepping through the execution of a [`Project`].
@@ -32,22 +40,6 @@ pub enum ProjectStep {
     Normal,
     /// There were no running processes to execute.
     Idle,
-}
-
-#[derive(Collect)]
-#[collect(no_drop)]
-struct State<'gc, S: System> {
-    global_context: GcCell<'gc, GlobalContext<'gc>>,
-    code: Rc<ByteCode>,
-    settings: Settings,
-    processes: SlotMap<ProcessKey, Process<'gc, S>>,
-    process_queue: VecDeque<ProcessKey>,
-}
-#[derive(Collect)]
-#[collect(no_drop)]
-pub struct Project<'gc, S: System> {
-    state: State<'gc, S>,
-    scripts: Vec<Script<'gc>>,
 }
 
 #[derive(Collect)]
@@ -106,6 +98,21 @@ impl<'gc> Script<'gc> {
     }
 }
 
+#[derive(Collect)]
+#[collect(no_drop)]
+struct State<'gc, S: System> {
+    global_context: GcCell<'gc, GlobalContext<'gc>>,
+    code: Rc<ByteCode>,
+    settings: Settings,
+    processes: SlotMap<ProcessKey, Process<'gc, S>>,
+    process_queue: VecDeque<ProcessKey>,
+}
+#[derive(Collect)]
+#[collect(no_drop)]
+pub struct Project<'gc, S: System> {
+    state: State<'gc, S>,
+    scripts: Vec<Script<'gc>>,
+}
 impl<'gc, S: System> Project<'gc, S> {
     pub fn from_ast(mc: MutationContext<'gc, '_>, role: &ast::Role, settings: Settings) -> Self {
         let global_context = GlobalContext::from_ast(mc, role);
@@ -155,6 +162,7 @@ impl<'gc, S: System> Project<'gc, S> {
                 self.state.processes.clear();
                 self.state.process_queue.clear();
             }
+            x => unimplemented!("{x:?}"),
         }
     }
     pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> ProjectStep {
@@ -183,7 +191,7 @@ impl<'gc, S: System> Project<'gc, S> {
                     self.state.process_queue.push_front(proc_key); // keep executing same process, if it was a wait, it'll yield next step
                 }
             }
-            Err(_) => unimplemented!(),
+            Err(e) => unimplemented!("{e:?}"),
         }
 
         ProjectStep::Normal

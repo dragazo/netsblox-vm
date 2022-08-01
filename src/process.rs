@@ -110,6 +110,7 @@ struct ReturnPoint {
 #[collect(require_static)]
 enum Defer<S: System> {
     RpcResult { key: S::RpcKey, aft_pos: usize },
+    InputResult { key: S::InputKey, aft_pos: usize },
     Barrier { condition: BarrierCondition, aft_pos: usize },
 }
 
@@ -134,6 +135,7 @@ pub struct Process<'gc, S: System> {
     meta_stack: Vec<String>,
     defer: Option<Defer<S>>,
     last_rpc_error: Option<Value<'gc>>,
+    last_answer: Option<Value<'gc>>,
 }
 impl<'gc, S: System> Process<'gc, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity`.
@@ -150,6 +152,7 @@ impl<'gc, S: System> Process<'gc, S> {
             meta_stack: vec![],
             defer: None,
             last_rpc_error: None,
+            last_answer: None,
         }
     }
     /// Checks if the process is currently running.
@@ -172,6 +175,7 @@ impl<'gc, S: System> Process<'gc, S> {
         self.meta_stack.clear();
         self.defer = None;
         self.last_rpc_error = None;
+        self.last_answer = None;
     }
     /// Executes a single bytecode instruction.
     /// The return value can be used to determine what additional effects the script has requested,
@@ -189,7 +193,7 @@ impl<'gc, S: System> Process<'gc, S> {
     fn step_impl(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> Result<ProcessStep<'gc>, ErrorCause> {
         match &self.defer {
             None => (),
-            Some(Defer::RpcResult { key, aft_pos }) => match system.poll_rpc(key)? {
+            Some(Defer::RpcResult { key, aft_pos }) => match system.poll_rpc(key) {
                 AsyncPoll::Completed(x) => {
                     self.value_stack.push(match x {
                         Ok(x) => {
@@ -202,6 +206,14 @@ impl<'gc, S: System> Process<'gc, S> {
                             x
                         }
                     });
+                    self.pos = *aft_pos;
+                    self.defer = None;
+                }
+                AsyncPoll::Pending => return Ok(ProcessStep::Yield),
+            }
+            Some(Defer::InputResult { key, aft_pos }) => match system.poll_input(key) {
+                AsyncPoll::Completed(x) => {
+                    self.last_answer = Some(Gc::allocate(mc, x).into());
                     self.pos = *aft_pos;
                     self.defer = None;
                 }
@@ -578,6 +590,16 @@ impl<'gc, S: System> Process<'gc, S> {
                 let value = self.value_stack.pop().unwrap();
                 let is_empty = match value { Value::String(x) => x.is_empty(), _ => false };
                 system.print(if is_empty { None } else { Some(value) }, &*entity);
+                self.pos = aft_pos;
+            }
+            Instruction::Ask => {
+                let prompt = self.value_stack.pop().unwrap();
+                let is_empty = match prompt { Value::String(x) => x.is_empty(), _ => false };
+                let key = system.input(if is_empty { None } else { Some(prompt) }, &*entity)?;
+                self.defer = Some(Defer::InputResult { key, aft_pos });
+            }
+            Instruction::PushAnswer => {
+                self.value_stack.push(self.last_answer.unwrap_or_else(|| Gc::allocate(mc, String::new()).into()));
                 self.pos = aft_pos;
             }
         }

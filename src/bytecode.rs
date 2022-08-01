@@ -192,6 +192,12 @@ pub(crate) enum Instruction<'a> {
 
     /// Consumes 1 value `msg` from the value stack and prints it to the stored printer.
     Print,
+    /// Consumes 1 value, `prompt`, from the value stack and uses it as a query to get input from the user.
+    /// The result is NOT stored on the value stack, and instead [`Instruction::PushAnswer`] must be used to retrieve the result.
+    Ask,
+    /// Pushes the most recent answer from an execution of [`Instruction::Ask`] onto the value stack, or empty string if no question has yet been asked.
+    /// Note that the most recent answer is a process-local value, so this cannot retrieve the answer to a question asked by another process.
+    PushAnswer,
 }
 
 pub(crate) enum RelocateInfo {
@@ -482,6 +488,8 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             59 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
             60 => read_prefixed!(Instruction::Print),
+            61 => read_prefixed!(Instruction::Ask),
+            62 => read_prefixed!(Instruction::PushAnswer),
 
             _ => unreachable!(),
         }
@@ -591,6 +599,8 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::Broadcast { wait: true } => append_prefixed!(59),
 
             Instruction::Print => append_prefixed!(60),
+            Instruction::Ask => append_prefixed!(61),
+            Instruction::PushAnswer => append_prefixed!(62),
         }
     }
 }
@@ -677,6 +687,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Listlen { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListLen),
             ast::Expr::ListIsEmpty { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListIsEmpty),
             ast::Expr::RangeInclusive { start, stop, .. } => self.append_simple_ins(entity, &[start, stop], Instruction::MakeListRange),
+            ast::Expr::Answer { .. } => self.ins.push(Instruction::PushAnswer.into()),
             ast::Expr::MakeList { values, .. } => {
                 for value in values {
                     self.append_expr(value, entity);
@@ -793,6 +804,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Stmt::LastIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignLast),
             ast::Stmt::RandIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignRandom),
             ast::Stmt::Return { value, .. } => self.append_simple_ins(entity, &[value], Instruction::Return),
+            ast::Stmt::Ask { prompt, .. } => self.append_simple_ins(entity, &[prompt], Instruction::Ask),
             ast::Stmt::Say { content, duration, .. } | ast::Stmt::Think { content, duration, .. } => match duration {
                 Some(_) => unimplemented!(),
                 None => self.append_simple_ins(entity, &[content], Instruction::Print),

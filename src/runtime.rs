@@ -630,10 +630,28 @@ pub enum AsyncPoll<T> {
     Pending,
 }
 
+/// A key from the keyboard.
+#[derive(Debug)]
+pub enum KeyCode {
+    /// A normal character key, such as a letter, number, or special symbol.
+    Char(char),
+    /// The up arrow key.
+    Up,
+    /// The down arrow key.
+    Down,
+    /// The left arrow key.
+    Left,
+    /// The right arrow key.
+    Right,
+}
+
 /// Types of [`System`] resources, grouped into feature categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemFeature {
+    /// The ability of a process to get the current time (not necessarily wall time).
     Time,
+    /// The ability of a process to request keyboard input from the user.
+    Input,
 }
 /// An error resulting from improper use of [`System`] resources.
 #[derive(Debug)]
@@ -653,23 +671,34 @@ pub enum SystemError {
 pub trait System: 'static {
     /// Key type used to await the result of an RPC request.
     type RpcKey: Collect + 'static;
-
-    /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
-    /// The [`Entity`] making the request is provided for context.
-    /// This operation should be infallible, but a no-op solution is sufficient.
-    fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>);
+    /// Key type used to await the result of an "ask" block (string input from the user).
+    type InputKey: Collect + 'static;
 
     /// Gets the current time in milliseconds.
     /// This is not required to represent the actual real-world time; e.g., this could simply measure uptime.
     /// Subsequent values are required to be non-decreasing.
     fn time_ms(&self) -> Result<u64, SystemError>;
 
+    /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
+    /// The [`Entity`] making the request is provided for context.
+    /// This operation should be infallible, but a no-op solution is sufficient.
+    fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>);
+
+    /// Request input from the user.
+    /// The `prompt` argument is either [`Some`] prompt to display, or [`None`] for no prompt.
+    /// If supported, this operation must be non-blocking and eventually terminate and yield a value to [`System::poll_input`].
+    fn input<'gc>(&self, prompt: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<Self::InputKey, SystemError>;
+    /// Polls for the completion of an asynchronous call to [`System::input`].
+    /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
+    fn poll_input(&self, key: &Self::InputKey) -> AsyncPoll<String>;
+
     /// Requests the system to execute the given RPC.
     /// Returns a key that can be passed to [`System::poll_rpc`] to poll for the result.
+    /// If supported, this operation must be non-blocking and eventually terminate and yield a value to [`System::poll_rpc`].
     fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<Self::RpcKey, SystemError>;
-    /// Polls for the completion of an RPC call.
+    /// Polls for the completion of an asynchronous call to [`System::call_rpc`].
     /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
-    fn poll_rpc(&self, key: &Self::RpcKey) -> Result<AsyncPoll<Result<Json, String>>, SystemError>;
+    fn poll_rpc(&self, key: &Self::RpcKey) -> AsyncPoll<Result<Json, String>>;
 }
 
 #[cfg(any(test, feature = "std"))]
@@ -687,6 +716,7 @@ mod std_system {
 
     new_key! {
         pub struct RpcKey;
+        pub struct InputKey;
     }
 
     struct Context {
@@ -706,6 +736,7 @@ mod std_system {
     }
 
     type RpcResults = SlotMap<RpcKey, Option<Result<Json, String>>>;
+    type InputResults = SlotMap<InputKey, Option<String>>;
 
     #[derive(Builder)]
     pub struct StdSystemConfig {
@@ -714,7 +745,13 @@ mod std_system {
         /// The second argument is a reference to the entity making the request.
         /// The default printer is no-op, effectively ignoring all output requests.
         #[builder(default = "Rc::new(|_, _| ())")]
-        printer: Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>)>,
+        print: Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>)>,
+        /// A function used to request input from the user.
+        /// This should be non-blocking, and the provided [`InputKey`]
+        /// should be given to [`StdSystem::finish_input`] when the value is entered by the user.
+        /// If not specified (default), the system gives an error when processes attempt to request user input.
+        #[builder(default = "None", setter(strip_option))]
+        input: Option<Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>, InputKey)>>,
     }
     impl StdSystemConfig {
         /// Constructs a new default instance of [`StdSystemConfigBuilder`].
@@ -749,6 +786,8 @@ mod std_system {
         context: Arc<Context>,
         client: Arc<reqwest::Client>,
         start_time: Instant,
+
+        input_results: Arc<Mutex<InputResults>>,
 
         rpc_results: Arc<Mutex<RpcResults>>,
         rpc_request_pipe: Sender<RpcRequest>,
@@ -806,6 +845,7 @@ mod std_system {
             Self {
                 config, context, client,
                 start_time: Instant::now(),
+                input_results: Default::default(),
                 rpc_results, rpc_request_pipe,
             }
         }
@@ -814,16 +854,40 @@ mod std_system {
         pub async fn call_rpc_async(&self, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<Json, String> {
             call_rpc_async(&self.context, &self.client, service, rpc, args).await
         }
+        /// Finishes an asynchronous request to get input from the user.
+        /// The key provided must only be used once - future usage of the same key will result in a panic.
+        pub fn finish_input(&self, key: InputKey, content: String) {
+            assert!(self.input_results.lock().unwrap().get_mut(key).unwrap().replace(content).is_none());
+        }
     }
     impl System for StdSystem {
         type RpcKey = RpcKey;
-
-        fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>) {
-            self.config.printer.as_ref()(value, entity)
-        }
+        type InputKey = InputKey;
 
         fn time_ms(&self) -> Result<u64, SystemError> {
             Ok(self.start_time.elapsed().as_millis() as u64)
+        }
+
+        fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>) {
+            self.config.print.as_ref()(value, entity)
+        }
+
+        fn input<'gc>(&self, prompt: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<Self::InputKey, SystemError> {
+            match self.config.input.as_ref() {
+                Some(input) => {
+                    let key = self.input_results.lock().unwrap().insert(None);
+                    input(prompt, entity, key);
+                    Ok(key)
+                }
+                None => Err(SystemError::NotSupported { feature: SystemFeature::Input }),
+            }
+        }
+        fn poll_input(&self, key: &Self::InputKey) -> AsyncPoll<String> {
+            let mut input_results = self.input_results.lock().unwrap();
+            match input_results.get(*key).unwrap().is_some() {
+                true => AsyncPoll::Completed(input_results.remove(*key).unwrap().unwrap()),
+                false => AsyncPoll::Pending,
+            }
         }
 
         fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<Self::RpcKey, SystemError> {
@@ -831,12 +895,12 @@ mod std_system {
             self.rpc_request_pipe.send(RpcRequest { service, rpc, args, result_key }).unwrap();
             Ok(result_key)
         }
-        fn poll_rpc(&self, key: &Self::RpcKey) -> Result<AsyncPoll<Result<Json, String>>, SystemError> {
+        fn poll_rpc(&self, key: &Self::RpcKey) -> AsyncPoll<Result<Json, String>> {
             let mut rpc_results = self.rpc_results.lock().unwrap();
-            Ok(match rpc_results.get(*key).unwrap().is_some() {
+            match rpc_results.get(*key).unwrap().is_some() {
                 true => AsyncPoll::Completed(rpc_results.remove(*key).unwrap().unwrap()),
                 false => AsyncPoll::Pending,
-            })
+            }
         }
     }
 }
