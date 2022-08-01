@@ -14,6 +14,21 @@ new_key! {
     struct ProcessKey;
 }
 
+fn parse_key(key: &str) -> Option<KeyCode> {
+    Some(match key {
+        "any key" => return None,
+        "up arrow" => KeyCode::Up,
+        "down arrow" => KeyCode::Down,
+        "left arrow" => KeyCode::Left,
+        "right arrow" => KeyCode::Right,
+        "space" => KeyCode::Char(' '),
+        _ => {
+            assert_eq!(key.chars().count(), 1);
+            KeyCode::Char(key.chars().next().unwrap().to_ascii_lowercase())
+        }
+    })
+}
+
 /// Simulates input from the user.
 #[derive(Debug)]
 pub enum Input {
@@ -47,6 +62,8 @@ pub enum ProjectStep {
 enum Hat {
     OnFlag,
     LocalMessage { msg_type: String },
+    /// Fire an event when a key is pressed. [`None`] is used to denote any key press.
+    OnKey { key: Option<KeyCode> },
 }
 
 #[derive(Collect)]
@@ -59,12 +76,9 @@ struct Script<'gc> {
     context_queue: VecDeque<(SymbolTable<'gc>, Option<Barrier>)>,
 }
 impl<'gc> Script<'gc> {
-    fn get_process_mut<'a, S: System>(&self, state: &'a mut State<'gc, S>) -> Option<&'a mut Process<'gc, S>> {
-        state.processes.get_mut(self.process?)
-    }
     fn consume_context<S: System>(&mut self, state: &mut State<'gc, S>) {
-        let process = self.get_process_mut(state);
-        if process.as_ref().map(|x| x.is_running()).unwrap_or(false) { return }
+        let process = self.process.map(|key| Some((key, state.processes.get_mut(key)?))).flatten();
+        if process.as_ref().map(|x| x.1.is_running()).unwrap_or(false) { return }
 
         let (context, barrier) = match self.context_queue.pop_front() {
             Some(x) => x,
@@ -72,7 +86,13 @@ impl<'gc> Script<'gc> {
         };
 
         match process {
-            Some(process) => process.initialize(context, barrier),
+            Some((key, process)) => {
+                debug_assert!(!state.process_queue.contains(&key));
+                debug_assert_eq!(self.process, Some(key));
+
+                process.initialize(context, barrier);
+                state.process_queue.push_back(key);
+            }
             None => {
                 let mut process = Process::new(state.code.clone(), self.start_pos, state.global_context, self.entity, state.settings);
                 process.initialize(context, barrier);
@@ -126,6 +146,7 @@ impl<'gc, S: System> Project<'gc, S> {
                         hat: match hat {
                             ast::Hat::OnFlag { .. } => Hat::OnFlag,
                             ast::Hat::LocalMessage { msg_type, .. } => Hat::LocalMessage { msg_type: msg_type.clone() },
+                            ast::Hat::OnKey { key, .. } => Hat::OnKey { key: parse_key(&key) },
                             x => unimplemented!("{:?}", x),
                         },
                         entity: *entity,
@@ -162,7 +183,16 @@ impl<'gc, S: System> Project<'gc, S> {
                 self.state.processes.clear();
                 self.state.process_queue.clear();
             }
-            x => unimplemented!("{x:?}"),
+            Input::KeyDown(input_key) => {
+                for script in self.scripts.iter_mut() {
+                    if let Hat::OnKey { key } = &script.hat {
+                        if key.map(|x| x == input_key).unwrap_or(true) {
+                            script.schedule(&mut self.state, Default::default(), None, 0);
+                        }
+                    }
+                }
+            }
+            Input::KeyUp(_) => unimplemented!(),
         }
     }
     pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> ProjectStep {

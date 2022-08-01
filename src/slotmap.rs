@@ -20,7 +20,7 @@ pub trait Key: Copy + Eq + Ord + 'static {
 #[macro_export]
 macro_rules! new_key {
     ($($(#[doc = $doc:expr])? $vis:vis struct $name:ident;)*) => {$(
-        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, $crate::gc::Collect)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, $crate::gc::Collect)]
         #[collect(require_static)]
         $(#[doc = $doc])?
         $vis struct $name(usize, usize);

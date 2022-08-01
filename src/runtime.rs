@@ -631,7 +631,7 @@ pub enum AsyncPoll<T> {
 }
 
 /// A key from the keyboard.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyCode {
     /// A normal character key, such as a letter, number, or special symbol.
     Char(char),
