@@ -112,6 +112,7 @@ enum Defer<S: System> {
     RpcResult { key: S::RpcKey, aft_pos: usize },
     InputResult { key: S::InputKey, aft_pos: usize },
     Barrier { condition: BarrierCondition, aft_pos: usize },
+    Sleep { until: u64, aft_pos: usize },
 }
 
 /// A [`ByteCode`] execution primitive.
@@ -136,6 +137,7 @@ pub struct Process<'gc, S: System> {
     defer: Option<Defer<S>>,
     last_rpc_error: Option<Value<'gc>>,
     last_answer: Option<Value<'gc>>,
+    timer_start: u64,
 }
 impl<'gc, S: System> Process<'gc, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity`.
@@ -153,6 +155,7 @@ impl<'gc, S: System> Process<'gc, S> {
             defer: None,
             last_rpc_error: None,
             last_answer: None,
+            timer_start: 0,
         }
     }
     /// Checks if the process is currently running.
@@ -164,7 +167,7 @@ impl<'gc, S: System> Process<'gc, S> {
     /// A [`Barrier`] may also be set, which will be destroyed upon termination, either due to completion or an error.
     /// 
     /// Any previous process state is wiped when performing this action.
-    pub fn initialize(&mut self, locals: SymbolTable<'gc>, barrier: Option<Barrier>) {
+    pub fn initialize(&mut self, locals: SymbolTable<'gc>, barrier: Option<Barrier>, system: &S) {
         self.pos = self.start_pos;
         self.running = true;
         self.barrier = barrier;
@@ -176,6 +179,7 @@ impl<'gc, S: System> Process<'gc, S> {
         self.defer = None;
         self.last_rpc_error = None;
         self.last_answer = None;
+        self.timer_start = system.time_ms().unwrap_or(0);
     }
     /// Executes a single bytecode instruction.
     /// The return value can be used to determine what additional effects the script has requested,
@@ -220,6 +224,13 @@ impl<'gc, S: System> Process<'gc, S> {
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
             }
             Some(Defer::Barrier { condition, aft_pos }) => match condition.is_completed() {
+                true => {
+                    self.pos = *aft_pos;
+                    self.defer = None;
+                }
+                false => return Ok(ProcessStep::Yield),
+            }
+            Some(Defer::Sleep { until, aft_pos }) => match system.time_ms()? >= *until {
                 true => {
                     self.pos = *aft_pos;
                     self.defer = None;
@@ -601,6 +612,22 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::PushAnswer => {
                 self.value_stack.push(self.last_answer.unwrap_or_else(|| Gc::allocate(mc, String::new()).into()));
                 self.pos = aft_pos;
+            }
+            Instruction::ResetTimer => {
+                self.timer_start = system.time_ms()?;
+                self.pos = aft_pos;
+            }
+            Instruction::PushTimer => {
+                self.value_stack.push((system.time_ms()?.saturating_sub(self.timer_start) as f64 / 1000.0).into());
+                self.pos = aft_pos;
+            }
+            Instruction::Sleep => {
+                let ms = self.value_stack.pop().unwrap().to_number()? * 1000.0;
+                if ms <= 0.0 {
+                    self.pos = aft_pos;
+                    return Ok(ProcessStep::Yield);
+                }
+                self.defer = Some(Defer::Sleep { until: system.time_ms()? + ms as u64, aft_pos });
             }
         }
 

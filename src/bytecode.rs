@@ -198,6 +198,14 @@ pub(crate) enum Instruction<'a> {
     /// Pushes the most recent answer from an execution of [`Instruction::Ask`] onto the value stack, or empty string if no question has yet been asked.
     /// Note that the most recent answer is a process-local value, so this cannot retrieve the answer to a question asked by another process.
     PushAnswer,
+
+    /// Resets the process-local timer value to the current system time.
+    ResetTimer,
+    /// Gets the current timer value (in seconds) and pushes its value onto the value stack.
+    PushTimer,
+    /// Consumes one value, `secs`, from the value stack and asynchronously waits for that amount of time to elapse.
+    /// Non-positive sleep times are ignored, but still generate a yield point.
+    Sleep,
 }
 
 pub(crate) enum RelocateInfo {
@@ -491,6 +499,10 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             61 => read_prefixed!(Instruction::Ask),
             62 => read_prefixed!(Instruction::PushAnswer),
 
+            63 => read_prefixed!(Instruction::ResetTimer),
+            64 => read_prefixed!(Instruction::PushTimer),
+            65 => read_prefixed!(Instruction::Sleep),
+
             _ => unreachable!(),
         }
     }
@@ -601,6 +613,10 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::Print => append_prefixed!(60),
             Instruction::Ask => append_prefixed!(61),
             Instruction::PushAnswer => append_prefixed!(62),
+
+            Instruction::ResetTimer => append_prefixed!(63),
+            Instruction::PushTimer => append_prefixed!(64),
+            Instruction::Sleep => append_prefixed!(65),
         }
     }
 }
@@ -688,6 +704,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::ListIsEmpty { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListIsEmpty),
             ast::Expr::RangeInclusive { start, stop, .. } => self.append_simple_ins(entity, &[start, stop], Instruction::MakeListRange),
             ast::Expr::Answer { .. } => self.ins.push(Instruction::PushAnswer.into()),
+            ast::Expr::Timer { .. } => self.ins.push(Instruction::PushTimer.into()),
             ast::Expr::MakeList { values, .. } => {
                 for value in values {
                     self.append_expr(value, entity);
@@ -805,6 +822,8 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Stmt::RandIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignRandom),
             ast::Stmt::Return { value, .. } => self.append_simple_ins(entity, &[value], Instruction::Return),
             ast::Stmt::Ask { prompt, .. } => self.append_simple_ins(entity, &[prompt], Instruction::Ask),
+            ast::Stmt::Sleep { seconds, .. } => self.append_simple_ins(entity, &[seconds], Instruction::Sleep),
+            ast::Stmt::ResetTimer { .. } => self.ins.push(Instruction::ResetTimer.into()),
             ast::Stmt::Say { content, duration, .. } | ast::Stmt::Think { content, duration, .. } => match duration {
                 Some(_) => unimplemented!(),
                 None => self.append_simple_ins(entity, &[content], Instruction::Print),
@@ -846,6 +865,17 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
                 self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
+            }
+            ast::Stmt::WaitUntil { condition, .. } => {
+                let top = self.ins.len();
+                self.append_expr(condition, entity);
+                let jump_pos = self.ins.len();
+                self.ins.push(InternalInstruction::Illegal);
+                self.ins.push(Instruction::Yield.into());
+                self.ins.push(Instruction::Jump { to: top }.into());
+                let aft = self.ins.len();
+
+                self.ins[jump_pos] = Instruction::ConditionalJump { to: aft, when: true }.into();
             }
             ast::Stmt::UntilLoop { condition, stmts, .. } => {
                 let top = self.ins.len();

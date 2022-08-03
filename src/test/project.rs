@@ -15,7 +15,7 @@ struct Env<'gc> {
 }
 make_arena!(EnvArena, Env);
 
-fn get_running_project(xml: &str) -> EnvArena {
+fn get_running_project(xml: &str, system: &StdSystem) -> EnvArena {
     EnvArena::new(Default::default(), |mc| {
         let parser = ast::ParserBuilder::default().build().unwrap();
         let ast = parser.parse(xml).unwrap();
@@ -23,7 +23,7 @@ fn get_running_project(xml: &str) -> EnvArena {
 
         let settings = Settings::builder().build().unwrap();
         let mut proj = Project::from_ast(mc, &ast.roles[0], settings);
-        proj.input(Input::Start);
+        proj.input(Input::Start, system);
         Env { proj: GcCell::allocate(mc, proj) }
     })
 }
@@ -40,7 +40,7 @@ fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdS
 #[test]
 fn test_proj_counting() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfigBuilder::default().build().unwrap());
-    let mut proj = get_running_project(include_str!("projects/counting.xml"));
+    let mut proj = get_running_project(include_str!("projects/counting.xml"), &system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc), &system);
         let global_context = proj.proj.read().global_context();
@@ -57,7 +57,7 @@ fn test_proj_counting() {
 #[test]
 fn test_proj_broadcast() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut proj = get_running_project(include_str!("projects/broadcast.xml"));
+    let mut proj = get_running_project(include_str!("projects/broadcast.xml"), &system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc), &system);
         let global_context = proj.proj.read().global_context();
@@ -80,7 +80,7 @@ fn test_proj_broadcast() {
 #[test]
 fn test_proj_parallel_rpcs() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut proj = get_running_project(include_str!("projects/parallel-rpcs.xml"));
+    let mut proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), &system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc), &system);
         let global_context = proj.proj.read().global_context();
@@ -116,5 +116,19 @@ fn test_proj_parallel_rpcs() {
                 }
             }
         }
+    });
+}
+
+#[test]
+fn test_proj_wait_until() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfigBuilder::default().build().unwrap());
+    let mut proj = get_running_project(include_str!("projects/wait-until.xml"), &system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc), &system);
+        let global_context = proj.proj.read().global_context();
+        let global_context = global_context.read();
+
+        assert_values_eq(&global_context.globals.lookup("mark").unwrap().get(), &Value::from_simple(mc, simple_value!(64)), 1e-20, "after wait value");
+        assert_values_eq(&global_context.globals.lookup("counter").unwrap().get(), &Value::from_simple(mc, simple_value!(128)), 1e-20, "final counter value");
     });
 }

@@ -19,7 +19,7 @@ struct Env<'gc> {
 }
 make_arena!(EnvArena, Env);
 
-fn get_running_proc(xml: &str, settings: Settings) -> EnvArena {
+fn get_running_proc(xml: &str, settings: Settings, system: &StdSystem) -> EnvArena {
     EnvArena::new(Default::default(), |mc| {
         let parser = ast::ParserBuilder::default().build().unwrap();
         let ast = parser.parse(xml).unwrap();
@@ -31,7 +31,7 @@ fn get_running_proc(xml: &str, settings: Settings) -> EnvArena {
 
         let mut proc = Process::new(Rc::new(code), main.1, glob, glob.read().entities[0], settings);
         assert!(!proc.is_running());
-        proc.initialize(Default::default(), None);
+        proc.initialize(Default::default(), None, system);
         assert!(proc.is_running());
 
         Env { glob, proc: GcCell::allocate(mc, proc) }
@@ -68,7 +68,7 @@ fn test_proc_ret() {
         fields = "",
         funcs = include_str!("blocks/ret.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |_, _, res| match res.unwrap().0.unwrap() {
         Value::String(x) => assert_eq!(&*x, ""),
@@ -84,13 +84,13 @@ fn test_proc_sum_123n() {
         fields = "",
         funcs = include_str!("blocks/sum-123n.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     for (n, expect) in [(0, simple_value!("0")), (1, simple_value!(1)), (2, simple_value!(3)), (3, simple_value!(6)), (4, simple_value!(10)), (5, simple_value!(15)), (6, simple_value!(21))] {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("n", Shared::Unique((n as f64).into()));
-            env.proc.write(mc).initialize(locals, None);
+            env.proc.write(mc).initialize(locals, None, &system);
         });
         run_till_term(&mut env, &system, |mc, _, res| {
             let expect = Value::from_simple(mc, expect);
@@ -107,13 +107,13 @@ fn test_proc_recursive_factorial() {
         fields = "",
         funcs = include_str!("blocks/recursive-factorial.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     for (n, expect) in [(0, simple_value!("1")), (1, simple_value!("1")), (2, simple_value!(2)), (3, simple_value!(6)), (4, simple_value!(24)), (5, simple_value!(120)), (6, simple_value!(720)), (7, simple_value!(5040))] {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("n", Shared::Unique((n as f64).into()));
-            env.proc.write(mc).initialize(locals, None);
+            env.proc.write(mc).initialize(locals, None, &system);
         });
         run_till_term(&mut env, &system, |mc, _, res| {
             let expect = Value::from_simple(mc, expect);
@@ -130,7 +130,7 @@ fn test_proc_loops_lists_basic() {
         fields = "",
         funcs = include_str!("blocks/loops-lists-basic.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expected = Value::from_simple(mc, simple_value!([
@@ -170,7 +170,7 @@ fn test_proc_recursively_self_containing_lists() {
         fields = "",
         funcs = include_str!("blocks/recursively-self-containing-lists.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| match res.unwrap().0.unwrap() {
         Value::List(res) => {
@@ -215,7 +215,7 @@ fn test_proc_sieve_of_eratosthenes() {
         fields = "",
         funcs = include_str!("blocks/sieve-of-eratosthenes.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     env.mutate(|mc, env| {
         let mut locals = SymbolTable::default();
@@ -223,7 +223,7 @@ fn test_proc_sieve_of_eratosthenes() {
 
         let mut proc = env.proc.write(mc);
         assert!(proc.is_running());
-        proc.initialize(locals, None);
+        proc.initialize(locals, None, &system);
         assert!(proc.is_running());
     });
 
@@ -241,7 +241,7 @@ fn test_proc_early_return() {
         fields = "",
         funcs = include_str!("blocks/early-return.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([1,3]));
@@ -257,7 +257,7 @@ fn test_proc_short_circuit() {
         fields = "",
         funcs = include_str!("blocks/short-circuit.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([
@@ -285,7 +285,7 @@ fn test_proc_all_arithmetic() {
         fields = "",
         funcs = include_str!("blocks/all-arithmetic.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let inf = std::f64::INFINITY;
@@ -329,7 +329,7 @@ fn test_proc_lambda_local_shadow_capture() {
         fields = "",
         funcs = include_str!("blocks/lambda-local-shadow-capture.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!(["1", 0, "1"]));
@@ -345,7 +345,7 @@ fn test_proc_generators_nested() {
         fields = "",
         funcs = include_str!("blocks/generators-nested.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761]));
@@ -361,7 +361,7 @@ fn test_proc_call_in_closure() {
         fields = "",
         funcs = include_str!("blocks/call-in-closure.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([
@@ -380,13 +380,13 @@ fn test_proc_warp_yields() {
         fields = "",
         funcs = include_str!("blocks/warp-yields.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     for (mode, (expected_counter, expected_yields)) in [(12, 12), (13, 13), (17, 0), (18, 0), (16, 0), (17, 2), (14, 0), (27, 3), (30, 7), (131, 109), (68, 23), (51, 0), (63, 14)].into_iter().enumerate() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("mode", Shared::Unique((mode as f64).into()));
-            env.proc.write(mc).initialize(locals, None);
+            env.proc.write(mc).initialize(locals, None, &system);
         });
 
         run_till_term(&mut env, &system, |_, env, res| {
@@ -406,7 +406,7 @@ fn test_proc_string_ops() {
         fields = "",
         funcs = include_str!("blocks/string-ops.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([
@@ -465,7 +465,7 @@ fn test_proc_str_cmp_case_insensitive() {
         fields = "",
         funcs = include_str!("blocks/str-cmp-case-insensitive.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([
@@ -487,14 +487,14 @@ fn test_proc_rpc_call_basic() {
         fields = "",
         funcs = include_str!("blocks/rpc-call-basic.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     for (lat, long, city) in [(36.1627, -86.7816, "Nashville"), (40.8136, -96.7026, "Lincoln"), (40.7608, -111.8910, "Salt Lake City")] {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("lat", Shared::Unique(lat.into()));
             locals.redefine_or_define("long", Shared::Unique(long.into()));
-            env.proc.write(mc).initialize(locals, None);
+            env.proc.write(mc).initialize(locals, None, &system);
         });
         run_till_term(&mut env, &system, |_, _, res| match res.unwrap().0.unwrap() {
             Value::String(ret) => assert_eq!(&*ret, city),
@@ -511,7 +511,7 @@ fn test_proc_list_index_blocks() {
         fields = "",
         funcs = include_str!("blocks/list-index-blocks.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([
@@ -544,7 +544,7 @@ fn test_proc_literal_types() {
         fields = "",
         funcs = include_str!("blocks/literal-types.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([ "50e4", "50e4s" ]));
@@ -565,8 +565,27 @@ fn test_proc_say() {
         fields = "",
         funcs = include_str!("blocks/say.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap());
+    ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |_, _, _| ());
     assert_eq!(output.borrow().as_str(), "\"Greetings, human.\"\n\"I will destroy him.\"\n");
+}
+
+#[test]
+fn test_proc_timer_wait() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/timer-wait.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    let start = std::time::Instant::now();
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([0.0, 0.05, 0.15, 0.3, 0.5, 0.75, 1.05, 1.4, 1.8, 2.25, 2.75]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 0.01, "timer checks");
+    });
+    let duration = start.elapsed().as_millis();
+    assert!(duration >= 2750);
 }

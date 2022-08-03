@@ -128,6 +128,8 @@ fn run_proj_tty(project_name: &str, server: String, mut env: EnvArena) {
         .build().unwrap();
     let system = StdSystem::new(server, Some(project_name), config);
 
+    env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
+
     let mut input_sequence = Vec::with_capacity(16);
     let in_input_mode = || !input_queries.borrow().is_empty();
     'program: loop {
@@ -162,7 +164,7 @@ fn run_proj_tty(project_name: &str, server: String, mut env: EnvArena) {
 
         env.mutate(|mc, env| {
             let mut proj = env.proj.write(mc);
-            for input in input_sequence.drain(..) { proj.input(input); }
+            for input in input_sequence.drain(..) { proj.input(input, &system); }
             proj.step(mc, &system)
         });
 
@@ -194,6 +196,8 @@ fn run_proj_non_tty(project_name: &str, server: String, mut env: EnvArena) {
         .build().unwrap();
     let system = StdSystem::new(server, Some(project_name), config);
 
+    env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
+
     loop {
         env.mutate(|mc, env| {
             let mut proj = env.proj.write(mc);
@@ -208,8 +212,7 @@ fn main() {
             let (project_name, role) = open_project(&src, role.as_deref());
             let env = EnvArena::new(Default::default(), |mc| {
                 let settings = Settings::builder().build().unwrap();
-                let mut proj = Project::from_ast(mc, &role, settings);
-                proj.input(Input::Start);
+                let proj = Project::from_ast(mc, &role, settings);
                 Env { proj: GcCell::allocate(mc, proj) }
             });
 

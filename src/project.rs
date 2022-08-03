@@ -76,7 +76,7 @@ struct Script<'gc> {
     context_queue: VecDeque<(SymbolTable<'gc>, Option<Barrier>)>,
 }
 impl<'gc> Script<'gc> {
-    fn consume_context<S: System>(&mut self, state: &mut State<'gc, S>) {
+    fn consume_context<S: System>(&mut self, state: &mut State<'gc, S>, system: &S) {
         let process = self.process.map(|key| Some((key, state.processes.get_mut(key)?))).flatten();
         if process.as_ref().map(|x| x.1.is_running()).unwrap_or(false) { return }
 
@@ -90,12 +90,12 @@ impl<'gc> Script<'gc> {
                 debug_assert!(!state.process_queue.contains(&key));
                 debug_assert_eq!(self.process, Some(key));
 
-                process.initialize(context, barrier);
+                process.initialize(context, barrier, system);
                 state.process_queue.push_back(key);
             }
             None => {
                 let mut process = Process::new(state.code.clone(), self.start_pos, state.global_context, self.entity, state.settings);
-                process.initialize(context, barrier);
+                process.initialize(context, barrier, system);
                 let key = state.processes.insert(process);
                 state.process_queue.push_back(key);
                 self.process = Some(key);
@@ -109,9 +109,9 @@ impl<'gc> Script<'gc> {
         }
         self.context_queue.clear();
     }
-    fn schedule<S: System>(&mut self, state: &mut State<'gc, S>, context: SymbolTable<'gc>, barrier: Option<Barrier>, max_queue: usize) {
+    fn schedule<S: System>(&mut self, state: &mut State<'gc, S>, system: &S, context: SymbolTable<'gc>, barrier: Option<Barrier>, max_queue: usize) {
         self.context_queue.push_back((context, barrier));
-        self.consume_context(state);
+        self.consume_context(state, system);
         if self.context_queue.len() > max_queue {
             self.context_queue.pop_back();
         }
@@ -169,13 +169,13 @@ impl<'gc, S: System> Project<'gc, S> {
             }
         }
     }
-    pub fn input(&mut self, input: Input) {
+    pub fn input(&mut self, input: Input, system: &S) {
         match input {
             Input::Start => {
                 for script in self.scripts.iter_mut() {
                     if let Hat::OnFlag = &script.hat {
                         script.stop_all(&mut self.state);
-                        script.schedule(&mut self.state, Default::default(), None, 0);
+                        script.schedule(&mut self.state, system, Default::default(), None, 0);
                     }
                 }
             }
@@ -187,7 +187,7 @@ impl<'gc, S: System> Project<'gc, S> {
                 for script in self.scripts.iter_mut() {
                     if let Hat::OnKey { key } = &script.hat {
                         if key.map(|x| x == input_key).unwrap_or(true) {
-                            script.schedule(&mut self.state, Default::default(), None, 0);
+                            script.schedule(&mut self.state, system, Default::default(), None, 0);
                         }
                     }
                 }
@@ -214,7 +214,7 @@ impl<'gc, S: System> Project<'gc, S> {
                         if let Hat::LocalMessage { msg_type: recv_type } = &script.hat {
                             if *recv_type == *msg_type {
                                 script.stop_all(&mut self.state);
-                                script.schedule(&mut self.state, Default::default(), barrier.clone(), 0);
+                                script.schedule(&mut self.state, system, Default::default(), barrier.clone(), 0);
                             }
                         }
                     }
