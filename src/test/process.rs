@@ -184,7 +184,7 @@ fn test_proc_recursively_self_containing_lists() {
                         let top_weak = got;
                         let got = got.read();
                         if got.len() != 11 { panic!("{} - len error - got {} expected 11", name, got.len()) }
-                        let basic = Value::List(GcCell::allocate(mc, got[..10].iter().cloned().collect()));
+                        let basic = Value::List(GcCell::allocate(mc, got.iter().take(10).cloned().collect()));
                         assert_values_eq(&basic, expected_basic, 1e-10, name);
                         match &got[10] {
                             Value::List(nested) => if top_weak.as_ptr() != nested.as_ptr() {
@@ -588,4 +588,31 @@ fn test_proc_timer_wait() {
     });
     let duration = start.elapsed().as_millis();
     assert!(duration >= 2750);
+}
+
+#[test]
+fn test_proc_cons_cdr() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/cons-cdr.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            [1],
+            [2,1],
+            [3,2,1],
+            [4,3,2,1],
+            [5,4,3,2,1],
+            [4,3,2,1],
+            [3,2,1],
+            [2,1],
+            [1],
+            []
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "cons cdr checks");
+    });
 }

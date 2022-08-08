@@ -1,5 +1,5 @@
 use std::prelude::v1::*;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::fmt;
@@ -222,7 +222,7 @@ pub enum Value<'gc> {
     /// include strings in its calculation of the total memory footprint (and allows [`Value`] to be [`Copy`]).
     String(Gc<'gc, String>),
     /// A primitive list type, which is a mutable reference type.
-    List(GcCell<'gc, Vec<Value<'gc>>>),
+    List(GcCell<'gc, VecDeque<Value<'gc>>>),
     /// A closure/lambda function. This contains information about the closure's bytecode location, parameters, and captures from the parent scope.
     Closure(GcCell<'gc, Closure<'gc>>),
     /// A reference to an [`Entity`] in the environment.
@@ -264,7 +264,7 @@ impl fmt::Debug for Value<'_> {
 impl<'gc> From<bool> for Value<'gc> { fn from(v: bool) -> Self { Value::Bool(v) } }
 impl<'gc> From<f64> for Value<'gc> { fn from(v: f64) -> Self { Value::Number(v) } }
 impl<'gc> From<Gc<'gc, String>> for Value<'gc> { fn from(v: Gc<'gc, String>) -> Self { Value::String(v) } }
-impl<'gc> From<GcCell<'gc, Vec<Value<'gc>>>> for Value<'gc> { fn from(v: GcCell<'gc, Vec<Value<'gc>>>) -> Self { Value::List(v) } }
+impl<'gc> From<GcCell<'gc, VecDeque<Value<'gc>>>> for Value<'gc> { fn from(v: GcCell<'gc, VecDeque<Value<'gc>>>) -> Self { Value::List(v) } }
 impl<'gc> From<GcCell<'gc, Closure<'gc>>> for Value<'gc> { fn from(v: GcCell<'gc, Closure<'gc>>) -> Self { Value::Closure(v) } }
 impl<'gc> From<GcCell<'gc, Entity<'gc>>> for Value<'gc> { fn from(v: GcCell<'gc, Entity<'gc>>) -> Self { Value::Entity(v) } }
 impl<'gc> Value<'gc> {
@@ -276,7 +276,7 @@ impl<'gc> Value<'gc> {
             ast::Value::Constant(ast::Constant::E) => std::f64::consts::E.into(),
             ast::Value::Constant(ast::Constant::Pi) => std::f64::consts::PI.into(),
             ast::Value::String(x) => Gc::allocate(mc, x.clone()).into(),
-            ast::Value::List(x) => GcCell::allocate(mc, x.iter().map(|x| Value::from_ast(mc, x)).collect::<Vec<_>>()).into(),
+            ast::Value::List(x) => GcCell::allocate(mc, x.iter().map(|x| Value::from_ast(mc, x)).collect::<VecDeque<_>>()).into(),
         }
     }
     /// Create a new [`Value`] from a [`SimpleValue`].
@@ -370,7 +370,7 @@ impl<'gc> Value<'gc> {
         })
     }
     /// Attempts to interpret this value as a list.
-    pub fn as_list(&self) -> Result<GcCell<'gc, Vec<Value<'gc>>>, ConversionError> {
+    pub fn as_list(&self) -> Result<GcCell<'gc, VecDeque<Value<'gc>>>, ConversionError> {
         match self {
             Value::List(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::List }),

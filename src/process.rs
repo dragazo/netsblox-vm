@@ -7,7 +7,7 @@
 //! Some utilities are provided to export these values from the runtime environment if needed.
 
 use std::prelude::v1::*;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::borrow::Cow;
 use std::rc::Rc;
 use std::iter;
@@ -326,11 +326,10 @@ impl<'gc, S: System> Process<'gc, S> {
             }
 
             Instruction::MakeList { len } => {
-                let mut vals = Vec::with_capacity(len);
+                let mut vals = VecDeque::with_capacity(len);
                 for _ in 0..len {
-                    vals.push(self.value_stack.pop().unwrap());
+                    vals.push_front(self.value_stack.pop().unwrap());
                 }
-                vals.reverse();
                 self.value_stack.push(GcCell::allocate(mc, vals).into());
                 self.pos = aft_pos;
             }
@@ -338,21 +337,35 @@ impl<'gc, S: System> Process<'gc, S> {
                 let b = self.value_stack.pop().unwrap().to_number()?;
                 let mut a = self.value_stack.pop().unwrap().to_number()?;
 
-                let mut res = vec![];
+                let mut res = VecDeque::new();
                 if a.is_finite() && b.is_finite() {
                     if a <= b {
                         while a <= b {
-                            res.push(a.into());
+                            res.push_back(a.into());
                             a += 1.0;
                         }
                     } else {
                         while a >= b {
-                            res.push(a.into());
+                            res.push_back(a.into());
                             a -= 1.0;
                         }
                     }
                 }
 
+                self.value_stack.push(GcCell::allocate(mc, res).into());
+                self.pos = aft_pos;
+            }
+
+            Instruction::ListCons => {
+                let mut res = self.value_stack.pop().unwrap().as_list()?.read().clone();
+                res.push_front(self.value_stack.pop().unwrap());
+                self.value_stack.push(GcCell::allocate(mc, res).into());
+                self.pos = aft_pos;
+            }
+            Instruction::ListCdr => {
+                let mut res = self.value_stack.pop().unwrap().as_list()?.read().clone();
+                if res.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }) }
+                res.pop_front().unwrap();
                 self.value_stack.push(GcCell::allocate(mc, res).into());
                 self.pos = aft_pos;
             }
@@ -381,7 +394,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::ListInsertLast => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let val = self.value_stack.pop().unwrap();
-                list.write(mc).push(val);
+                list.write(mc).push_back(val);
                 self.pos = aft_pos;
             }
             Instruction::ListInsertRandom => {
@@ -396,7 +409,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::ListGetLast => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                self.value_stack.push(match list.read().last() {
+                self.value_stack.push(match list.read().back() {
                     Some(x) => *x,
                     None => return Err(ErrorCause::IndexOutOfBounds { index: 0.0, list_len: 0 }),
                 });
@@ -420,7 +433,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let mut list = list.write(mc);
                 if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }); }
-                *list.last_mut().unwrap() = value;
+                *list.back_mut().unwrap() = value;
                 self.pos = aft_pos;
             }
             Instruction::ListAssignRandom => {
@@ -439,7 +452,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let mut list = list.write(mc);
                 if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }) }
-                list.pop().unwrap();
+                list.pop_back().unwrap();
                 self.pos = aft_pos;
             }
             Instruction::ListRemoveRandom => {
@@ -638,17 +651,17 @@ impl<'gc, S: System> Process<'gc, S> {
 mod ops {
     use super::*;
 
-    fn as_list<'gc>(v: &Value<'gc>) -> Option<GcCell<'gc, Vec<Value<'gc>>>> {
+    fn as_list<'gc>(v: &Value<'gc>) -> Option<GcCell<'gc, VecDeque<Value<'gc>>>> {
         match v {
             Value::List(v) => Some(*v),
             _ => None
         }
     }
-    fn as_matrix<'gc>(v: &Value<'gc>) -> Option<GcCell<'gc, Vec<Value<'gc>>>> {
+    fn as_matrix<'gc>(v: &Value<'gc>) -> Option<GcCell<'gc, VecDeque<Value<'gc>>>> {
         let vals = as_list(v)?;
-        let good = match vals.read().as_slice() {
-            [] => false,
-            [first, ..] => as_list(first).is_some(),
+        let good = match vals.read().front() {
+            None => false,
+            Some(first) => as_list(first).is_some(),
         };
         if good { Some(vals) } else { None }
     }
@@ -681,34 +694,34 @@ mod ops {
                 match (checker(a), checker(b)) {
                     (Some(a), Some(b)) => {
                         let (a, b) = (a.read(), b.read());
-                        let real_res = GcCell::allocate(mc, Vec::with_capacity(a.len().min(b.len()))).into();
+                        let real_res = GcCell::allocate(mc, VecDeque::with_capacity(a.len().min(b.len()))).into();
                         cache.insert(cache_key, real_res);
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
                         for (a, b) in iter::zip(&*a, &*b) {
-                            res.push(binary_op_impl(mc, a, b, matrix_mode, cache, scalar_op)?);
+                            res.push_back(binary_op_impl(mc, a, b, matrix_mode, cache, scalar_op)?);
                         }
                         real_res
                     }
                     (Some(a), None) => {
                         let a = a.read();
-                        let real_res = GcCell::allocate(mc, Vec::with_capacity(a.len())).into();
+                        let real_res = GcCell::allocate(mc, VecDeque::with_capacity(a.len())).into();
                         cache.insert(cache_key, real_res);
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
                         for a in &*a {
-                            res.push(binary_op_impl(mc, a, b, matrix_mode, cache, scalar_op)?);
+                            res.push_back(binary_op_impl(mc, a, b, matrix_mode, cache, scalar_op)?);
                         }
                         real_res
                     }
                     (None, Some(b)) => {
                         let b = b.read();
-                        let real_res = GcCell::allocate(mc, Vec::with_capacity(b.len())).into();
+                        let real_res = GcCell::allocate(mc, VecDeque::with_capacity(b.len())).into();
                         cache.insert(cache_key, real_res);
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
                         for b in &*b {
-                            res.push(binary_op_impl(mc, a, b, matrix_mode, cache, scalar_op)?);
+                            res.push_back(binary_op_impl(mc, a, b, matrix_mode, cache, scalar_op)?);
                         }
                         real_res
                     }
@@ -735,7 +748,7 @@ mod ops {
 
             BinaryOp::SplitCustom => binary_op_impl(mc, a, b, true, &mut cache, |mc, a, b| {
                 let (text, pattern) = (a.to_string(mc)?, b.to_string(mc)?);
-                Ok(GcCell::allocate(mc, text.split(pattern.as_str()).map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<Vec<_>>()).into())
+                Ok(GcCell::allocate(mc, text.split(pattern.as_str()).map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
         }
     }
@@ -747,12 +760,12 @@ mod ops {
             None => match as_list(x) {
                 Some(x) => {
                     let x = x.read();
-                    let real_res = GcCell::allocate(mc, Vec::with_capacity(x.len())).into();
+                    let real_res = GcCell::allocate(mc, VecDeque::with_capacity(x.len())).into();
                     cache.insert(cache_key, real_res);
                     let res = as_list(&real_res).unwrap();
                     let mut res = res.write(mc);
                     for x in &*x {
-                        res.push(unary_op_impl(mc, x, cache, scalar_op)?);
+                        res.push_back(unary_op_impl(mc, x, cache, scalar_op)?);
                     }
                     real_res
                 }
@@ -779,22 +792,22 @@ mod ops {
             UnaryOp::Strlen => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((x.to_string(mc)?.chars().count() as f64).into())),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                Ok(GcCell::allocate(mc, x.to_string(mc)?.chars().map(|x| Gc::allocate(mc, x.to_string()).into()).collect::<Vec<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string(mc)?.chars().map(|x| Gc::allocate(mc, x.to_string()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitWord => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                Ok(GcCell::allocate(mc, x.to_string(mc)?.split_whitespace().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<Vec<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string(mc)?.split_whitespace().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitTab => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                Ok(GcCell::allocate(mc, x.to_string(mc)?.split('\t').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<Vec<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string(mc)?.split('\t').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitCR => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                Ok(GcCell::allocate(mc, x.to_string(mc)?.split('\r').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<Vec<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string(mc)?.split('\r').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitLF => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                Ok(GcCell::allocate(mc, x.to_string(mc)?.lines().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<Vec<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string(mc)?.lines().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitCsv => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                let lines = x.to_string(mc)?.lines().map(|line| GcCell::allocate(mc, line.split(',').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<Vec<_>>()).into()).collect::<Vec<_>>();
+                let lines = x.to_string(mc)?.lines().map(|line| GcCell::allocate(mc, line.split(',').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into()).collect::<VecDeque<_>>();
                 Ok(match lines.len() {
                     1 => lines.into_iter().next().unwrap(),
                     _ => GcCell::allocate(mc, lines).into(),
@@ -820,7 +833,7 @@ mod ops {
             }),
             UnaryOp::CharToUnicode => unary_op_impl(mc, x, &mut cache, &|mc, x| {
                 let src = x.to_string(mc)?;
-                let values: Vec<_> = src.chars().map(|ch| (ch as u32 as f64).into()).collect();
+                let values: VecDeque<_> = src.chars().map(|ch| (ch as u32 as f64).into()).collect();
                 Ok(match values.len() {
                     1 => values.into_iter().next().unwrap(),
                     _ => GcCell::allocate(mc, values).into(),
