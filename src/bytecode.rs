@@ -1041,6 +1041,14 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.ins.push(Instruction::Broadcast { wait: *wait }.into());
                 }
             }
+            ast::Stmt::RunRpc { service, rpc, args, .. } => {
+                for (arg_name, arg) in args {
+                    self.ins.push(Instruction::MetaPush { value: arg_name }.into());
+                    self.append_expr(arg, entity);
+                }
+                self.ins.push(Instruction::CallRpc { service, rpc, args: args.len() }.into());
+                self.ins.push(Instruction::PopValue.into());
+            }
             x => unimplemented!("{:?}", x),
         }
     }
