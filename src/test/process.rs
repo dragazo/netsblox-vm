@@ -616,3 +616,31 @@ fn test_proc_cons_cdr() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "cons cdr checks");
     });
 }
+
+#[test]
+fn test_proc_list_find_contains() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/list-find-contains.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            ["1", 0, false],
+            ["2", 2, true],
+            ["3", 0, false],
+            ["5", 1, true],
+            ["world", 0, false],
+            ["hello", 3, true],
+            ["2", 2, true],
+            [["1","2","3"], 4, true],
+            [["1","2","3","4"], 0, false],
+            [["1","2"], 0, false],
+            [[], 5, true],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "cons cdr checks");
+    });
+}

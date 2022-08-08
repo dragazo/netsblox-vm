@@ -370,6 +370,20 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
 
+            Instruction::ListFind => {
+                let list = self.value_stack.pop().unwrap().as_list()?;
+                let value = self.value_stack.pop().unwrap();
+                let res = list.read().iter().enumerate().find(|(_, x)| ops::check_eq(x, &value)).map(|(i, _)| i + 1).unwrap_or(0);
+                self.value_stack.push((res as f64).into());
+                self.pos = aft_pos;
+            }
+            Instruction::ListContains => {
+                let value = self.value_stack.pop().unwrap();
+                let res = self.value_stack.pop().unwrap().as_list()?.read().iter().find(|x| ops::check_eq(x, &value)).is_some();
+                self.value_stack.push(res.into());
+                self.pos = aft_pos;
+            }
+
             Instruction::ListLen => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 self.value_stack.push((list.read().len() as f64).into());
