@@ -939,6 +939,34 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins[exit_jump_pos] = Instruction::ListPopFirstOrElse { goto: aft_loop }.into();
                 self.ins[skip_jump_pos] = Instruction::ConditionalJump { to: ret, when: true }.into();
             }
+            ast::Expr::Combine { f, list, .. } => {
+                self.append_expr(list, entity);
+                self.ins.push(Instruction::MakeListConcat { len: 1 }.into());
+                self.append_expr(f, entity);
+
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                let first_check_pos = self.ins.len();
+                self.ins.push(InternalInstruction::Illegal.into());
+
+                let top = self.ins.len();
+                self.ins.push(Instruction::DupeValue { top_index: 2 }.into());
+                let loop_done_pos = self.ins.len();
+                self.ins.push(InternalInstruction::Illegal);
+                self.ins.push(Instruction::DupeValue { top_index: 2 }.into());
+                self.ins.push(Instruction::CallClosure { args: 2 }.into());
+                self.ins.push(Instruction::Yield.into());
+                self.ins.push(Instruction::Jump { to: top }.into());
+
+                let empty_list = self.ins.len();
+                self.ins.push(Instruction::PushInt { value: 0 }.into());
+                let ret = self.ins.len();
+                self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 }.into());
+                self.ins.push(Instruction::PopValue.into());
+                self.ins.push(Instruction::PopValue.into());
+
+                self.ins[first_check_pos] = Instruction::ListPopFirstOrElse { goto: empty_list }.into();
+                self.ins[loop_done_pos] = Instruction::ListPopFirstOrElse { goto: ret }.into();
+            }
             x => unimplemented!("{:?}", x),
         }
     }

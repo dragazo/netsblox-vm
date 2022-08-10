@@ -729,3 +729,30 @@ fn test_proc_keep_find() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "keep/find results");
     });
 }
+
+#[test]
+fn test_proc_combine() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = r#"<variable name="foo"><l>0</l></variable>"#,
+        fields = "",
+        funcs = include_str!("blocks/combine.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            [1,2,3,4,5,6,7,8,9,10,[1,2],[2,3],[6,4],[24,5],[120,6],[720,7],[5040,8],[40320,9],[362880,10]],
+            3628800,
+            ["7"],
+            "7",
+            [],
+            0,
+            55,
+            "1, 2, 3, 4, 5, 6, 7, 8, 9, 10",
+            0,
+            0,
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "keep/find results");
+    });
+}
