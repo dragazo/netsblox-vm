@@ -308,11 +308,6 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.swap(len - 1 - top_index_1 as usize, len - 1 - top_index_2 as usize);
                 self.pos = aft_pos;
             }
-            Instruction::ShallowCopy => {
-                let val = self.value_stack.pop().unwrap();
-                self.value_stack.push(val.shallow_copy(mc));
-                self.pos = aft_pos;
-            }
 
             Instruction::ToBool => {
                 let val = self.value_stack.pop().unwrap();

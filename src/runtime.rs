@@ -310,17 +310,6 @@ impl<'gc> Value<'gc> {
         debug_assert_eq!(cache.len(), 0);
         res
     }
-    /// Creates a shallow copy of this value.
-    pub fn shallow_copy(&self, mc: MutationContext<'gc, '_>) -> Value<'gc> {
-        match *self {
-            Value::Bool(x) => x.into(),
-            Value::Number(x) => x.into(),
-            Value::String(x) => x.into(),
-            Value::Entity(x) => x.into(),
-            Value::Closure(x) => x.into(),
-            Value::List(x) => GcCell::allocate(mc, x.read().to_owned()).into(),
-        }
-    }
     /// Returns a value representing this object that implements [`Eq`] such that
     /// two values are equal if and only if they are references to the same object.
     /// This is primarily useful for testing for reference equality of lists.

@@ -83,8 +83,6 @@ pub(crate) enum Instruction<'a> {
     DupeValue { top_index: u8 },
     /// Swaps two values in the value stack, as determined by the specified top index values (see [`Instruction::DupeValue`].
     SwapValues { top_index_1: u8, top_index_2: u8 },
-    /// Consumes 1 value, `val`, from the value stack and pushes a shallow copy of `val` into the value stack.
-    ShallowCopy,
 
     /// Consumes 1 value from the value stack and pushes its bool coercion value onto the stack.
     ToBool,
@@ -451,87 +449,88 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
 
             11 => read_prefixed!(Instruction::DupeValue {} : top_index),
             12 => read_prefixed!(Instruction::SwapValues {} : top_index_1, top_index_2),
-            13 => read_prefixed!(Instruction::ShallowCopy),
 
-            14 => read_prefixed!(Instruction::ToBool),
-            15 => read_prefixed!(Instruction::ToNumber),
+            13 => read_prefixed!(Instruction::ToBool),
+            14 => read_prefixed!(Instruction::ToNumber),
 
+            15 => read_prefixed!(Instruction::MakeList { len: 0}),
             16 => read_prefixed!(Instruction::MakeList {} : len),
-            17 => read_prefixed!(Instruction::MakeListConcat {} : len),
-            18 => read_prefixed!(Instruction::MakeListRange),
+            17 => read_prefixed!(Instruction::MakeListConcat { len: 1 }),
+            18 => read_prefixed!(Instruction::MakeListConcat {} : len),
+            19 => read_prefixed!(Instruction::MakeListRange),
 
-            19 => read_prefixed!(Instruction::ListCons),
-            20 => read_prefixed!(Instruction::ListCdr),
+            20 => read_prefixed!(Instruction::ListCons),
+            21 => read_prefixed!(Instruction::ListCdr),
 
-            21 => read_prefixed!(Instruction::ListFind),
-            22 => read_prefixed!(Instruction::ListContains),
+            22 => read_prefixed!(Instruction::ListFind),
+            23 => read_prefixed!(Instruction::ListContains),
 
-            23 => read_prefixed!(Instruction::ListLen),
-            24 => read_prefixed!(Instruction::ListIsEmpty),
+            24 => read_prefixed!(Instruction::ListLen),
+            25 => read_prefixed!(Instruction::ListIsEmpty),
 
-            25 => read_prefixed!(Instruction::ListInsert),
-            26 => read_prefixed!(Instruction::ListInsertLast),
-            27 => read_prefixed!(Instruction::ListInsertRandom),
+            26 => read_prefixed!(Instruction::ListInsert),
+            27 => read_prefixed!(Instruction::ListInsertLast),
+            28 => read_prefixed!(Instruction::ListInsertRandom),
 
-            28 => read_prefixed!(Instruction::ListGet),
-            29 => read_prefixed!(Instruction::ListGetLast),
-            30 => read_prefixed!(Instruction::ListGetRandom),
+            29 => read_prefixed!(Instruction::ListGet),
+            30 => read_prefixed!(Instruction::ListGetLast),
+            31 => read_prefixed!(Instruction::ListGetRandom),
 
-            31 => read_prefixed!(Instruction::ListAssign),
-            32 => read_prefixed!(Instruction::ListAssignLast),
-            33 => read_prefixed!(Instruction::ListAssignRandom),
+            32 => read_prefixed!(Instruction::ListAssign),
+            33 => read_prefixed!(Instruction::ListAssignLast),
+            34 => read_prefixed!(Instruction::ListAssignRandom),
 
-            34 => read_prefixed!(Instruction::ListRemove),
-            35 => read_prefixed!(Instruction::ListRemoveLast),
-            36 => read_prefixed!(Instruction::ListRemoveRandom),
-            37 => read_prefixed!(Instruction::ListRemoveAll),
+            35 => read_prefixed!(Instruction::ListRemove),
+            36 => read_prefixed!(Instruction::ListRemoveLast),
+            37 => read_prefixed!(Instruction::ListRemoveRandom),
+            38 => read_prefixed!(Instruction::ListRemoveAll),
 
-            38 => read_prefixed!(Instruction::ListPopFirstOrElse {} : goto),
+            39 => read_prefixed!(Instruction::ListPopFirstOrElse {} : goto),
 
-            39 => read_prefixed!(Instruction::Strcat {} : args),
+            40 => read_prefixed!(Instruction::Strcat {} : args),
 
-            40 => read_prefixed!(Instruction::Eq),
+            41 => read_prefixed!(Instruction::Eq),
 
-            41 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Add }),
-            42 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Sub }),
-            43 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Mul }),
-            44 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Div }),
-            45 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Greater }),
-            46 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Less }),
-            47 => read_prefixed!(Instruction::BinaryOp {} : op),
+            42 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Add }),
+            43 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Sub }),
+            44 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Mul }),
+            45 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Div }),
+            46 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Greater }),
+            47 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Less }),
+            48 => read_prefixed!(Instruction::BinaryOp {} : op),
 
-            48 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Not }),
-            49 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Round }),
-            50 => read_prefixed!(Instruction::UnaryOp {} : op),
+            49 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Not }),
+            50 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Round }),
+            51 => read_prefixed!(Instruction::UnaryOp {} : op),
 
-            51 => read_prefixed!(Instruction::DeclareLocal {} : var),
-            52 => read_prefixed!(Instruction::Assign {} : var),
+            52 => read_prefixed!(Instruction::DeclareLocal {} : var),
+            53 => read_prefixed!(Instruction::Assign {} : var),
 
-            53 => read_prefixed!(Instruction::BinaryOpAssign { op: BinaryOp::Add, } : var),
-            54 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
+            54 => read_prefixed!(Instruction::BinaryOpAssign { op: BinaryOp::Add, } : var),
+            55 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
 
-            55 => read_prefixed!(Instruction::Jump {} : to),
-            56 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
-            57 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
+            56 => read_prefixed!(Instruction::Jump {} : to),
+            57 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
+            58 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
 
-            58 => read_prefixed!(Instruction::MetaPush {} : value),
+            59 => read_prefixed!(Instruction::MetaPush {} : value),
 
-            59 => read_prefixed!(Instruction::Call {} : pos, params),
-            60 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
-            61 => read_prefixed!(Instruction::CallClosure {} : args),
-            62 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
-            63 => read_prefixed!(Instruction::Return),
+            60 => read_prefixed!(Instruction::Call {} : pos, params),
+            61 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
+            62 => read_prefixed!(Instruction::CallClosure {} : args),
+            63 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
+            64 => read_prefixed!(Instruction::Return),
 
-            64 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            65 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            65 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            66 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
-            66 => read_prefixed!(Instruction::Print),
-            67 => read_prefixed!(Instruction::Ask),
-            68 => read_prefixed!(Instruction::PushAnswer),
+            67 => read_prefixed!(Instruction::Print),
+            68 => read_prefixed!(Instruction::Ask),
+            69 => read_prefixed!(Instruction::PushAnswer),
 
-            69 => read_prefixed!(Instruction::ResetTimer),
-            70 => read_prefixed!(Instruction::PushTimer),
-            71 => read_prefixed!(Instruction::Sleep),
+            70 => read_prefixed!(Instruction::ResetTimer),
+            71 => read_prefixed!(Instruction::PushTimer),
+            72 => read_prefixed!(Instruction::Sleep),
 
             _ => unreachable!(),
         }
@@ -575,87 +574,88 @@ impl BinaryWrite for Instruction<'_> {
 
             Instruction::DupeValue { top_index } => append_prefixed!(11: top_index),
             Instruction::SwapValues { top_index_1, top_index_2 } => append_prefixed!(12: top_index_1, top_index_2),
-            Instruction::ShallowCopy => append_prefixed!(13),
 
-            Instruction::ToBool => append_prefixed!(14),
-            Instruction::ToNumber => append_prefixed!(15),
+            Instruction::ToBool => append_prefixed!(13),
+            Instruction::ToNumber => append_prefixed!(14),
 
+            Instruction::MakeList { len: 0 } => append_prefixed!(15),
             Instruction::MakeList { len } => append_prefixed!(16: len),
-            Instruction::MakeListConcat { len } => append_prefixed!(17: len),
-            Instruction::MakeListRange => append_prefixed!(18),
+            Instruction::MakeListConcat { len: 1 } => append_prefixed!(17),
+            Instruction::MakeListConcat { len } => append_prefixed!(18: len),
+            Instruction::MakeListRange => append_prefixed!(19),
 
-            Instruction::ListCons => append_prefixed!(19),
-            Instruction::ListCdr => append_prefixed!(20),
+            Instruction::ListCons => append_prefixed!(20),
+            Instruction::ListCdr => append_prefixed!(21),
 
-            Instruction::ListFind => append_prefixed!(21),
-            Instruction::ListContains => append_prefixed!(22),
+            Instruction::ListFind => append_prefixed!(22),
+            Instruction::ListContains => append_prefixed!(23),
 
-            Instruction::ListLen => append_prefixed!(23),
-            Instruction::ListIsEmpty => append_prefixed!(24),
+            Instruction::ListLen => append_prefixed!(24),
+            Instruction::ListIsEmpty => append_prefixed!(25),
 
-            Instruction::ListInsert => append_prefixed!(25),
-            Instruction::ListInsertLast => append_prefixed!(26),
-            Instruction::ListInsertRandom => append_prefixed!(27),
+            Instruction::ListInsert => append_prefixed!(26),
+            Instruction::ListInsertLast => append_prefixed!(27),
+            Instruction::ListInsertRandom => append_prefixed!(28),
 
-            Instruction::ListGet => append_prefixed!(28),
-            Instruction::ListGetLast => append_prefixed!(29),
-            Instruction::ListGetRandom => append_prefixed!(30),
+            Instruction::ListGet => append_prefixed!(29),
+            Instruction::ListGetLast => append_prefixed!(30),
+            Instruction::ListGetRandom => append_prefixed!(31),
 
-            Instruction::ListAssign => append_prefixed!(31),
-            Instruction::ListAssignLast => append_prefixed!(32),
-            Instruction::ListAssignRandom => append_prefixed!(33),
+            Instruction::ListAssign => append_prefixed!(32),
+            Instruction::ListAssignLast => append_prefixed!(33),
+            Instruction::ListAssignRandom => append_prefixed!(34),
 
-            Instruction::ListRemove => append_prefixed!(34),
-            Instruction::ListRemoveLast => append_prefixed!(35),
-            Instruction::ListRemoveRandom => append_prefixed!(36),
-            Instruction::ListRemoveAll => append_prefixed!(37),
+            Instruction::ListRemove => append_prefixed!(35),
+            Instruction::ListRemoveLast => append_prefixed!(36),
+            Instruction::ListRemoveRandom => append_prefixed!(37),
+            Instruction::ListRemoveAll => append_prefixed!(38),
 
-            Instruction::ListPopFirstOrElse { goto } => append_prefixed!(38: move goto),
+            Instruction::ListPopFirstOrElse { goto } => append_prefixed!(39: move goto),
 
-            Instruction::Strcat { args } => append_prefixed!(39: args),
+            Instruction::Strcat { args } => append_prefixed!(40: args),
 
-            Instruction::Eq => append_prefixed!(40),
+            Instruction::Eq => append_prefixed!(41),
 
-            Instruction::BinaryOp { op: BinaryOp::Add } => append_prefixed!(41),
-            Instruction::BinaryOp { op: BinaryOp::Sub } => append_prefixed!(42),
-            Instruction::BinaryOp { op: BinaryOp::Mul } => append_prefixed!(43),
-            Instruction::BinaryOp { op: BinaryOp::Div } => append_prefixed!(44),
-            Instruction::BinaryOp { op: BinaryOp::Greater } => append_prefixed!(45),
-            Instruction::BinaryOp { op: BinaryOp::Less } => append_prefixed!(46),
-            Instruction::BinaryOp { op } => append_prefixed!(47: op),
+            Instruction::BinaryOp { op: BinaryOp::Add } => append_prefixed!(42),
+            Instruction::BinaryOp { op: BinaryOp::Sub } => append_prefixed!(43),
+            Instruction::BinaryOp { op: BinaryOp::Mul } => append_prefixed!(44),
+            Instruction::BinaryOp { op: BinaryOp::Div } => append_prefixed!(45),
+            Instruction::BinaryOp { op: BinaryOp::Greater } => append_prefixed!(46),
+            Instruction::BinaryOp { op: BinaryOp::Less } => append_prefixed!(47),
+            Instruction::BinaryOp { op } => append_prefixed!(48: op),
 
-            Instruction::UnaryOp { op: UnaryOp::Not } => append_prefixed!(48),
-            Instruction::UnaryOp { op: UnaryOp::Round } => append_prefixed!(49),
-            Instruction::UnaryOp { op } => append_prefixed!(50: op),
+            Instruction::UnaryOp { op: UnaryOp::Not } => append_prefixed!(49),
+            Instruction::UnaryOp { op: UnaryOp::Round } => append_prefixed!(50),
+            Instruction::UnaryOp { op } => append_prefixed!(51: op),
 
-            Instruction::DeclareLocal { var } => append_prefixed!(51: move str var),
-            Instruction::Assign { var } => append_prefixed!(52: move str var),
+            Instruction::DeclareLocal { var } => append_prefixed!(52: move str var),
+            Instruction::Assign { var } => append_prefixed!(53: move str var),
 
-            Instruction::BinaryOpAssign { var, op: BinaryOp::Add } => append_prefixed!(53: move str var),
-            Instruction::BinaryOpAssign { var, op } => append_prefixed!(54: move str var, op),
+            Instruction::BinaryOpAssign { var, op: BinaryOp::Add } => append_prefixed!(54: move str var),
+            Instruction::BinaryOpAssign { var, op } => append_prefixed!(55: move str var, op),
 
-            Instruction::Jump { to } => append_prefixed!(55: move to),
-            Instruction::ConditionalJump { to, when: false } => append_prefixed!(56: move to),
-            Instruction::ConditionalJump { to, when: true } => append_prefixed!(57: move to),
+            Instruction::Jump { to } => append_prefixed!(56: move to),
+            Instruction::ConditionalJump { to, when: false } => append_prefixed!(57: move to),
+            Instruction::ConditionalJump { to, when: true } => append_prefixed!(58: move to),
 
-            Instruction::MetaPush { value } => append_prefixed!(58: move str value),
+            Instruction::MetaPush { value } => append_prefixed!(59: move str value),
 
-            Instruction::Call { pos, params } => append_prefixed!(59: move pos, params),
-            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(60: move pos, params, captures),
-            Instruction::CallClosure { args } => append_prefixed!(61: args),
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(62: move str service, move str rpc, args),
-            Instruction::Return => append_prefixed!(63),
+            Instruction::Call { pos, params } => append_prefixed!(60: move pos, params),
+            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(61: move pos, params, captures),
+            Instruction::CallClosure { args } => append_prefixed!(62: args),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(63: move str service, move str rpc, args),
+            Instruction::Return => append_prefixed!(64),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(64),
-            Instruction::Broadcast { wait: true } => append_prefixed!(65),
+            Instruction::Broadcast { wait: false } => append_prefixed!(65),
+            Instruction::Broadcast { wait: true } => append_prefixed!(66),
 
-            Instruction::Print => append_prefixed!(66),
-            Instruction::Ask => append_prefixed!(67),
-            Instruction::PushAnswer => append_prefixed!(68),
+            Instruction::Print => append_prefixed!(67),
+            Instruction::Ask => append_prefixed!(68),
+            Instruction::PushAnswer => append_prefixed!(69),
 
-            Instruction::ResetTimer => append_prefixed!(69),
-            Instruction::PushTimer => append_prefixed!(70),
-            Instruction::Sleep => append_prefixed!(71),
+            Instruction::ResetTimer => append_prefixed!(70),
+            Instruction::PushTimer => append_prefixed!(71),
+            Instruction::Sleep => append_prefixed!(72),
         }
     }
 }
@@ -856,7 +856,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Map { f, list, .. } => {
                 self.append_expr(f, entity);
                 self.append_expr(list, entity);
-                self.ins.push(Instruction::ShallowCopy.into());
+                self.ins.push(Instruction::MakeListConcat { len: 1 }.into());
                 self.ins.push(Instruction::MakeList { len: 0 }.into());
 
                 let top = self.ins.len();
@@ -1047,7 +1047,7 @@ impl<'a> ByteCodeBuilder<'a> {
             }
             ast::Stmt::ForeachLoop { var, items, stmts, .. } => {
                 self.append_expr(items, entity);
-                self.ins.push(Instruction::ShallowCopy.into());
+                self.ins.push(Instruction::MakeListConcat { len: 1 }.into());
 
                 let top = self.ins.len();
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
