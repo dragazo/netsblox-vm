@@ -867,6 +867,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::CallClosure { args: 1 }.into());
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 self.ins.push(Instruction::ListInsertLast.into());
+                self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
                 let aft = self.ins.len();
 
@@ -875,6 +876,68 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 }.into());
                 self.ins.push(Instruction::PopValue.into());
                 self.ins.push(Instruction::PopValue.into());
+            }
+            ast::Expr::Keep { f, list, .. } => {
+                self.append_expr(f, entity);
+                self.append_expr(list, entity);
+                self.ins.push(Instruction::MakeListConcat { len: 1 }.into());
+                self.ins.push(Instruction::MakeList { len: 0 }.into());
+
+                let top = self.ins.len();
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                let exit_jump_pos = self.ins.len();
+                self.ins.push(InternalInstruction::Illegal);
+                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 4 }.into());
+                self.ins.push(Instruction::CallClosure { args: 1 }.into());
+                let skip_append_pos = self.ins.len();
+                self.ins.push(InternalInstruction::Illegal);
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::ListInsertLast.into());
+                let kept_jump_pos = self.ins.len();
+                self.ins.push(InternalInstruction::Illegal);
+                let pop_cont = self.ins.len();
+                self.ins.push(Instruction::PopValue.into());
+                let cont = self.ins.len();
+                self.ins.push(Instruction::Yield.into());
+                self.ins.push(Instruction::Jump { to: top }.into());
+                let aft = self.ins.len();
+
+                self.ins[exit_jump_pos] = Instruction::ListPopFirstOrElse { goto: aft }.into();
+                self.ins[skip_append_pos] = Instruction::ConditionalJump { to: pop_cont, when: false }.into();
+                self.ins[kept_jump_pos] = Instruction::Jump { to: cont }.into();
+
+                self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 }.into());
+                self.ins.push(Instruction::PopValue.into());
+                self.ins.push(Instruction::PopValue.into());
+            }
+            ast::Expr::FindFirst { f, list, .. } => {
+                self.append_expr(f, entity);
+                self.append_expr(list, entity);
+                self.ins.push(Instruction::MakeListConcat { len: 1 }.into());
+
+                let top = self.ins.len();
+                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
+                let exit_jump_pos = self.ins.len();
+                self.ins.push(InternalInstruction::Illegal);
+                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 3 }.into());
+                self.ins.push(Instruction::CallClosure { args: 1 }.into());
+                let skip_jump_pos = self.ins.len();
+                self.ins.push(InternalInstruction::Illegal);
+                self.ins.push(Instruction::PopValue.into());
+                self.ins.push(Instruction::Yield.into());
+                self.ins.push(Instruction::Jump { to: top }.into());
+
+                let aft_loop = self.ins.len();
+                self.ins.push(Instruction::PushString { value: "" }.into());
+                let ret = self.ins.len();
+                self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 }.into());
+                self.ins.push(Instruction::PopValue.into());
+                self.ins.push(Instruction::PopValue.into());
+
+                self.ins[exit_jump_pos] = Instruction::ListPopFirstOrElse { goto: aft_loop }.into();
+                self.ins[skip_jump_pos] = Instruction::ConditionalJump { to: ret, when: true }.into();
             }
             x => unimplemented!("{:?}", x),
         }

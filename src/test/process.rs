@@ -707,3 +707,25 @@ fn test_proc_map() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "map result");
     });
 }
+
+#[test]
+fn test_proc_keep_find() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = r#"<variable name="foo"><l>0</l></variable>"#,
+        fields = "",
+        funcs = include_str!("blocks/keep-find.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            [1,2,3,4,5,6,7,8,9,10,4,5,6,7,8,9,10,11,12,13],
+            [3,6,9],
+            [10,11,12,13,14,15,16,17,18,19,20,17,18,19,20,21],
+            14,
+            "",
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "keep/find results");
+    });
+}
