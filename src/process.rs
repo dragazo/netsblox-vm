@@ -333,6 +333,16 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.push(GcCell::allocate(mc, vals).into());
                 self.pos = aft_pos;
             }
+            Instruction::MakeListConcat { len } => {
+                let mut vals = VecDeque::new();
+                for _ in 0..len {
+                    for &val in self.value_stack.pop().unwrap().as_list()?.read().iter().rev() {
+                        vals.push_front(val);
+                    }
+                }
+                self.value_stack.push(GcCell::allocate(mc, vals).into());
+                self.pos = aft_pos;
+            }
             Instruction::MakeListRange => {
                 let b = self.value_stack.pop().unwrap().to_number()?;
                 let mut a = self.value_stack.pop().unwrap().to_number()?;
