@@ -644,3 +644,44 @@ fn test_proc_list_find_contains() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "cons cdr checks");
     });
 }
+
+
+#[test]
+fn test_proc_foreach_mutate() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/foreach-mutate.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            [1,2,3,4,5,6,7,8,9,10,2,3,4,5,6,7,8,9,10,11],
+            [2,4,6,8,10,12,14,16,18,20],
+            [2, 1.5, 1.3333333, 3, 2, 1.6666666, 4, 2.5, 2, 3, 2.5, 2.33333, 4, 3, 2.666666, 5, 3.5, 3, 4, 3.5, 3.333333, 5, 4, 3.666666, 6, 4.5, 4],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "map result");
+    });
+}
+
+#[test]
+fn test_proc_map() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = r#"<variable name="foo"><l>0</l></variable>"#,
+        fields = "",
+        funcs = include_str!("blocks/map.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            [1,2,3,4,5,6,7,8,9,10,2,4,6,8,10,12,14,16,18,20],
+            [1,4,9,16,25,36,49,64,81,100],
+            [1.0, 1.4142135623730951, 1.7320508075688772, 2.0, 2.23606797749979, 2.449489742783178, 2.6457513110645907, 2.8284271247461903, 3.0, 3.1622776601683795, 1.4142135623730951, 2.0, 2.449489742783178, 2.8284271247461903, 3.1622776601683795, 3.4641016151377544, 3.7416573867739413, 4.0, 4.242640687119285, 4.47213595499958],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "map result");
+    });
+}

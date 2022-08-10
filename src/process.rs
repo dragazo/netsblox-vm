@@ -477,6 +477,14 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
 
+            Instruction::ListPopFirstOrElse { goto } => match self.value_stack.pop().unwrap().as_list()?.write(mc).pop_front() {
+                Some(value) => {
+                    self.value_stack.push(value);
+                    self.pos = aft_pos;
+                }
+                None => self.pos = goto,
+            }
+
             Instruction::Strcat { args } => {
                 let mut values = Vec::with_capacity(args);
                 for _ in 0..args {
