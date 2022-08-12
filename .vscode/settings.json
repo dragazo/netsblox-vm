@@ -25,6 +25,8 @@
         "vals"
     ],
     "cSpell.words": [
+        "actix",
+        "Condvar",
         "Listcat"
     ]
 }
