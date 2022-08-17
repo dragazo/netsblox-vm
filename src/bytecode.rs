@@ -948,7 +948,7 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 let first_check_pos = self.ins.len();
-                self.ins.push(InternalInstruction::Illegal.into());
+                self.ins.push(InternalInstruction::Illegal);
 
                 let top = self.ins.len();
                 self.ins.push(Instruction::DupeValue { top_index: 2 }.into());

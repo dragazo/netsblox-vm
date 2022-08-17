@@ -384,7 +384,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::ListContains => {
                 let value = self.value_stack.pop().unwrap();
-                let res = self.value_stack.pop().unwrap().as_list()?.read().iter().find(|x| ops::check_eq(x, &value)).is_some();
+                let res = self.value_stack.pop().unwrap().as_list()?.read().iter().any(|x| ops::check_eq(x, &value));
                 self.value_stack.push(res.into());
                 self.pos = aft_pos;
             }

@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::time::Duration;
 use std::collections::VecDeque;
 use std::cell::{Cell, RefCell};
-use std::io::{self, Read, Write, stdout, stderr};
+use std::io::{self, Read, Write, stdout};
 use std::sync::{Arc, Mutex, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering as MemOrder};
 use std::{thread, mem, fmt};
@@ -26,8 +26,8 @@ use netsblox_vm::project::*;
 
 macro_rules! crash {
     ($ret:literal : $($tt:tt)*) => {{
-        write!(stderr(), $($tt)*).unwrap();
-        write!(stderr(), "\r\n").unwrap();
+        eprint!($($tt)*);
+        eprint!("\r\n");
         std::process::exit($ret);
     }}
 }
@@ -110,7 +110,7 @@ fn read_file(src: &str) -> io::Result<String> {
     Ok(s)
 }
 fn open_project<'a>(content: &str, role: Option<&'a str>) -> Result<(String, ast::Role), OpenProjectError<'a>> {
-    let parsed = match ast::ParserBuilder::default().build().unwrap().parse(&content) {
+    let parsed = match ast::ParserBuilder::default().build().unwrap().parse(content) {
         Ok(x) => x,
         Err(error) => return Err(OpenProjectError::ParseError { error }),
     };
@@ -170,7 +170,7 @@ fn run_proj_tty<T: StopFlag>(project_name: &str, server: String, mut env: EnvAre
             let update_flag = update_flag.clone();
             Rc::new(move |value, entity| {
                 if let Some(value) = value {
-                    write!(stdout(), "{entity:?} > {value:?}\r\n").unwrap();
+                    print!("{entity:?} > {value:?}\r\n");
                     update_flag.set(true);
                 }
             })

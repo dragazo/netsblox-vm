@@ -77,7 +77,7 @@ struct Script<'gc> {
 }
 impl<'gc> Script<'gc> {
     fn consume_context<S: System>(&mut self, state: &mut State<'gc, S>, system: &S) {
-        let process = self.process.map(|key| Some((key, state.processes.get_mut(key)?))).flatten();
+        let process = self.process.and_then(|key| Some((key, state.processes.get_mut(key)?)));
         if process.as_ref().map(|x| x.1.is_running()).unwrap_or(false) { return }
 
         let (context, barrier) = match self.context_queue.pop_front() {
@@ -146,7 +146,7 @@ impl<'gc, S: System> Project<'gc, S> {
                         hat: match hat {
                             ast::Hat::OnFlag { .. } => Hat::OnFlag,
                             ast::Hat::LocalMessage { msg_type, .. } => Hat::LocalMessage { msg_type: msg_type.clone() },
-                            ast::Hat::OnKey { key, .. } => Hat::OnKey { key: parse_key(&key) },
+                            ast::Hat::OnKey { key, .. } => Hat::OnKey { key: parse_key(key) },
                             x => unimplemented!("{:?}", x),
                         },
                         entity: *entity,

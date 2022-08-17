@@ -317,8 +317,8 @@ impl<'gc> Value<'gc> {
     /// This is primarily useful for testing for reference equality of lists.
     pub fn identity(&self) -> Identity<'gc> {
         match self {
-            Value::Bool(x) => Identity(&*x as *const bool as *const (), PhantomData),
-            Value::Number(x) => Identity(&*x as *const f64 as *const (), PhantomData),
+            Value::Bool(x) => Identity(x as *const bool as *const (), PhantomData),
+            Value::Number(x) => Identity(x as *const f64 as *const (), PhantomData),
             Value::String(x) => Identity(x.as_ptr() as *const String as *const (), PhantomData),
             Value::List(x) => Identity(x.as_ptr() as *const Vec<Value> as *const (), PhantomData),
             Value::Closure(x) => Identity(x.as_ptr() as *const Closure as *const (), PhantomData),
