@@ -4,6 +4,8 @@ use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::fmt;
 
+use rand::distributions::uniform::{SampleUniform, SampleRange};
+
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
@@ -637,6 +639,8 @@ pub enum KeyCode {
 /// Types of [`System`] resources, grouped into feature categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemFeature {
+    /// The ability of a process to generate random numbers.
+    Random,
     /// The ability of a process to get the current time (not necessarily wall time).
     Time,
     /// The ability of a process to request keyboard input from the user.
@@ -662,6 +666,11 @@ pub trait System: 'static {
     type RpcKey: Collect + 'static;
     /// Key type used to await the result of an "ask" block (string input from the user).
     type InputKey: Collect + 'static;
+
+    /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
+    /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],
+    /// which makes it possible to implement this function with any random provider under the [`rand`] crate standard.
+    fn rand<T, R>(&self, range: R) -> Result<T, SystemError> where T: SampleUniform, R: SampleRange<T>;
 
     /// Gets the current time in milliseconds.
     /// This is not required to represent the actual real-world time; e.g., this could simply measure uptime.
@@ -699,6 +708,8 @@ mod std_system {
     use real_std::thread;
 
     use derive_builder::Builder;
+    use rand_chacha::ChaChaRng;
+    use rand::{Rng, SeedableRng};
 
     use super::*;
     use crate::slotmap::SlotMap;
@@ -775,6 +786,7 @@ mod std_system {
         context: Arc<Context>,
         client: Arc<reqwest::Client>,
         start_time: Instant,
+        rng: Mutex<ChaChaRng>,
 
         input_results: Arc<Mutex<InputResults>>,
 
@@ -831,9 +843,13 @@ mod std_system {
                 sender
             };
 
+            let mut seed: <ChaChaRng as SeedableRng>::Seed = Default::default();
+            getrandom::getrandom(&mut seed).expect("failed to generate random seed");
+
             Self {
                 config, context, client,
                 start_time: Instant::now(),
+                rng: Mutex::new(ChaChaRng::from_seed(seed)),
                 input_results: Default::default(),
                 rpc_results, rpc_request_pipe,
             }
@@ -852,6 +868,10 @@ mod std_system {
     impl System for StdSystem {
         type RpcKey = RpcKey;
         type InputKey = InputKey;
+
+        fn rand<T, R>(&self, range: R) -> Result<T, SystemError> where T: SampleUniform, R: SampleRange<T> {
+            Ok(self.rng.lock().unwrap().gen_range(range))
+        }
 
         fn time_ms(&self) -> Result<u64, SystemError> {
             Ok(self.start_time.elapsed().as_millis() as u64)

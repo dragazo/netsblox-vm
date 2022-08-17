@@ -506,7 +506,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::BinaryOp { op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::binary_op(mc, &a, &b, op)?);
+                self.value_stack.push(ops::binary_op(mc, system, &a, &b, op)?);
                 self.pos = aft_pos;
             }
             Instruction::Eq => {
@@ -533,7 +533,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = lookup_var!(var).get();
-                context.set_or_define(mc, var, ops::binary_op(mc, &a, &b, op)?);
+                context.set_or_define(mc, var, ops::binary_op(mc, system, &a, &b, op)?);
                 self.pos = aft_pos;
             }
 
@@ -712,7 +712,7 @@ mod ops {
 
     const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 
-    fn binary_op_impl<'gc>(mc: MutationContext<'gc, '_>, a: &Value<'gc>, b: &Value<'gc>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc>, Identity<'gc>, bool), Value<'gc>>, scalar_op: fn(MutationContext<'gc, '_>, &Value<'gc>, &Value<'gc>) -> Result<Value<'gc>, ErrorCause>) -> Result<Value<'gc>, ErrorCause> {
+    fn binary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc>, b: &Value<'gc>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc>, Identity<'gc>, bool), Value<'gc>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc>, &Value<'gc>) -> Result<Value<'gc>, ErrorCause>) -> Result<Value<'gc>, ErrorCause> {
         let cache_key = (a.identity(), b.identity(), matrix_mode);
         Ok(match cache.get(&cache_key) {
             Some(x) => *x,
@@ -726,7 +726,7 @@ mod ops {
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
                         for (a, b) in iter::zip(&*a, &*b) {
-                            res.push_back(binary_op_impl(mc, a, b, matrix_mode, cache, scalar_op)?);
+                            res.push_back(binary_op_impl(mc, system, a, b, matrix_mode, cache, scalar_op)?);
                         }
                         real_res
                     }
@@ -737,7 +737,7 @@ mod ops {
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
                         for a in &*a {
-                            res.push_back(binary_op_impl(mc, a, b, matrix_mode, cache, scalar_op)?);
+                            res.push_back(binary_op_impl(mc, system, a, b, matrix_mode, cache, scalar_op)?);
                         }
                         real_res
                     }
@@ -748,35 +748,45 @@ mod ops {
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
                         for b in &*b {
-                            res.push_back(binary_op_impl(mc, a, b, matrix_mode, cache, scalar_op)?);
+                            res.push_back(binary_op_impl(mc, system, a, b, matrix_mode, cache, scalar_op)?);
                         }
                         real_res
                     }
-                    (None, None) => if matrix_mode { binary_op_impl(mc, a, b, false, cache, scalar_op)? } else { scalar_op(mc, a, b)? }
+                    (None, None) => if matrix_mode { binary_op_impl(mc, system, a, b, false, cache, scalar_op)? } else { scalar_op(mc, system, a, b)? }
                 }
             }
         })
     }
-    pub(super) fn binary_op<'gc, 'a>(mc: MutationContext<'gc, '_>, a: &'a Value<'gc>, b: &'a Value<'gc>, op: BinaryOp) -> Result<Value<'gc>, ErrorCause> {
+    pub(super) fn binary_op<'gc, 'a, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &'a Value<'gc>, b: &'a Value<'gc>, op: BinaryOp) -> Result<Value<'gc>, ErrorCause> {
         let mut cache = Default::default();
         match op {
-            BinaryOp::Add     => binary_op_impl(mc, a, b, true, &mut cache, |_, a, b| Ok((a.to_number()? + b.to_number()?).into())),
-            BinaryOp::Sub     => binary_op_impl(mc, a, b, true, &mut cache, |_, a, b| Ok((a.to_number()? - b.to_number()?).into())),
-            BinaryOp::Mul     => binary_op_impl(mc, a, b, true, &mut cache, |_, a, b| Ok((a.to_number()? * b.to_number()?).into())),
-            BinaryOp::Div     => binary_op_impl(mc, a, b, true, &mut cache, |_, a, b| Ok((a.to_number()? / b.to_number()?).into())),
-            BinaryOp::Pow     => binary_op_impl(mc, a, b, true, &mut cache, |_, a, b| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
-            BinaryOp::Log     => binary_op_impl(mc, a, b, true, &mut cache, |_, a, b| Ok((libm::log2(b.to_number()?) / libm::log2(a.to_number()?)).into())),
-            BinaryOp::Greater => binary_op_impl(mc, a, b, true, &mut cache, |_, a, b| Ok((a.to_number()? > b.to_number()?).into())),
-            BinaryOp::Less    => binary_op_impl(mc, a, b, true, &mut cache, |_, a, b| Ok((a.to_number()? < b.to_number()?).into())),
-            BinaryOp::Mod     => binary_op_impl(mc, a, b, true, &mut cache, |_, a, b| {
+            BinaryOp::Add     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? + b.to_number()?).into())),
+            BinaryOp::Sub     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? - b.to_number()?).into())),
+            BinaryOp::Mul     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? * b.to_number()?).into())),
+            BinaryOp::Div     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? / b.to_number()?).into())),
+            BinaryOp::Pow     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
+            BinaryOp::Log     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((libm::log2(b.to_number()?) / libm::log2(a.to_number()?)).into())),
+            BinaryOp::Greater => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? > b.to_number()?).into())),
+            BinaryOp::Less    => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? < b.to_number()?).into())),
+
+            BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
                 let (a, b) = (a.to_number()?, b.to_number()?);
                 Ok(if a.is_sign_positive() == b.is_sign_positive() { a % b } else { b + (a % -b) }.into())
             }),
-
-            BinaryOp::SplitCustom => binary_op_impl(mc, a, b, true, &mut cache, |mc, a, b| {
+            BinaryOp::SplitCustom => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
                 let (text, pattern) = (a.to_string(mc)?, b.to_string(mc)?);
                 Ok(GcCell::allocate(mc, text.split(pattern.as_str()).map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
+            BinaryOp::Rand => binary_op_impl(mc, system, a, b, true, &mut cache, |_, system, a, b| {
+                let (mut a, mut b) = (a.to_number()?, b.to_number()?);
+                if a > b { (a, b) = (b, a); }
+                if a == libm::round(a) && b == libm::round(b) {
+                    let (a, b) = (a as i64, b as i64);
+                    Ok((system.rand(a..=b)? as f64).into())
+                } else {
+                    Ok(system.rand(a..=b)?.into())
+                }
+            })
         }
     }
 

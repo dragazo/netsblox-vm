@@ -779,3 +779,64 @@ fn test_proc_autofill_closure_params() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "autofill closure params");
     });
 }
+
+#[test]
+fn test_proc_pick_random() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/pick-random.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |_, _, res| {
+        let results = {
+            let mut out = vec![];
+            for row in res.unwrap().0.unwrap().as_list().unwrap().read().iter() {
+                let mut vals = vec![];
+                for val in row.as_list().unwrap().read().iter() {
+                    vals.push(match val {
+                        Value::Number(x) => *x,
+                        _ => panic!("{val:?}"),
+                    });
+                }
+                out.push(vals);
+            }
+            out
+        };
+        assert_eq!(results.len(), 4);
+        for row in results.iter() {
+            if row.len() != 1024 { panic!("len error {}\n{row:?}", row.len()); }
+        }
+
+        for val in results[0].iter() {
+            if !(1.0..=10.0).contains(val) || (*val != *val as i64 as f64) {
+                panic!("res[0] error: {val}");
+            }
+        }
+        for val in results[1].iter() {
+            if !(-6.0..=5.0).contains(val) || (*val != *val as i64 as f64) {
+                panic!("res[1] error: {val}");
+            }
+        }
+
+        let mut int_count = 0;
+        for val in results[2].iter() {
+            if !(-6.0..=5.1).contains(val) {
+                panic!("res[2] error: {val}");
+            }
+            if *val == *val as i64 as f64 { int_count += 1; }
+        }
+        assert!(int_count <= 5); // hard to test rng, but this is almost certainly true
+
+        int_count = 0;
+        for val in results[3].iter() {
+            if !(0.0..=0.9999).contains(val) {
+                panic!("res[3] error: {val}");
+            }
+            if *val == *val as i64 as f64 { int_count += 1; }
+        }
+        assert!(int_count <= 5); // hard to test rng, but this is almost certainly true
+    });
+}

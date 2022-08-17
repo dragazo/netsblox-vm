@@ -23,6 +23,7 @@ pub(crate) enum BinaryOp {
     Add, Sub, Mul, Div, Mod, Pow, Log,
     Greater, Less,
     SplitCustom,
+    Rand,
 }
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
@@ -746,6 +747,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::ListAllButFirst { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListCdr),
             ast::Expr::ListFind { list, value, .. } => self.append_simple_ins(entity, &[value, list], Instruction::ListFind),
             ast::Expr::ListContains { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListContains),
+            ast::Expr::RandInclusive { a, b, .. } => self.append_simple_ins(entity, &[a, b], BinaryOp::Rand.into()),
             ast::Expr::Answer { .. } => self.ins.push(Instruction::PushAnswer.into()),
             ast::Expr::Timer { .. } => self.ins.push(Instruction::PushTimer.into()),
             ast::Expr::MakeList { values, .. } => {
