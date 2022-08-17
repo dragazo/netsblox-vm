@@ -389,10 +389,11 @@ fn test_proc_warp_yields() {
             env.proc.write(mc).initialize(locals, None, &system);
         });
 
-        run_till_term(&mut env, &system, |_, env, res| {
-            let yields = res.unwrap().1;
+        run_till_term(&mut env, &system, |mc, env, res| {
+            let (res, yields) = res.unwrap();
+            assert_values_eq(res.as_ref().unwrap(), &Value::from_simple(mc, simple_value!("x")), 1e-20, &format!("yield test (mode {mode}) res"));
             let counter = env.glob.read().globals.lookup("counter").unwrap().get();
-            assert_values_eq(&counter, &(expected_counter as f64).into(), 1e-20, &format!("yield test (mode {}) value", mode));
+            assert_values_eq(&counter, &(expected_counter as f64).into(), 1e-20, &format!("yield test (mode {mode}) value"));
             if yields != expected_yields { panic!("yield test (mode {}) yields - got {} expected {}", mode, yields, expected_yields) }
         });
     }
@@ -754,5 +755,27 @@ fn test_proc_combine() {
             0,
         ]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "keep/find results");
+    });
+}
+
+#[test]
+fn test_proc_autofill_closure_params() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = r#"<variable name="foo"><l>0</l></variable>"#,
+        fields = "",
+        funcs = include_str!("blocks/autofill-closure-params.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            [3,6,9,12,15,18,21,24,27,30],
+            [3,4,5,6,7,8,9,10,11,12],
+            [1,3,5,7,9],
+            55,
+            3628800,
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "autofill closure params");
     });
 }
