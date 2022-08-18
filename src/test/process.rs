@@ -840,3 +840,57 @@ fn test_proc_pick_random() {
         assert!(int_count <= 5); // hard to test rng, but this is almost certainly true
     });
 }
+
+#[test]
+fn test_proc_rand_list_ops() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/rand-list-ops.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |_, _, res| {
+        let (results, last) = {
+            fn extract_value(val: &Value) -> String {
+                match val {
+                    Value::Number(x) => x.to_string(),
+                    Value::String(x) if matches!(x.as_str(), "hello" | "goodbye") => x.as_str().to_owned(),
+                    x => panic!("{x:?}"),
+                }
+            }
+
+            let mut out = vec![];
+            let res = res.unwrap().0.unwrap().as_list().unwrap();
+            let res = res.read();
+            let mut res = res.iter();
+            let last = loop {
+                match res.next().unwrap() {
+                    Value::List(row) => {
+                        let mut vals = vec![];
+                        for val in row.read().iter() {
+                            vals.push(extract_value(val));
+                        }
+                        out.push(vals);
+                    }
+                    x => break extract_value(x),
+                }
+            };
+            assert!(res.next().is_none());
+            (out, last)
+        };
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].len(), 6);
+        assert_eq!(results[1].len(), 7);
+        assert_eq!(results[2].len(), 7);
+
+        assert_eq!(results[0], &["5", "6", "7", "8", "9", "10"]);
+        assert!(results[1].iter().any(|x| x == "hello"));
+        assert!(!results[1].iter().any(|x| x == "goodbye"));
+        assert!(results[2].iter().any(|x| x == "goodbye"));
+
+        assert!(results[2].contains(&last));
+    });
+}

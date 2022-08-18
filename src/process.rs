@@ -417,7 +417,13 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::ListInsertRandom => {
-                unimplemented!()
+                let list = self.value_stack.pop().unwrap().as_list()?;
+                let val = self.value_stack.pop().unwrap();
+                let mut list = list.write(mc);
+
+                let index = ops::prep_rand_index(system, list.len() + 1)?;
+                list.insert(index, val);
+                self.pos = aft_pos;
             }
 
             Instruction::ListGet => {
@@ -435,7 +441,11 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::ListGetRandom => {
-                unimplemented!()
+                let list = self.value_stack.pop().unwrap().as_list()?;
+                let list = list.read();
+                let index = ops::prep_rand_index(system, list.len())?;
+                self.value_stack.push(list[index]);
+                self.pos = aft_pos;
             }
 
             Instruction::ListAssign => {
@@ -443,6 +453,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let index = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
+
                 let index = ops::prep_list_index(&index, list.len())?;
                 list[index] = value;
                 self.pos = aft_pos;
@@ -456,7 +467,13 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::ListAssignRandom => {
-                unimplemented!()
+                let value = self.value_stack.pop().unwrap();
+                let list = self.value_stack.pop().unwrap().as_list()?;
+                let mut list = list.write(mc);
+
+                let index = ops::prep_rand_index(system, list.len())?;
+                list[index] = value;
+                self.pos = aft_pos;
             }
 
             Instruction::ListRemove => {
@@ -473,9 +490,6 @@ impl<'gc, S: System> Process<'gc, S> {
                 if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }) }
                 list.pop_back().unwrap();
                 self.pos = aft_pos;
-            }
-            Instruction::ListRemoveRandom => {
-                unimplemented!()
             }
             Instruction::ListRemoveAll => {
                 self.value_stack.pop().unwrap().as_list()?.write(mc).clear();
@@ -699,6 +713,10 @@ mod ops {
         let index = raw_index as u64;
         if index as f64 != raw_index { return Err(ErrorCause::IndexNotInteger { index: raw_index }) }
         Ok(index as usize - 1)
+    }
+    pub(super) fn prep_rand_index<S: System>(system: &S, list_len: usize) -> Result<usize, ErrorCause> {
+        if list_len == 0 { return Err(ErrorCause::IndexOutOfBounds { index: 0.0, list_len: 0 }) }
+        Ok(system.rand(0..list_len)?)
     }
 
     pub(super) fn json_to_value<'gc>(mc: MutationContext<'gc, '_>, json: Json, src: Option<Cow<str>>) -> Result<Value<'gc>, ErrorCause> {
