@@ -31,7 +31,7 @@ fn get_running_proc(xml: &str, settings: Settings, system: &StdSystem) -> EnvAre
 
         let mut proc = Process::new(Rc::new(code), main.1, glob, glob.read().entities[0], settings);
         assert!(!proc.is_running());
-        proc.initialize(Default::default(), None, system);
+        proc.initialize(Default::default(), None, None, system);
         assert!(proc.is_running());
 
         Env { glob, proc: GcCell::allocate(mc, proc) }
@@ -90,7 +90,7 @@ fn test_proc_sum_123n() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("n", Shared::Unique((n as f64).into()));
-            env.proc.write(mc).initialize(locals, None, &system);
+            env.proc.write(mc).initialize(locals, None, None, &system);
         });
         run_till_term(&mut env, &system, |mc, _, res| {
             let expect = Value::from_simple(mc, expect);
@@ -113,7 +113,7 @@ fn test_proc_recursive_factorial() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("n", Shared::Unique((n as f64).into()));
-            env.proc.write(mc).initialize(locals, None, &system);
+            env.proc.write(mc).initialize(locals, None, None, &system);
         });
         run_till_term(&mut env, &system, |mc, _, res| {
             let expect = Value::from_simple(mc, expect);
@@ -223,7 +223,7 @@ fn test_proc_sieve_of_eratosthenes() {
 
         let mut proc = env.proc.write(mc);
         assert!(proc.is_running());
-        proc.initialize(locals, None, &system);
+        proc.initialize(locals, None, None, &system);
         assert!(proc.is_running());
     });
 
@@ -386,7 +386,7 @@ fn test_proc_warp_yields() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("mode", Shared::Unique((mode as f64).into()));
-            env.proc.write(mc).initialize(locals, None, &system);
+            env.proc.write(mc).initialize(locals, None, None, &system);
         });
 
         run_till_term(&mut env, &system, |mc, env, res| {
@@ -495,7 +495,7 @@ fn test_proc_rpc_call_basic() {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("lat", Shared::Unique(lat.into()));
             locals.redefine_or_define("long", Shared::Unique(long.into()));
-            env.proc.write(mc).initialize(locals, None, &system);
+            env.proc.write(mc).initialize(locals, None, None, &system);
         });
         run_till_term(&mut env, &system, |_, _, res| match res.unwrap().0.unwrap() {
             Value::String(ret) => assert_eq!(&*ret, city),

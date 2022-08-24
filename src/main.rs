@@ -185,6 +185,7 @@ fn run_proj_tty<T: StopFlag>(project_name: &str, server: String, mut env: EnvAre
         })
         .build().unwrap();
     let system = StdSystem::new(server, Some(project_name), config);
+    print!("public id: {}\r\n", system.get_public_id());
 
     env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
 
@@ -255,6 +256,7 @@ fn run_proj_non_tty<T: StopFlag>(project_name: &str, server: String, mut env: En
         .print(Rc::new(move |value, entity| { if let Some(value) = value { println!("{entity:?} > {value:?}") } }))
         .build().unwrap();
     let system = StdSystem::new(server, Some(project_name), config);
+    println!("public id: {}", system.get_public_id());
 
     env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
 

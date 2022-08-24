@@ -26,9 +26,11 @@
     ],
     "cSpell.words": [
         "actix",
+        "chacha",
         "Condvar",
         "getrandom",
         "Listcat",
-        "Seedable"
+        "Seedable",
+        "tungstenite"
     ]
 }

@@ -1,5 +1,5 @@
 use std::prelude::v1::*;
-use std::collections::VecDeque;
+use std::collections::{VecDeque, BTreeMap};
 use std::rc::Rc;
 use std::iter;
 
@@ -62,25 +62,26 @@ pub enum ProjectStep {
 enum Hat {
     OnFlag,
     LocalMessage { msg_type: String },
+    NetworkMessage { msg_type: String, fields: Vec<String> },
     /// Fire an event when a key is pressed. [`None`] is used to denote any key press.
     OnKey { key: Option<KeyCode> },
 }
 
 #[derive(Collect)]
 #[collect(no_drop)]
-struct Script<'gc> {
+struct Script<'gc, S: System> {
     hat: Hat,
     start_pos: usize,
     entity: GcCell<'gc, Entity<'gc>>,
     process: Option<ProcessKey>,
-    context_queue: VecDeque<(SymbolTable<'gc>, Option<Barrier>)>,
+    context_queue: VecDeque<(SymbolTable<'gc>, Option<Barrier>, Option<S::InternReplyKey>)>,
 }
-impl<'gc> Script<'gc> {
-    fn consume_context<S: System>(&mut self, state: &mut State<'gc, S>, system: &S) {
+impl<'gc, S: System> Script<'gc, S> {
+    fn consume_context(&mut self, state: &mut State<'gc, S>, system: &S) {
         let process = self.process.and_then(|key| Some((key, state.processes.get_mut(key)?)));
         if process.as_ref().map(|x| x.1.is_running()).unwrap_or(false) { return }
 
-        let (context, barrier) = match self.context_queue.pop_front() {
+        let (context, barrier, reply_key) = match self.context_queue.pop_front() {
             Some(x) => x,
             None => return,
         };
@@ -90,27 +91,27 @@ impl<'gc> Script<'gc> {
                 debug_assert!(!state.process_queue.contains(&key));
                 debug_assert_eq!(self.process, Some(key));
 
-                process.initialize(context, barrier, system);
+                process.initialize(context, barrier, reply_key, system);
                 state.process_queue.push_back(key);
             }
             None => {
                 let mut process = Process::new(state.code.clone(), self.start_pos, state.global_context, self.entity, state.settings);
-                process.initialize(context, barrier, system);
+                process.initialize(context, barrier, reply_key, system);
                 let key = state.processes.insert(process);
                 state.process_queue.push_back(key);
                 self.process = Some(key);
             }
         }
     }
-    fn stop_all<S: System>(&mut self, state: &mut State<'gc, S>) {
+    fn stop_all(&mut self, state: &mut State<'gc, S>) {
         if let Some(process) = self.process {
             state.processes.remove(process);
             self.process = None;
         }
         self.context_queue.clear();
     }
-    fn schedule<S: System>(&mut self, state: &mut State<'gc, S>, system: &S, context: SymbolTable<'gc>, barrier: Option<Barrier>, max_queue: usize) {
-        self.context_queue.push_back((context, barrier));
+    fn schedule(&mut self, state: &mut State<'gc, S>, system: &S, context: SymbolTable<'gc>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, max_queue: usize) {
+        self.context_queue.push_back((context, barrier, reply_key));
         self.consume_context(state, system);
         if self.context_queue.len() > max_queue {
             self.context_queue.pop_back();
@@ -131,7 +132,7 @@ struct State<'gc, S: System> {
 #[collect(no_drop)]
 pub struct Project<'gc, S: System> {
     state: State<'gc, S>,
-    scripts: Vec<Script<'gc>>,
+    scripts: Vec<Script<'gc, S>>,
 }
 impl<'gc, S: System> Project<'gc, S> {
     pub fn from_ast(mc: MutationContext<'gc, '_>, role: &ast::Role, settings: Settings) -> Self {
@@ -146,6 +147,7 @@ impl<'gc, S: System> Project<'gc, S> {
                         hat: match hat {
                             ast::Hat::OnFlag { .. } => Hat::OnFlag,
                             ast::Hat::LocalMessage { msg_type, .. } => Hat::LocalMessage { msg_type: msg_type.clone() },
+                            ast::Hat::NetworkMessage { msg_type, fields, .. } => Hat::NetworkMessage { msg_type: msg_type.clone(), fields: fields.iter().map(|x| x.trans_name.clone()).collect() },
                             ast::Hat::OnKey { key, .. } => Hat::OnKey { key: parse_key(key) },
                             x => unimplemented!("{:?}", x),
                         },
@@ -175,7 +177,7 @@ impl<'gc, S: System> Project<'gc, S> {
                 for script in self.scripts.iter_mut() {
                     if let Hat::OnFlag = &script.hat {
                         script.stop_all(&mut self.state);
-                        script.schedule(&mut self.state, system, Default::default(), None, 0);
+                        script.schedule(&mut self.state, system, Default::default(), None, None, 0);
                     }
                 }
             }
@@ -187,7 +189,7 @@ impl<'gc, S: System> Project<'gc, S> {
                 for script in self.scripts.iter_mut() {
                     if let Hat::OnKey { key } = &script.hat {
                         if key.map(|x| x == input_key).unwrap_or(true) {
-                            script.schedule(&mut self.state, system, Default::default(), None, 0);
+                            script.schedule(&mut self.state, system, Default::default(), None, None, 0);
                         }
                     }
                 }
@@ -196,6 +198,23 @@ impl<'gc, S: System> Project<'gc, S> {
         }
     }
     pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> ProjectStep {
+        if let Some((msg_type, values, reply_key)) = system.receive_message() {
+            let values: BTreeMap<_,_> = values.into_iter().collect();
+            for script in self.scripts.iter_mut() {
+                if let Hat::NetworkMessage { msg_type: script_msg_type, fields } = &script.hat {
+                    if msg_type == *script_msg_type {
+                        let mut context = SymbolTable::default();
+                        for field in fields.iter() {
+                            context.redefine_or_define(field, values.get(field).map(|x| {
+                                Value::from_simple(mc, SimpleValue::try_from(x.clone()).unwrap_or(0f64.into()))
+                            }).unwrap_or(0f64.into()).into());
+                        }
+                        script.schedule(&mut self.state, system, context, None, reply_key.clone(), usize::MAX);
+                    }
+                }
+            }
+        }
+
         let (proc_key, proc) = loop {
             match self.state.process_queue.pop_front() {
                 None => return ProjectStep::Idle,
@@ -214,7 +233,7 @@ impl<'gc, S: System> Project<'gc, S> {
                         if let Hat::LocalMessage { msg_type: recv_type } = &script.hat {
                             if *recv_type == *msg_type {
                                 script.stop_all(&mut self.state);
-                                script.schedule(&mut self.state, system, Default::default(), barrier.clone(), 0);
+                                script.schedule(&mut self.state, system, Default::default(), barrier.clone(), None, 0);
                             }
                         }
                     }

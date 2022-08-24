@@ -224,6 +224,15 @@ pub(crate) enum Instruction<'a> {
     /// Consumes one value, `secs`, from the value stack and asynchronously waits for that amount of time to elapse.
     /// Non-positive sleep times are ignored, but still generate a yield point.
     Sleep,
+
+    /// Consumes 1 value, `target` from the value stack, which is either a single or a list of targets.
+    /// Then consumes `values` values from the value stack and meta stack, representing the fields of a message packet to send to (each) target.
+    /// The `expect_reply` flag denotes if this is a blocking operation that awaits a response from the target(s).
+    /// If `expect_reply` is true, the reply value (or empty string on timeout) is pushed onto the value stack.
+    SendMessage { msg_type: &'a str, values: usize, expect_reply: bool },
+    /// Consumes 1 value, `value`, from the value stack and sends it as the response to a received message.
+    /// It is not an error to reply to a message that was not expecting a reply, in which case the value is simply discarded.
+    SendReply,
 }
 
 pub(crate) enum RelocateInfo {
@@ -530,6 +539,10 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             70 => read_prefixed!(Instruction::PushTimer),
             71 => read_prefixed!(Instruction::Sleep),
 
+            72 => read_prefixed!(Instruction::SendMessage { expect_reply: false, } : msg_type, values),
+            73 => read_prefixed!(Instruction::SendMessage { expect_reply: true, } : msg_type, values),
+            74 => read_prefixed!(Instruction::SendReply),
+
             _ => unreachable!(),
         }
     }
@@ -653,6 +666,10 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::ResetTimer => append_prefixed!(69),
             Instruction::PushTimer => append_prefixed!(70),
             Instruction::Sleep => append_prefixed!(71),
+
+            Instruction::SendMessage { msg_type, values, expect_reply: false } => append_prefixed!(72: move str msg_type, values),
+            Instruction::SendMessage { msg_type, values, expect_reply: true } => append_prefixed!(73: move str msg_type, values),
+            Instruction::SendReply => append_prefixed!(74),
         }
     }
 }
@@ -823,6 +840,14 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
                 self.ins.push(Instruction::CallRpc { service, rpc, args: args.len() }.into());
             }
+            ast::Expr::NetworkMessageReply { target, msg_type, values, .. } => {
+                for (field, value) in values {
+                    self.append_expr(value, entity);
+                    self.ins.push(Instruction::MetaPush { value: field }.into());
+                }
+                self.append_expr(target, entity);
+                self.ins.push(Instruction::SendMessage { msg_type, values: values.len(), expect_reply: true }.into());
+            }
             ast::Expr::Closure { params, captures, stmts, .. } => {
                 let closure_hole_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
@@ -985,6 +1010,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Stmt::Ask { prompt, .. } => self.append_simple_ins(entity, &[prompt], Instruction::Ask),
             ast::Stmt::Sleep { seconds, .. } => self.append_simple_ins(entity, &[seconds], Instruction::Sleep),
             ast::Stmt::ResetTimer { .. } => self.ins.push(Instruction::ResetTimer.into()),
+            ast::Stmt::SendNetworkReply { value, .. } => self.append_simple_ins(entity, &[value], Instruction::SendReply),
             ast::Stmt::Say { content, duration, .. } | ast::Stmt::Think { content, duration, .. } => match duration {
                 Some(_) => unimplemented!(),
                 None => self.append_simple_ins(entity, &[content], Instruction::Print),
@@ -1197,6 +1223,14 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
                 self.ins.push(Instruction::CallRpc { service, rpc, args: args.len() }.into());
                 self.ins.push(Instruction::PopValue.into());
+            }
+            ast::Stmt::SendNetworkMessage { target, msg_type, values, .. } => {
+                for (field, value) in values {
+                    self.append_expr(value, entity);
+                    self.ins.push(Instruction::MetaPush { value: field }.into());
+                }
+                self.append_expr(target, entity);
+                self.ins.push(Instruction::SendMessage { msg_type, values: values.len(), expect_reply: false }.into());
             }
             x => unimplemented!("{:?}", x),
         }

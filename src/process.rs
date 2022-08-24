@@ -36,6 +36,8 @@ pub enum ErrorCause {
     UndefinedVariable { name: String },
     /// The result of a failed type conversion.
     ConversionError { got: Type, expected: Type },
+    /// The result of a failed variadic type conversion (expected type `T` or a list of type `T`).
+    VariadicConversionError { got: Type, expected: Type },
     /// Attempt to index a list with a non-integer numeric value, `index`.
     IndexNotInteger { index: f64 },
     /// An indexing operation on a list had an out of bounds index, `index`, on a list of size `list_len`. Note that Snap!/NetsBlox use 1-based indexing.
@@ -110,8 +112,9 @@ struct ReturnPoint {
 #[collect(require_static)]
 enum Defer<S: System> {
     RpcResult { key: S::RpcKey, aft_pos: usize },
-    InputResult { key: S::InputKey, aft_pos: usize },
+    MessageReply { key: S::ExternReplyKey, aft_pos: usize },
     Barrier { condition: BarrierCondition, aft_pos: usize },
+    InputResult { key: S::InputKey, aft_pos: usize },
     Sleep { until: u64, aft_pos: usize },
 }
 
@@ -130,6 +133,7 @@ pub struct Process<'gc, S: System> {
     pos: usize,
     running: bool,
     barrier: Option<Barrier>,
+    reply_key: Option<S::InternReplyKey>,
     warp_counter: usize,
     call_stack: Vec<(ReturnPoint, SymbolTable<'gc>)>, // tuples of (ret pos, locals)
     value_stack: Vec<Value<'gc>>,
@@ -147,6 +151,7 @@ impl<'gc, S: System> Process<'gc, S> {
             bytecode, start_pos, global_context, entity, settings,
             running: false,
             barrier: None,
+            reply_key: None,
             pos: 0,
             warp_counter: 0,
             call_stack: vec![],
@@ -167,10 +172,11 @@ impl<'gc, S: System> Process<'gc, S> {
     /// A [`Barrier`] may also be set, which will be destroyed upon termination, either due to completion or an error.
     /// 
     /// Any previous process state is wiped when performing this action.
-    pub fn initialize(&mut self, locals: SymbolTable<'gc>, barrier: Option<Barrier>, system: &S) {
+    pub fn initialize(&mut self, locals: SymbolTable<'gc>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, system: &S) {
         self.pos = self.start_pos;
         self.running = true;
         self.barrier = barrier;
+        self.reply_key = reply_key;
         self.warp_counter = 0;
         self.call_stack.clear();
         self.call_stack.push((ReturnPoint { pos: usize::MAX, warp_counter: 0, value_stack_size: 0 }, locals));
@@ -191,6 +197,7 @@ impl<'gc, S: System> Process<'gc, S> {
         if let Ok(ProcessStep::Terminate { .. }) | Err(_) = res {
             self.running = false;
             self.barrier = None;
+            self.reply_key = None;
         }
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
@@ -210,6 +217,18 @@ impl<'gc, S: System> Process<'gc, S> {
                             x
                         }
                     });
+                    self.pos = *aft_pos;
+                    self.defer = None;
+                }
+                AsyncPoll::Pending => return Ok(ProcessStep::Yield),
+            }
+            Some(Defer::MessageReply { key, aft_pos }) => match system.poll_reply(key) {
+                AsyncPoll::Completed(x) => {
+                    let value = match x {
+                        Some(x) => ops::json_to_value(mc, x, None)?,
+                        None => Value::from_simple(mc, simple_value!("")),
+                    };
+                    self.value_stack.push(value);
                     self.pos = *aft_pos;
                     self.defer = None;
                 }
@@ -682,6 +701,43 @@ impl<'gc, S: System> Process<'gc, S> {
                     return Ok(ProcessStep::Yield);
                 }
                 self.defer = Some(Defer::Sleep { until: system.time_ms()? + ms as u64, aft_pos });
+            }
+            Instruction::SendMessage { msg_type, values, expect_reply } => {
+                let targets = match self.value_stack.pop().unwrap() {
+                    Value::String(x) => vec![x.as_str().to_owned()],
+                    Value::List(x) => {
+                        let x = x.read();
+                        let mut res = Vec::with_capacity(x.len());
+                        for val in x.iter() {
+                            match val {
+                                Value::String(x) => res.push(x.as_str().to_owned()),
+                                x => return Err(ErrorCause::VariadicConversionError { got: x.get_type(), expected: Type::String }),
+                            }
+                        }
+                        res
+                    }
+                    x => return Err(ErrorCause::VariadicConversionError { got: x.get_type(), expected: Type::String }),
+                };
+                let values = {
+                    let mut res = Vec::with_capacity(values);
+                    for _ in 0..values {
+                        let value = self.value_stack.pop().unwrap().to_simple()?.try_into()?;
+                        let field = self.meta_stack.pop().unwrap();
+                        res.push((field, value));
+                    }
+                    res
+                };
+                match system.send_message(msg_type.into(), values, targets, expect_reply)? {
+                    Some(key) => self.defer = Some(Defer::MessageReply { key, aft_pos }),
+                    None => self.pos = aft_pos,
+                }
+            }
+            Instruction::SendReply => {
+                let value = self.value_stack.pop().unwrap().to_simple()?.try_into()?;
+                if let Some(key) = self.reply_key.take() {
+                    system.send_reply(key, value)?;
+                }
+                self.pos = aft_pos;
             }
         }
 
