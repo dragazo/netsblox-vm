@@ -408,7 +408,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
 
-            Instruction::ListLen => {
+            Instruction::ListLength => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 self.value_stack.push((list.read().len() as f64).into());
                 self.pos = aft_pos;
@@ -702,7 +702,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 }
                 self.defer = Some(Defer::Sleep { until: system.time_ms()? + ms as u64, aft_pos });
             }
-            Instruction::SendMessage { msg_type, values, expect_reply } => {
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply } => {
                 let targets = match self.value_stack.pop().unwrap() {
                     Value::String(x) => vec![x.as_str().to_owned()],
                     Value::List(x) => {
@@ -732,7 +732,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     None => self.pos = aft_pos,
                 }
             }
-            Instruction::SendReply => {
+            Instruction::SendNetworkReply => {
                 let value = self.value_stack.pop().unwrap().to_simple()?.try_into()?;
                 if let Some(key) = self.reply_key.take() {
                     system.send_reply(key, value)?;
@@ -851,7 +851,7 @@ mod ops {
                 let (text, pattern) = (a.to_string(mc)?, b.to_string(mc)?);
                 Ok(GcCell::allocate(mc, text.split(pattern.as_str()).map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
-            BinaryOp::Rand => binary_op_impl(mc, system, a, b, true, &mut cache, |_, system, a, b| {
+            BinaryOp::Random => binary_op_impl(mc, system, a, b, true, &mut cache, |_, system, a, b| {
                 let (mut a, mut b) = (a.to_number()?, b.to_number()?);
                 if a > b { (a, b) = (b, a); }
                 if a == libm::round(a) && b == libm::round(b) {

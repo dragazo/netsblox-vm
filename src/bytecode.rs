@@ -23,7 +23,7 @@ pub(crate) enum BinaryOp {
     Add, Sub, Mul, Div, Mod, Pow, Log,
     Greater, Less,
     SplitCustom,
-    Rand,
+    Random,
 }
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
@@ -117,7 +117,7 @@ pub(crate) enum Instruction<'a> {
     ListContains,
 
     /// Consumes 1 value, `list`, from the value stack and pushes the length of the list onto the value stack.
-    ListLen,
+    ListLength,
     /// Consumes 1 value, `list`, from the value stack and pushes a bool representing if the list is empty onto the value stack.
     ListIsEmpty,
 
@@ -229,10 +229,10 @@ pub(crate) enum Instruction<'a> {
     /// Then consumes `values` values from the value stack and meta stack, representing the fields of a message packet to send to (each) target.
     /// The `expect_reply` flag denotes if this is a blocking operation that awaits a response from the target(s).
     /// If `expect_reply` is true, the reply value (or empty string on timeout) is pushed onto the value stack.
-    SendMessage { msg_type: &'a str, values: usize, expect_reply: bool },
+    SendNetworkMessage { msg_type: &'a str, values: usize, expect_reply: bool },
     /// Consumes 1 value, `value`, from the value stack and sends it as the response to a received message.
     /// It is not an error to reply to a message that was not expecting a reply, in which case the value is simply discarded.
-    SendReply,
+    SendNetworkReply,
 }
 
 pub(crate) enum RelocateInfo {
@@ -473,7 +473,7 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             22 => read_prefixed!(Instruction::ListFind),
             23 => read_prefixed!(Instruction::ListContains),
 
-            24 => read_prefixed!(Instruction::ListLen),
+            24 => read_prefixed!(Instruction::ListLength),
             25 => read_prefixed!(Instruction::ListIsEmpty),
 
             26 => read_prefixed!(Instruction::ListInsert),
@@ -539,9 +539,9 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             70 => read_prefixed!(Instruction::PushTimer),
             71 => read_prefixed!(Instruction::Sleep),
 
-            72 => read_prefixed!(Instruction::SendMessage { expect_reply: false, } : msg_type, values),
-            73 => read_prefixed!(Instruction::SendMessage { expect_reply: true, } : msg_type, values),
-            74 => read_prefixed!(Instruction::SendReply),
+            72 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
+            73 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
+            74 => read_prefixed!(Instruction::SendNetworkReply),
 
             _ => unreachable!(),
         }
@@ -601,7 +601,7 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::ListFind => append_prefixed!(22),
             Instruction::ListContains => append_prefixed!(23),
 
-            Instruction::ListLen => append_prefixed!(24),
+            Instruction::ListLength => append_prefixed!(24),
             Instruction::ListIsEmpty => append_prefixed!(25),
 
             Instruction::ListInsert => append_prefixed!(26),
@@ -667,9 +667,9 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::PushTimer => append_prefixed!(70),
             Instruction::Sleep => append_prefixed!(71),
 
-            Instruction::SendMessage { msg_type, values, expect_reply: false } => append_prefixed!(72: move str msg_type, values),
-            Instruction::SendMessage { msg_type, values, expect_reply: true } => append_prefixed!(73: move str msg_type, values),
-            Instruction::SendReply => append_prefixed!(74),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(72: move str msg_type, values),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(73: move str msg_type, values),
+            Instruction::SendNetworkReply => append_prefixed!(74),
         }
     }
 }
@@ -750,17 +750,17 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::UnicodeToChar { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::UnicodeToChar.into()),
             ast::Expr::CharToUnicode { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::CharToUnicode.into()),
             ast::Expr::Eq { left, right, .. } => self.append_simple_ins(entity, &[left, right], Instruction::Eq),
-            ast::Expr::ListIndex { list, index, .. } => self.append_simple_ins(entity, &[index, list], Instruction::ListGet),
+            ast::Expr::ListGet { list, index, .. } => self.append_simple_ins(entity, &[index, list], Instruction::ListGet),
             ast::Expr::ListLastIndex { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListGetLast),
-            ast::Expr::ListRandIndex { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListGetRandom),
-            ast::Expr::Listlen { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListLen),
+            ast::Expr::ListGetRandom { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListGetRandom),
+            ast::Expr::ListLength { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListLength),
             ast::Expr::ListIsEmpty { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListIsEmpty),
-            ast::Expr::RangeInclusive { start, stop, .. } => self.append_simple_ins(entity, &[start, stop], Instruction::MakeListRange),
-            ast::Expr::ListItemInFrontOf { item, list, .. } => self.append_simple_ins(entity, &[item, list], Instruction::ListCons),
-            ast::Expr::ListAllButFirst { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListCdr),
+            ast::Expr::MakeListRange { start, stop, .. } => self.append_simple_ins(entity, &[start, stop], Instruction::MakeListRange),
+            ast::Expr::ListCons { item, list, .. } => self.append_simple_ins(entity, &[item, list], Instruction::ListCons),
+            ast::Expr::ListCdr { value, .. } => self.append_simple_ins(entity, &[value], Instruction::ListCdr),
             ast::Expr::ListFind { list, value, .. } => self.append_simple_ins(entity, &[value, list], Instruction::ListFind),
             ast::Expr::ListContains { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListContains),
-            ast::Expr::RandInclusive { a, b, .. } => self.append_simple_ins(entity, &[a, b], BinaryOp::Rand.into()),
+            ast::Expr::Random { a, b, .. } => self.append_simple_ins(entity, &[a, b], BinaryOp::Random.into()),
             ast::Expr::Answer { .. } => self.ins.push(Instruction::PushAnswer.into()),
             ast::Expr::Timer { .. } => self.ins.push(Instruction::PushTimer.into()),
             ast::Expr::MakeList { values, .. } => {
@@ -769,7 +769,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
                 self.ins.push(Instruction::MakeList { len: values.len() }.into());
             }
-            ast::Expr::Listcat { lists, .. } => {
+            ast::Expr::MakeListConcat { lists, .. } => {
                 for list in lists {
                     self.append_expr(list, entity);
                 }
@@ -846,7 +846,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.ins.push(Instruction::MetaPush { value: field }.into());
                 }
                 self.append_expr(target, entity);
-                self.ins.push(Instruction::SendMessage { msg_type, values: values.len(), expect_reply: true }.into());
+                self.ins.push(Instruction::SendNetworkMessage { msg_type, values: values.len(), expect_reply: true }.into());
             }
             ast::Expr::Closure { params, captures, stmts, .. } => {
                 let closure_hole_pos = self.ins.len();
@@ -997,25 +997,25 @@ impl<'a> ByteCodeBuilder<'a> {
         match stmt {
             ast::Stmt::Assign { var, value, .. } => self.append_simple_ins(entity, &[value], Instruction::Assign { var: &var.trans_name }),
             ast::Stmt::AddAssign { var, value, .. } => self.append_simple_ins(entity, &[value], Instruction::BinaryOpAssign { var: &var.trans_name, op: BinaryOp::Add }),
-            ast::Stmt::InsertAt { list, value, index, .. } => self.append_simple_ins(entity, &[value, index, list], Instruction::ListInsert),
-            ast::Stmt::Push { list, value, .. } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertLast),
-            ast::Stmt::InsertAtRand { list, value, .. } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertRandom),
-            ast::Stmt::RemoveAt { list, index, .. } => self.append_simple_ins(entity, &[index, list], Instruction::ListRemove),
-            ast::Stmt::Pop { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListRemoveLast),
-            ast::Stmt::RemoveAll { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListRemoveAll),
-            ast::Stmt::IndexAssign { list, index, value, .. } => self.append_simple_ins(entity, &[index, list, value], Instruction::ListAssign),
-            ast::Stmt::LastIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignLast),
-            ast::Stmt::RandIndexAssign { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignRandom),
+            ast::Stmt::ListInsert { list, value, index, .. } => self.append_simple_ins(entity, &[value, index, list], Instruction::ListInsert),
+            ast::Stmt::ListInsertLast { list, value, .. } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertLast),
+            ast::Stmt::ListInsertRandom { list, value, .. } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertRandom),
+            ast::Stmt::ListRemove { list, index, .. } => self.append_simple_ins(entity, &[index, list], Instruction::ListRemove),
+            ast::Stmt::ListRemoveLast { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListRemoveLast),
+            ast::Stmt::ListRemoveAll { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListRemoveAll),
+            ast::Stmt::ListAssign { list, index, value, .. } => self.append_simple_ins(entity, &[index, list, value], Instruction::ListAssign),
+            ast::Stmt::ListAssignLast { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignLast),
+            ast::Stmt::ListAssignRandom { list, value, .. } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignRandom),
             ast::Stmt::Return { value, .. } => self.append_simple_ins(entity, &[value], Instruction::Return),
             ast::Stmt::Ask { prompt, .. } => self.append_simple_ins(entity, &[prompt], Instruction::Ask),
             ast::Stmt::Sleep { seconds, .. } => self.append_simple_ins(entity, &[seconds], Instruction::Sleep),
             ast::Stmt::ResetTimer { .. } => self.ins.push(Instruction::ResetTimer.into()),
-            ast::Stmt::SendNetworkReply { value, .. } => self.append_simple_ins(entity, &[value], Instruction::SendReply),
+            ast::Stmt::SendNetworkReply { value, .. } => self.append_simple_ins(entity, &[value], Instruction::SendNetworkReply),
             ast::Stmt::Say { content, duration, .. } | ast::Stmt::Think { content, duration, .. } => match duration {
                 Some(_) => unimplemented!(),
                 None => self.append_simple_ins(entity, &[content], Instruction::Print),
             }
-            ast::Stmt::VarDecl { vars, .. } => {
+            ast::Stmt::DeclareLocals { vars, .. } => {
                 for var in vars {
                     self.ins.push(Instruction::DeclareLocal { var: &var.trans_name }.into());
                 }
@@ -1230,7 +1230,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.ins.push(Instruction::MetaPush { value: field }.into());
                 }
                 self.append_expr(target, entity);
-                self.ins.push(Instruction::SendMessage { msg_type, values: values.len(), expect_reply: false }.into());
+                self.ins.push(Instruction::SendNetworkMessage { msg_type, values: values.len(), expect_reply: false }.into());
             }
             x => unimplemented!("{:?}", x),
         }
