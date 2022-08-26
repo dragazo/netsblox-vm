@@ -24,7 +24,7 @@ use netsblox_vm::runtime::*;
 use netsblox_vm::process::*;
 use netsblox_vm::project::*;
 
-const STEPS_PER_IO_ITER: usize = 32;
+const STEPS_PER_IO_ITER: usize = 64;
 
 macro_rules! crash {
     ($ret:literal : $($tt:tt)*) => {{

@@ -722,7 +722,7 @@ pub trait System: 'static {
 #[cfg(any(test, feature = "std"))]
 mod std_system {
     extern crate std as real_std;
-    use real_std::time::{Instant, SystemTime, Duration, UNIX_EPOCH};
+    use real_std::time::{Instant, SystemTime, UNIX_EPOCH};
     use real_std::sync::{Arc, Mutex};
     use real_std::sync::mpsc::{Sender, Receiver, channel};
     use real_std::thread;
@@ -1119,7 +1119,7 @@ mod std_system {
             Ok(())
         }
         fn receive_message(&self) -> Option<(String, Vec<(String, Json)>, Option<Self::InternReplyKey>)> {
-            self.message_receiver.recv_timeout(Duration::from_secs(0)).ok().map(|x| (x.msg_type, x.values, x.reply_key))
+            self.message_receiver.try_recv().ok().map(|x| (x.msg_type, x.values, x.reply_key))
         }
     }
 }

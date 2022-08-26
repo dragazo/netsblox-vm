@@ -1,4 +1,7 @@
 target/
 Cargo.lock
 /*.xml
+/*.svg
+/*.data
+/*.old
 .DS_STORE
