@@ -24,6 +24,8 @@ use netsblox_vm::runtime::*;
 use netsblox_vm::process::*;
 use netsblox_vm::project::*;
 
+const STEPS_PER_IO_ITER: usize = 32;
+
 macro_rules! crash {
     ($ret:literal : $($tt:tt)*) => {{
         eprint!($($tt)*);
@@ -226,7 +228,9 @@ fn run_proj_tty<T: StopFlag>(project_name: &str, server: String, mut env: EnvAre
         env.mutate(|mc, env| {
             let mut proj = env.proj.write(mc);
             for input in input_sequence.drain(..) { proj.input(input, &system); }
-            proj.step(mc, &system)
+            for _ in 0..STEPS_PER_IO_ITER {
+                proj.step(mc, &system);
+            }
         });
 
         if update_flag.get() {
@@ -265,7 +269,9 @@ fn run_proj_non_tty<T: StopFlag>(project_name: &str, server: String, mut env: En
 
         env.mutate(|mc, env| {
             let mut proj = env.proj.write(mc);
-            proj.step(mc, &system)
+            for _ in 0..STEPS_PER_IO_ITER {
+                proj.step(mc, &system);
+            }
         });
     }
 }
