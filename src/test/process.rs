@@ -894,3 +894,30 @@ fn test_proc_rand_list_ops() {
         assert!(results[2].contains(&last));
     });
 }
+
+#[test]
+fn test_proc_variadic_sum_product() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/variadic-sum-product.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            15,
+            21,
+            [17, 16, 18],
+            [20, 28, 13],
+            0,
+            120,
+            840,
+            [150, 180, 180],
+            [240, 320, 20],
+            1,
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic sum product");
+    });
+}

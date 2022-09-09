@@ -763,17 +763,23 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Random { a, b, .. } => self.append_simple_ins(entity, &[a, b], BinaryOp::Random.into()),
             ast::Expr::Answer { .. } => self.ins.push(Instruction::PushAnswer.into()),
             ast::Expr::Timer { .. } => self.ins.push(Instruction::PushTimer.into()),
-            ast::Expr::MakeList { values, .. } => {
-                for value in values {
-                    self.append_expr(value, entity);
+            ast::Expr::MakeList { values, .. } => match values {
+                ast::VariadicInput::Fixed(values) => {
+                    for value in values {
+                        self.append_expr(value, entity);
+                    }
+                    self.ins.push(Instruction::MakeList { len: values.len() }.into());
                 }
-                self.ins.push(Instruction::MakeList { len: values.len() }.into());
+                ast::VariadicInput::VarArgs(values) => self.append_simple_ins(entity, &[values], Instruction::MakeListConcat { len: 1 }),
             }
-            ast::Expr::MakeListConcat { lists, .. } => {
-                for list in lists {
-                    self.append_expr(list, entity);
+            ast::Expr::MakeListConcat { lists, .. } => match lists {
+                ast::VariadicInput::Fixed(lists) => {
+                    for list in lists {
+                        self.append_expr(list, entity);
+                    }
+                    self.ins.push(Instruction::MakeListConcat { len: lists.len() }.into());
                 }
-                self.ins.push(Instruction::MakeListConcat { len: lists.len() }.into());
+                ast::VariadicInput::VarArgs(_) => unimplemented!(),
             }
             ast::Expr::Conditional { condition, then, otherwise, .. } => {
                 self.append_expr(condition, entity);
