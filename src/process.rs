@@ -542,6 +542,30 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.push(ops::binary_op(mc, system, &a, &b, op)?);
                 self.pos = aft_pos;
             }
+            Instruction::VariadicOp { op, len } => {
+                let (mut value, bin_op) = match op {
+                    VariadicOp::Add => (Value::Number(0.0), BinaryOp::Add),
+                    VariadicOp::Mul => (Value::Number(1.0), BinaryOp::Mul),
+                    VariadicOp::Min => (Value::Number(std::f64::INFINITY), BinaryOp::Min),
+                    VariadicOp::Max => (Value::Number(std::f64::NEG_INFINITY), BinaryOp::Max),
+                };
+                match len {
+                    VariadicLen::Fixed(len) => {
+                        let stack_size = self.value_stack.len();
+                        for item in self.value_stack.drain(stack_size - len..) {
+                            value = ops::binary_op(mc, system, &value, &item, bin_op)?;
+                        }
+                    }
+                    VariadicLen::Dynamic => {
+                        let src = self.value_stack.pop().unwrap().as_list()?;
+                        for item in src.read().iter() {
+                            value = ops::binary_op(mc, system, &value, &item, bin_op)?;
+                        }
+                    }
+                }
+                self.value_stack.push(value);
+                self.pos = aft_pos;
+            }
             Instruction::Eq => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
@@ -834,14 +858,18 @@ mod ops {
     pub(super) fn binary_op<'gc, 'a, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &'a Value<'gc>, b: &'a Value<'gc>, op: BinaryOp) -> Result<Value<'gc>, ErrorCause> {
         let mut cache = Default::default();
         match op {
-            BinaryOp::Add     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? + b.to_number()?).into())),
-            BinaryOp::Sub     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? - b.to_number()?).into())),
-            BinaryOp::Mul     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? * b.to_number()?).into())),
-            BinaryOp::Div     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? / b.to_number()?).into())),
-            BinaryOp::Pow     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
-            BinaryOp::Log     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((libm::log2(b.to_number()?) / libm::log2(a.to_number()?)).into())),
-            BinaryOp::Greater => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? > b.to_number()?).into())),
-            BinaryOp::Less    => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? < b.to_number()?).into())),
+            BinaryOp::Add       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? + b.to_number()?).into())),
+            BinaryOp::Sub       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? - b.to_number()?).into())),
+            BinaryOp::Mul       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? * b.to_number()?).into())),
+            BinaryOp::Div       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? / b.to_number()?).into())),
+            BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
+            BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((libm::log2(b.to_number()?) / libm::log2(a.to_number()?)).into())),
+            BinaryOp::Greater   => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? > b.to_number()?).into())),
+            BinaryOp::GreaterEq => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? >= b.to_number()?).into())),
+            BinaryOp::Less      => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? < b.to_number()?).into())),
+            BinaryOp::LessEq    => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? <= b.to_number()?).into())),
+            BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()?.min(b.to_number()?)).into())),
+            BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()?.max(b.to_number()?)).into())),
 
             BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
                 let (a, b) = (a.to_number()?, b.to_number()?);
