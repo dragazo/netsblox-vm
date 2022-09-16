@@ -962,3 +962,24 @@ fn test_proc_atan2_new_cmp() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "atan2 and new cmp");
     });
 }
+
+#[test]
+fn test_proc_flatten() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/flatten.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            ["3", "6", "7", "10", "12", "16", "20"],
+            ["6", "1", "3", "6", "1", "3", "6", "1", "3"],
+            ["hello world"],
+            [""],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "flatten");
+    });
+}

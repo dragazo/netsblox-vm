@@ -50,6 +50,10 @@ pub enum ErrorCause {
     SystemError { error: SystemError },
     /// Attempt to pass a non-simple value to external code, such as a system call or RPC call.
     SimplifyError { error: SimplifyError },
+    /// An acyclic operation received a cyclic input value.
+    /// Note that this is similar (but different) to [`ErrorCause::SimplifyError`] with sub-error [`SimplifyError::HadCycle`]
+    /// because [`ErrorCause::CyclicValue`] was not generated due to trying to create a [`SimpleValue`].
+    CyclicValue,
     /// A failed attempt to convert a value to JSON for use in external code such as an RPC call.
     /// Related to [`ErrorCause::SimplifyError`], which is typically an intermediate conversion step.
     ToJsonError { error: ToJsonError },
@@ -416,6 +420,11 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::ListIsEmpty => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 self.value_stack.push(list.read().is_empty().into());
+                self.pos = aft_pos;
+            }
+            Instruction::ListFlatten => {
+                let list = self.value_stack.pop().unwrap();
+                self.value_stack.push(GcCell::allocate(mc, ops::flatten(&list)?).into());
                 self.pos = aft_pos;
             }
 
@@ -812,6 +821,28 @@ mod ops {
             Err(FromJsonError::HadNull) => Err(ErrorCause::JsonHadNull { value: src.into_owned() }),
             Err(FromJsonError::HadBadNumber) => Err(ErrorCause::JsonHadBadNumber { value: src.into_owned() }),
         }
+    }
+
+    pub(super) fn flatten<'gc>(value: &Value<'gc>) -> Result<VecDeque<Value<'gc>>, ErrorCause> {
+        fn flatten_impl<'gc>(value: &Value<'gc>, dest: &mut VecDeque<Value<'gc>>, cache: &mut BTreeSet<Identity<'gc>>) -> Result<(), ErrorCause> {
+            match value {
+                Value::List(values) => {
+                    let key = value.identity();
+                    if !cache.insert(key) { return Err(ErrorCause::CyclicValue) }
+                    for value in values.read().iter() {
+                        flatten_impl(value, dest, cache)?;
+                    }
+                    cache.remove(&key);
+                }
+                _ => dest.push_back(*value),
+            }
+            Ok(())
+        }
+        let mut res = Default::default();
+        let mut cache = Default::default();
+        flatten_impl(value, &mut res, &mut cache)?;
+        debug_assert_eq!(cache.len(), 0);
+        Ok(res)
     }
 
     const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
