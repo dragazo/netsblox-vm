@@ -206,7 +206,7 @@ impl<'gc, S: System> Project<'gc, S> {
                         let mut context = SymbolTable::default();
                         for field in fields.iter() {
                             context.redefine_or_define(field, values.get(field).map(|x| {
-                                Value::from_simple(mc, SimpleValue::try_from(x.clone()).unwrap_or(0f64.into()))
+                                Value::from_simple(mc, SimpleValue::from_json(x.clone()).unwrap_or(0f64.into()))
                             }).unwrap_or(0f64.into()).into());
                         }
                         script.schedule(&mut self.state, system, context, None, reply_key.clone(), usize::MAX);

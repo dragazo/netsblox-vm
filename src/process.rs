@@ -572,6 +572,12 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.push(ops::check_eq(&a, &b).into());
                 self.pos = aft_pos;
             }
+            Instruction::Neq => {
+                let b = self.value_stack.pop().unwrap();
+                let a = self.value_stack.pop().unwrap();
+                self.value_stack.push((!ops::check_eq(&a, &b)).into());
+                self.pos = aft_pos;
+            }
             Instruction::UnaryOp { op } => {
                 let x = self.value_stack.pop().unwrap();
                 self.value_stack.push(ops::unary_op(mc, &x, op)?);
@@ -654,7 +660,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let mut args_vec = Vec::with_capacity(args);
                 for _ in 0..args {
                     let arg_name = self.meta_stack.pop().unwrap();
-                    let value = self.value_stack.pop().unwrap().to_simple()?.try_into()?;
+                    let value = self.value_stack.pop().unwrap().to_simple()?.into_json()?;
                     args_vec.push((arg_name, value));
                 }
                 args_vec.reverse();
@@ -745,7 +751,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let values = {
                     let mut res = Vec::with_capacity(values);
                     for _ in 0..values {
-                        let value = self.value_stack.pop().unwrap().to_simple()?.try_into()?;
+                        let value = self.value_stack.pop().unwrap().to_simple()?.into_json()?;
                         let field = self.meta_stack.pop().unwrap();
                         res.push((field, value));
                     }
@@ -757,7 +763,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 }
             }
             Instruction::SendNetworkReply => {
-                let value = self.value_stack.pop().unwrap().to_simple()?.try_into()?;
+                let value = self.value_stack.pop().unwrap().to_simple()?.into_json()?;
                 if let Some(key) = self.reply_key.take() {
                     system.send_reply(key, value)?;
                 }
@@ -801,7 +807,7 @@ mod ops {
 
     pub(super) fn json_to_value<'gc>(mc: MutationContext<'gc, '_>, json: Json, src: Option<Cow<str>>) -> Result<Value<'gc>, ErrorCause> {
         let src = src.unwrap_or_else(|| Cow::Owned(json.to_string())); // we need this in case parsing fails to give a good error message
-        match SimpleValue::try_from(json) {
+        match SimpleValue::from_json(json) {
             Ok(x) => Ok(Value::from_simple(mc, x)),
             Err(FromJsonError::HadNull) => Err(ErrorCause::JsonHadNull { value: src.into_owned() }),
             Err(FromJsonError::HadBadNumber) => Err(ErrorCause::JsonHadBadNumber { value: src.into_owned() }),
@@ -809,6 +815,7 @@ mod ops {
     }
 
     const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
+    const RAD_TO_DEG: f64 = 180.0 / std::f64::consts::PI;
 
     fn binary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc>, b: &Value<'gc>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc>, Identity<'gc>, bool), Value<'gc>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc>, &Value<'gc>) -> Result<Value<'gc>, ErrorCause>) -> Result<Value<'gc>, ErrorCause> {
         let cache_key = (a.identity(), b.identity(), matrix_mode);
@@ -864,6 +871,7 @@ mod ops {
             BinaryOp::Div       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? / b.to_number()?).into())),
             BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
             BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((libm::log2(b.to_number()?) / libm::log2(a.to_number()?)).into())),
+            BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((libm::atan2(a.to_number()?, b.to_number()?) * RAD_TO_DEG).into())),
             BinaryOp::Greater   => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? > b.to_number()?).into())),
             BinaryOp::GreaterEq => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? >= b.to_number()?).into())),
             BinaryOp::Less      => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? < b.to_number()?).into())),
@@ -925,9 +933,9 @@ mod ops {
             UnaryOp::Sin    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::sin(x.to_number()? * DEG_TO_RAD).into())),
             UnaryOp::Cos    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::cos(x.to_number()? * DEG_TO_RAD).into())),
             UnaryOp::Tan    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::tan(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Asin   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::asin(x.to_number()?) / DEG_TO_RAD).into())),
-            UnaryOp::Acos   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::acos(x.to_number()?) / DEG_TO_RAD).into())),
-            UnaryOp::Atan   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::atan(x.to_number()?) / DEG_TO_RAD).into())),
+            UnaryOp::Asin   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::asin(x.to_number()?) * RAD_TO_DEG).into())),
+            UnaryOp::Acos   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::acos(x.to_number()?) * RAD_TO_DEG).into())),
+            UnaryOp::Atan   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::atan(x.to_number()?) * RAD_TO_DEG).into())),
             UnaryOp::Strlen => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((x.to_string(mc)?.chars().count() as f64).into())),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, x, &mut cache, &|mc, x| {

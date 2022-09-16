@@ -39,47 +39,42 @@ impl SimpleValue {
     pub fn into_string(self) -> Option<String> { match self { SimpleValue::String(x) => Some(x), _ => None } }
     /// Retrieves the value of the [`SimpleValue::List`] variant, or [`None`] if that is not the current variant.
     pub fn into_list(self) -> Option<Vec<SimpleValue>> { match self { SimpleValue::List(x) => Some(x), _ => None } }
+
+    /// Create a new [`SimpleValue`] from a [`Json`] value.
+    /// 
+    /// NetsBlox does not allow a concept of null, so [`Json`] values containing [`Json::Null`] will result in [`FromJsonError::HadNull`].
+    /// Additionally, `serde_json`'s interface states that [`Json::Number`] values might not be able to be encoded as [`f64`], in which case [`FromJsonError::HadBadNumber`] is returned;
+    /// however, based on their source code, this should only be possible with special feature flags passed in to allow arbitrary precision floating point.
+    pub fn from_json(value: Json) -> Result<Self, FromJsonError> {
+        Ok(match value {
+            Json::Null => return Err(FromJsonError::HadNull),
+            Json::Bool(x) => x.into(),
+            Json::Number(x) => x.as_f64().ok_or(FromJsonError::HadBadNumber)?.into(),
+            Json::String(x) => x.into(),
+            Json::Array(x) => x.into_iter().map(SimpleValue::from_json).collect::<Result<Vec<_>,_>>()?.into(),
+            Json::Object(x) => x.into_iter().map(|(k, v)| Ok(vec![ k.into(), SimpleValue::from_json(v)? ].into())).collect::<Result<Vec<_>,_>>()?.into(),
+        })
+    }
+    /// Convert a [`SimpleValue`] into [`Json`].
+    /// 
+    /// [`Json`] does not allow numbers to be infinite or nan, which is the only failure case for this conversion.
+    pub fn into_json(self) -> Result<Json, ToJsonError> {
+        Ok(match self {
+            SimpleValue::Bool(x) => Json::Bool(x),
+            SimpleValue::Number(x) => match serde_json::Number::from_f64(x) {
+                Some(x) => Json::Number(x),
+                None => return Err(ToJsonError::HadBadNumber(x)),
+            }
+            SimpleValue::String(x) => Json::String(x),
+            SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_json).collect::<Result<_,_>>()?),
+        })
+    }
 }
 impl From<bool> for SimpleValue { fn from(v: bool) -> Self { Self::Bool(v) } }
 impl From<f64> for SimpleValue { fn from(v: f64) -> Self { Self::Number(v) } }
 impl From<i64> for SimpleValue { fn from(v: i64) -> Self { Self::Number(v as f64) } }
 impl From<String> for SimpleValue { fn from(v: String) -> Self { Self::String(v) } }
 impl From<Vec<SimpleValue>> for SimpleValue { fn from(v: Vec<SimpleValue>) -> Self { Self::List(v) } }
-impl TryFrom<Json> for SimpleValue {
-    type Error = FromJsonError;
-    /// Create a new [`SimpleValue`] from a [`Json`] value.
-    /// 
-    /// NetsBlox does not allow a concept of null, so [`Json`] values containing [`Json::Null`] will result in [`FromJsonError::HadNull`].
-    /// Additionally, `serde_json`'s interface states that [`Json::Number`] values might not be able to be encoded as [`f64`], in which case [`FromJsonError::HadBadNumber`] is returned;
-    /// however, based on their source code, this should only be possible with special feature flags passed in to allow arbitrary precision floating point.
-    fn try_from(value: Json) -> Result<Self, Self::Error> {
-        Ok(match value {
-            Json::Null => return Err(Self::Error::HadNull),
-            Json::Bool(x) => x.into(),
-            Json::Number(x) => x.as_f64().ok_or(Self::Error::HadBadNumber)?.into(),
-            Json::String(x) => x.into(),
-            Json::Array(x) => x.into_iter().map(SimpleValue::try_from).collect::<Result<Vec<_>,_>>()?.into(),
-            Json::Object(x) => x.into_iter().map(|(k, v)| Ok(vec![ k.into(), SimpleValue::try_from(v)? ].into())).collect::<Result<Vec<_>,_>>()?.into(),
-        })
-    }
-}
-impl TryInto<Json> for SimpleValue {
-    type Error = ToJsonError;
-    /// Convert a [`SimpleValue`] into [`Json`].
-    /// 
-    /// [`Json`] does not allow numbers to be infinite or nan, which is the only failure case for this conversion.
-    fn try_into(self) -> Result<Json, Self::Error> {
-        Ok(match self {
-            SimpleValue::Bool(x) => Json::Bool(x),
-            SimpleValue::Number(x) => match serde_json::Number::from_f64(x) {
-                Some(x) => Json::Number(x),
-                None => return Err(Self::Error::HadBadNumber(x)),
-            }
-            SimpleValue::String(x) => Json::String(x),
-            SimpleValue::List(x) => Json::Array(x.into_iter().map(TryInto::try_into).collect::<Result<_,_>>()?),
-        })
-    }
-}
 
 /// Creates a new [`SimpleValue`] using Python-like syntax.
 /// 

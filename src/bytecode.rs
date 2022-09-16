@@ -20,7 +20,7 @@ const SHRINK_CYCLES: usize = 3;
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
 pub(crate) enum BinaryOp {
-    Add, Sub, Mul, Div, Mod, Pow, Log,
+    Add, Sub, Mul, Div, Mod, Pow, Log, Atan2,
     Greater, GreaterEq, Less, LessEq,
     Min, Max,
     SplitCustom,
@@ -190,6 +190,8 @@ pub(crate) enum Instruction<'a> {
     /// where `==` is a deep comparison allowing type conversions.
     /// This is similar to [`Instruction::BinaryOp`] except that it is not vectorized and always returns a single (scalar) boolean value.
     Eq,
+    /// Equivalent to [`Instruction::Eq`] followed by [`UnaryOp::Not`].
+    Neq,
     /// Consumes 1 value, `x`, from the value stack, and pushes the value `f(x)` onto the value stack.
     UnaryOp { op: UnaryOp },
 
@@ -533,55 +535,56 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             39 => read_prefixed!(Instruction::Strcat {} : args),
 
             40 => read_prefixed!(Instruction::Eq),
+            41 => read_prefixed!(Instruction::Neq),
 
-            41 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Add }),
-            42 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Sub }),
-            43 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Mul }),
-            44 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Div }),
-            45 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Greater }),
-            46 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Less }),
-            47 => read_prefixed!(Instruction::BinaryOp {} : op),
+            42 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Add }),
+            43 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Sub }),
+            44 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Mul }),
+            45 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Div }),
+            46 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Greater }),
+            47 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Less }),
+            48 => read_prefixed!(Instruction::BinaryOp {} : op),
 
-            48 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::Add, } : len),
-            49 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::Mul, } : len),
-            50 => read_prefixed!(Instruction::VariadicOp {} : op, len),
+            49 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::Add, } : len),
+            50 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::Mul, } : len),
+            51 => read_prefixed!(Instruction::VariadicOp {} : op, len),
 
-            51 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Not }),
-            52 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Round }),
-            53 => read_prefixed!(Instruction::UnaryOp {} : op),
+            52 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Not }),
+            53 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Round }),
+            54 => read_prefixed!(Instruction::UnaryOp {} : op),
 
-            54 => read_prefixed!(Instruction::DeclareLocal {} : var),
-            55 => read_prefixed!(Instruction::Assign {} : var),
+            55 => read_prefixed!(Instruction::DeclareLocal {} : var),
+            56 => read_prefixed!(Instruction::Assign {} : var),
 
-            56 => read_prefixed!(Instruction::BinaryOpAssign { op: BinaryOp::Add, } : var),
-            57 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
+            57 => read_prefixed!(Instruction::BinaryOpAssign { op: BinaryOp::Add, } : var),
+            58 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
 
-            58 => read_prefixed!(Instruction::Jump {} : to),
-            59 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
-            60 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
+            59 => read_prefixed!(Instruction::Jump {} : to),
+            60 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
+            61 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
 
-            61 => read_prefixed!(Instruction::MetaPush {} : value),
+            62 => read_prefixed!(Instruction::MetaPush {} : value),
 
-            62 => read_prefixed!(Instruction::Call {} : pos, params),
-            63 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
-            64 => read_prefixed!(Instruction::CallClosure {} : args),
-            65 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
-            66 => read_prefixed!(Instruction::Return),
+            63 => read_prefixed!(Instruction::Call {} : pos, params),
+            64 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
+            65 => read_prefixed!(Instruction::CallClosure {} : args),
+            66 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
+            67 => read_prefixed!(Instruction::Return),
 
-            67 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            68 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            68 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            69 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
-            69 => read_prefixed!(Instruction::Print),
-            70 => read_prefixed!(Instruction::Ask),
-            71 => read_prefixed!(Instruction::PushAnswer),
+            70 => read_prefixed!(Instruction::Print),
+            71 => read_prefixed!(Instruction::Ask),
+            72 => read_prefixed!(Instruction::PushAnswer),
 
-            72 => read_prefixed!(Instruction::ResetTimer),
-            73 => read_prefixed!(Instruction::PushTimer),
-            74 => read_prefixed!(Instruction::Sleep),
+            73 => read_prefixed!(Instruction::ResetTimer),
+            74 => read_prefixed!(Instruction::PushTimer),
+            75 => read_prefixed!(Instruction::Sleep),
 
-            75 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
-            76 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
-            77 => read_prefixed!(Instruction::SendNetworkReply),
+            76 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
+            77 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
+            78 => read_prefixed!(Instruction::SendNetworkReply),
 
             _ => unreachable!(),
         }
@@ -665,55 +668,56 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::Strcat { args } => append_prefixed!(39: args),
 
             Instruction::Eq => append_prefixed!(40),
+            Instruction::Neq => append_prefixed!(41),
 
-            Instruction::BinaryOp { op: BinaryOp::Add } => append_prefixed!(41),
-            Instruction::BinaryOp { op: BinaryOp::Sub } => append_prefixed!(42),
-            Instruction::BinaryOp { op: BinaryOp::Mul } => append_prefixed!(43),
-            Instruction::BinaryOp { op: BinaryOp::Div } => append_prefixed!(44),
-            Instruction::BinaryOp { op: BinaryOp::Greater } => append_prefixed!(45),
-            Instruction::BinaryOp { op: BinaryOp::Less } => append_prefixed!(46),
-            Instruction::BinaryOp { op } => append_prefixed!(47: op),
+            Instruction::BinaryOp { op: BinaryOp::Add } => append_prefixed!(42),
+            Instruction::BinaryOp { op: BinaryOp::Sub } => append_prefixed!(43),
+            Instruction::BinaryOp { op: BinaryOp::Mul } => append_prefixed!(44),
+            Instruction::BinaryOp { op: BinaryOp::Div } => append_prefixed!(45),
+            Instruction::BinaryOp { op: BinaryOp::Greater } => append_prefixed!(46),
+            Instruction::BinaryOp { op: BinaryOp::Less } => append_prefixed!(47),
+            Instruction::BinaryOp { op } => append_prefixed!(48: op),
 
-            Instruction::VariadicOp { op: VariadicOp::Add, len } => append_prefixed!(48: len),
-            Instruction::VariadicOp { op: VariadicOp::Mul, len } => append_prefixed!(49: len),
-            Instruction::VariadicOp { op, len } => append_prefixed!(50: op, len),
+            Instruction::VariadicOp { op: VariadicOp::Add, len } => append_prefixed!(49: len),
+            Instruction::VariadicOp { op: VariadicOp::Mul, len } => append_prefixed!(50: len),
+            Instruction::VariadicOp { op, len } => append_prefixed!(51: op, len),
 
-            Instruction::UnaryOp { op: UnaryOp::Not } => append_prefixed!(51),
-            Instruction::UnaryOp { op: UnaryOp::Round } => append_prefixed!(52),
-            Instruction::UnaryOp { op } => append_prefixed!(53: op),
+            Instruction::UnaryOp { op: UnaryOp::Not } => append_prefixed!(52),
+            Instruction::UnaryOp { op: UnaryOp::Round } => append_prefixed!(53),
+            Instruction::UnaryOp { op } => append_prefixed!(54: op),
 
-            Instruction::DeclareLocal { var } => append_prefixed!(54: move str var),
-            Instruction::Assign { var } => append_prefixed!(55: move str var),
+            Instruction::DeclareLocal { var } => append_prefixed!(55: move str var),
+            Instruction::Assign { var } => append_prefixed!(56: move str var),
 
-            Instruction::BinaryOpAssign { var, op: BinaryOp::Add } => append_prefixed!(56: move str var),
-            Instruction::BinaryOpAssign { var, op } => append_prefixed!(57: move str var, op),
+            Instruction::BinaryOpAssign { var, op: BinaryOp::Add } => append_prefixed!(57: move str var),
+            Instruction::BinaryOpAssign { var, op } => append_prefixed!(58: move str var, op),
 
-            Instruction::Jump { to } => append_prefixed!(58: move to),
-            Instruction::ConditionalJump { to, when: false } => append_prefixed!(59: move to),
-            Instruction::ConditionalJump { to, when: true } => append_prefixed!(60: move to),
+            Instruction::Jump { to } => append_prefixed!(59: move to),
+            Instruction::ConditionalJump { to, when: false } => append_prefixed!(60: move to),
+            Instruction::ConditionalJump { to, when: true } => append_prefixed!(61: move to),
 
-            Instruction::MetaPush { value } => append_prefixed!(61: move str value),
+            Instruction::MetaPush { value } => append_prefixed!(62: move str value),
 
-            Instruction::Call { pos, params } => append_prefixed!(62: move pos, params),
-            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(63: move pos, params, captures),
-            Instruction::CallClosure { args } => append_prefixed!(64: args),
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(65: move str service, move str rpc, args),
-            Instruction::Return => append_prefixed!(66),
+            Instruction::Call { pos, params } => append_prefixed!(63: move pos, params),
+            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(64: move pos, params, captures),
+            Instruction::CallClosure { args } => append_prefixed!(65: args),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(66: move str service, move str rpc, args),
+            Instruction::Return => append_prefixed!(67),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(67),
-            Instruction::Broadcast { wait: true } => append_prefixed!(68),
+            Instruction::Broadcast { wait: false } => append_prefixed!(68),
+            Instruction::Broadcast { wait: true } => append_prefixed!(69),
 
-            Instruction::Print => append_prefixed!(69),
-            Instruction::Ask => append_prefixed!(70),
-            Instruction::PushAnswer => append_prefixed!(71),
+            Instruction::Print => append_prefixed!(70),
+            Instruction::Ask => append_prefixed!(71),
+            Instruction::PushAnswer => append_prefixed!(72),
 
-            Instruction::ResetTimer => append_prefixed!(72),
-            Instruction::PushTimer => append_prefixed!(73),
-            Instruction::Sleep => append_prefixed!(74),
+            Instruction::ResetTimer => append_prefixed!(73),
+            Instruction::PushTimer => append_prefixed!(74),
+            Instruction::Sleep => append_prefixed!(75),
 
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(75: move str msg_type, values),
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(76: move str msg_type, values),
-            Instruction::SendNetworkReply => append_prefixed!(77),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(76: move str msg_type, values),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(77: move str msg_type, values),
+            Instruction::SendNetworkReply => append_prefixed!(78),
         }
     }
 }
@@ -782,11 +786,14 @@ impl<'a> ByteCodeBuilder<'a> {
                 ast::Value::List(_) => unreachable!(),
             }.into()),
             ast::Expr::Variable { var, .. } => self.ins.push(Instruction::PushVariable { var: &var.trans_name }.into()),
+            ast::Expr::Atan2 { y, x, .. } => self.append_simple_ins(entity, &[y, x], BinaryOp::Atan2.into()),
             ast::Expr::Sub { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Sub.into()),
             ast::Expr::Div { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Div.into()),
             ast::Expr::Pow { base, power, .. } => self.append_simple_ins(entity, &[base, power], BinaryOp::Pow.into()),
             ast::Expr::Greater { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Greater.into()),
+            ast::Expr::GreaterEq { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::GreaterEq.into()),
             ast::Expr::Less { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Less.into()),
+            ast::Expr::LessEq { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::LessEq.into()),
             ast::Expr::Mod { left, right, .. } => self.append_simple_ins(entity, &[left, right], BinaryOp::Mod.into()),
             ast::Expr::Log { base, value, .. } => self.append_simple_ins(entity, &[base, value], BinaryOp::Log.into()),
             ast::Expr::Neg { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::Neg.into()),
@@ -806,6 +813,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::UnicodeToChar { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::UnicodeToChar.into()),
             ast::Expr::CharToUnicode { value, .. } => self.append_simple_ins(entity, &[value], UnaryOp::CharToUnicode.into()),
             ast::Expr::Eq { left, right, .. } => self.append_simple_ins(entity, &[left, right], Instruction::Eq),
+            ast::Expr::Neq { left, right, .. } => self.append_simple_ins(entity, &[left, right], Instruction::Neq),
             ast::Expr::ListGet { list, index, .. } => self.append_simple_ins(entity, &[index, list], Instruction::ListGet),
             ast::Expr::ListLastIndex { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListGetLast),
             ast::Expr::ListGetRandom { list, .. } => self.append_simple_ins(entity, &[list], Instruction::ListGetRandom),
@@ -821,6 +829,8 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Expr::Timer { .. } => self.ins.push(Instruction::PushTimer.into()),
             ast::Expr::Add { values, .. } => self.append_variadic_ins(entity, values, VariadicOp::Add),
             ast::Expr::Mul { values, .. } => self.append_variadic_ins(entity, values, VariadicOp::Mul),
+            ast::Expr::Min { values, .. } => self.append_variadic_ins(entity, values, VariadicOp::Min),
+            ast::Expr::Max { values, .. } => self.append_variadic_ins(entity, values, VariadicOp::Max),
             ast::Expr::Strcat { values, .. } => match values {
                 ast::VariadicInput::Fixed(values) => {
                     for value in values {

@@ -921,3 +921,44 @@ fn test_proc_variadic_sum_product() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic sum product");
     });
 }
+
+#[test]
+fn test_proc_variadic_min_max() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/variadic-min-max.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([ 1, 2, 9, 17 ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic min/max");
+    });
+}
+
+#[test]
+fn test_proc_atan2_new_cmp() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/atan2-new-cmp.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            [18.43494882, 116.5650511, -32.0053832, -158.198590],
+            [14.03624346, 53.13010235, -18.4349488],
+            [false, true, true],
+            [true, true, false],
+            [true, false, true],
+            [true, false, true],
+            [false, true, true],
+            [false, true],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "atan2 and new cmp");
+    });
+}
