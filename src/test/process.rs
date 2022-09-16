@@ -983,3 +983,28 @@ fn test_proc_flatten() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "flatten");
     });
 }
+
+#[test]
+fn test_proc_list_len_rank_dims() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/list-len-rank-dims.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            [0, 1, [0]],
+            [3, 1, [3]],
+            [3, 2, [3, 0]],
+            [3, 2, [3, 1]],
+            [5, 3, [5, 3, 1]],
+            [6, 5, [6, 3, 1, 3, 1]],
+            [2, 2, [2, 10]],
+            [2, 2, [2, 10]],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list len, rank, dims");
+    });
+}

@@ -412,14 +412,24 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
 
+            Instruction::ListIsEmpty => {
+                let list = self.value_stack.pop().unwrap().as_list()?;
+                self.value_stack.push(list.read().is_empty().into());
+                self.pos = aft_pos;
+            }
             Instruction::ListLength => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 self.value_stack.push((list.read().len() as f64).into());
                 self.pos = aft_pos;
             }
-            Instruction::ListIsEmpty => {
-                let list = self.value_stack.pop().unwrap().as_list()?;
-                self.value_stack.push(list.read().is_empty().into());
+            Instruction::ListDims => {
+                let list = self.value_stack.pop().unwrap();
+                self.value_stack.push(GcCell::allocate(mc, ops::dimensions(&list)?.into_iter().map(|x| (x as f64).into()).collect::<VecDeque<_>>()).into());
+                self.pos = aft_pos;
+            }
+            Instruction::ListRank => {
+                let list = self.value_stack.pop().unwrap();
+                self.value_stack.push((ops::dimensions(&list)?.len() as f64).into());
                 self.pos = aft_pos;
             }
             Instruction::ListFlatten => {
@@ -841,6 +851,32 @@ mod ops {
         let mut res = Default::default();
         let mut cache = Default::default();
         flatten_impl(value, &mut res, &mut cache)?;
+        debug_assert_eq!(cache.len(), 0);
+        Ok(res)
+    }
+    pub(super) fn dimensions(value: &Value) -> Result<Vec<usize>, ErrorCause> {
+        fn dimensions_impl<'gc>(value: &Value<'gc>, depth: usize, res: &mut Vec<usize>, cache: &mut BTreeSet<Identity<'gc>>) -> Result<(), ErrorCause> {
+            debug_assert!(depth <= res.len());
+
+            if let Value::List(values) = value {
+                if depth == res.len() { res.push(0); }
+
+                let key = value.identity();
+                if !cache.insert(key) { return Err(ErrorCause::CyclicValue) }
+
+                let values = values.read();
+                res[depth] = res[depth].max(values.len());
+                for value in values.iter() {
+                    dimensions_impl(value, depth + 1, res, cache)?;
+                }
+
+                cache.remove(&key);
+            }
+            Ok(())
+        }
+        let mut res = Default::default();
+        let mut cache = Default::default();
+        dimensions_impl(value, 0, &mut res, &mut cache)?;
         debug_assert_eq!(cache.len(), 0);
         Ok(res)
     }
