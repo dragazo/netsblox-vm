@@ -432,6 +432,12 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.push((ops::dimensions(&list)?.len() as f64).into());
                 self.pos = aft_pos;
             }
+
+            Instruction::ListRev => {
+                let list = self.value_stack.pop().unwrap().as_list()?;
+                self.value_stack.push(GcCell::allocate(mc, list.read().iter().rev().copied().collect::<VecDeque<_>>()).into());
+                self.pos = aft_pos;
+            }
             Instruction::ListFlatten => {
                 let list = self.value_stack.pop().unwrap();
                 self.value_stack.push(GcCell::allocate(mc, ops::flatten(&list)?).into());

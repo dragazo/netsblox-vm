@@ -1008,3 +1008,23 @@ fn test_proc_list_len_rank_dims() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list len, rank, dims");
     });
 }
+
+#[test]
+fn test_proc_list_rev() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/list-rev.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            ["2", "4", "1"],
+            ["2", ["6", "4", "3"], "8", "1"],
+            [["6", ["6", "4", "3"], "3"], ["6", "4", "3"], "8", "1"],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list rev");
+    });
+}
