@@ -468,6 +468,12 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
 
+            Instruction::ListJson => {
+                let value = self.value_stack.pop().unwrap().to_simple()?.into_json()?;
+                self.value_stack.push(Gc::allocate(mc, value.to_string()).into());
+                self.pos = aft_pos;
+            }
+
             Instruction::ListInsert => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let index = self.value_stack.pop().unwrap();

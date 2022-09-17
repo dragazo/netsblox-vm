@@ -1004,6 +1004,7 @@ fn test_proc_list_len_rank_dims() {
             [6, 5, [6, 3, 1, 3, 1]],
             [2, 2, [2, 10]],
             [2, 2, [2, 10]],
+            [0, []],
         ]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list len, rank, dims");
     });
@@ -1061,5 +1062,28 @@ fn test_proc_list_reshape() {
             [["", ""], ["", ""]],
         ]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list reshape");
+    });
+}
+
+#[test]
+fn test_proc_list_json() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/list-json.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            r#"[]"#,
+            r#"["test"]"#,
+            r#"["test",25.0,"12"]"#,
+            r#"[["1",["2"],[],[["2"]]],"\"another\"",["1",["2"],[],[["2"]]],"[{}]"]"#,
+            r#"14.0"#,
+            r#""hello world \"again\"""#
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list json");
     });
 }
