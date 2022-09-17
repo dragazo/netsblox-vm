@@ -1028,3 +1028,38 @@ fn test_proc_list_rev() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list rev");
     });
 }
+
+#[test]
+fn test_proc_list_reshape() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/list-reshape.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            ["3", "1", "h", "e", "l", "l", "1", "h", "e", "l"],
+            [["3", "1", "h", "e", "l"], ["l", "1", "h", "e", "l"]],
+            [
+                [["3", "1", "h"], ["e", "l", "l"], ["1", "h", "e"], ["l", "l", "gh"], ["3", "1", "h"]],
+                [["e", "l", "l"], ["1", "h", "e"], ["l", "l", "gh"], ["3", "1", "h"], ["e", "l", "l"]],
+            ],
+            [
+                [["3", "1", "h", "e", "l"]],
+                [["l", "1", "h", "e", "l"]],
+                [["l", "gh", "3", "1", "h"]],
+                [["e", "l", "l", "1", "h"]],
+                [["e", "l", "l", "gh", "3"]],
+            ],
+            [],
+            "3",
+            "3",
+            [[6, 6, 6], [6, 6, 6]],
+            [["", ""], ["", ""]],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list reshape");
+    });
+}

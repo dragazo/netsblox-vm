@@ -7,10 +7,10 @@
 //! Some utilities are provided to export these values from the runtime environment if needed.
 
 use std::prelude::v1::*;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
 use std::borrow::Cow;
 use std::rc::Rc;
-use std::iter;
+use std::iter::{self, Cycle};
 
 use derive_builder::Builder;
 
@@ -42,6 +42,8 @@ pub enum ErrorCause {
     IndexNotInteger { index: f64 },
     /// An indexing operation on a list had an out of bounds index, `index`, on a list of size `list_len`. Note that Snap!/NetsBlox use 1-based indexing.
     IndexOutOfBounds { index: f64, list_len: usize },
+    /// Attempt to use a number which was not a valid size (must be convertible to [`usize`]).
+    InvalidSize { value: f64 },
     /// Exceeded the maximum call depth. This can be configured by [`Process::new`].
     CallDepthLimit { limit: usize },
     /// Attempt to call a closure which required `expected` arguments, but `got` arguments were supplied.
@@ -441,6 +443,28 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::ListFlatten => {
                 let list = self.value_stack.pop().unwrap();
                 self.value_stack.push(GcCell::allocate(mc, ops::flatten(&list)?).into());
+                self.pos = aft_pos;
+            }
+            Instruction::ListReshape { len } => {
+                let raw_dims: Vec<_> = match len {
+                    VariadicLen::Fixed(len) => {
+                        let stack_size = self.value_stack.len();
+                        self.value_stack.drain(stack_size - len..).collect()
+                    }
+                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().copied().collect(),
+                };
+                let src = self.value_stack.pop().unwrap();
+
+                let mut dims = Vec::with_capacity(raw_dims.len());
+                for dim in raw_dims {
+                    let dim = dim.to_number()?;
+                    if dim < 0.0 || dim > usize::MAX as f64 { return Err(ErrorCause::InvalidSize { value: dim }) }
+                    let int_dim = dim as usize;
+                    if int_dim as f64 != dim { return Err(ErrorCause::InvalidSize { value: dim }) }
+                    dims.push(int_dim);
+                }
+
+                self.value_stack.push(ops::reshape(mc, &src, &dims)?);
                 self.pos = aft_pos;
             }
 
@@ -885,6 +909,22 @@ mod ops {
         dimensions_impl(value, 0, &mut res, &mut cache)?;
         debug_assert_eq!(cache.len(), 0);
         Ok(res)
+    }
+    pub(super) fn reshape<'gc>(mc: MutationContext<'gc, '_>, src: &Value<'gc>, dims: &[usize]) -> Result<Value<'gc>, ErrorCause> {
+        if dims.iter().any(|&x| x == 0) { return Ok(GcCell::allocate(mc, VecDeque::default()).into()) }
+
+        let mut src = ops::flatten(src)?;
+        if src.is_empty() {
+            src.push_back(Gc::allocate(mc, String::new()).into());
+        }
+
+        fn reshape_impl<'gc>(mc: MutationContext<'gc, '_>, src: &mut Cycle<VecDequeIter<Value<'gc>>>, dims: &[usize]) -> Value<'gc> {
+            match dims {
+                [] => *src.next().unwrap(),
+                [first, rest @ ..] => GcCell::allocate(mc, (0..*first).map(|_| reshape_impl(mc, src, rest)).collect::<VecDeque<_>>()).into(),
+            }
+        }
+        Ok(reshape_impl(mc, &mut src.iter().cycle(), dims))
     }
 
     const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
