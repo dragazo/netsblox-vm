@@ -1082,8 +1082,51 @@ fn test_proc_list_json() {
             r#"["test",25.0,"12"]"#,
             r#"[["1",["2"],[],[["2"]]],"\"another\"",["1",["2"],[],[["2"]]],"[{}]"]"#,
             r#"14.0"#,
-            r#""hello world \"again\"""#
+            r#""hello world \"again\"""#,
         ]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list json");
+    });
+}
+
+#[test]
+fn test_proc_list_combinations() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/list-combinations.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            [],
+            [[1], [2], [3], [4], [5], [6], [7], [8], [9], [10]],
+            [
+                [1, "red"], [1, "green"], [1, "blue"],
+                [2, "red"], [2, "green"], [2, "blue"],
+                [3, "red"], [3, "green"], [3, "blue"],
+            ],
+            [
+                [1, "red", "yes"], [1, "red", "no"],
+                [1, "green", "yes"], [1, "green", "no"],
+                [1, "blue", "yes"], [1, "blue", "no"],
+
+                [2, "red", "yes"], [2, "red", "no"],
+                [2, "green", "yes"], [2, "green", "no"],
+                [2, "blue", "yes"], [2, "blue", "no"],
+            ],
+            [
+                ["hello", "darkness", "friend", "!"], ["hello", "darkness", "friend", "."],
+                ["hello", "my", "friend", "!"], ["hello", "my", "friend", "."],
+                ["hello", "old", "friend", "!"], ["hello", "old", "friend", "."],
+
+                ["goodbye", "darkness", "friend", "!"], ["goodbye", "darkness", "friend", "."],
+                ["goodbye", "my", "friend", "!"], ["goodbye", "my", "friend", "."],
+                ["goodbye", "old", "friend", "!"], ["goodbye", "old", "friend", "."],
+            ],
+            [],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list combinations");
     });
 }

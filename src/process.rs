@@ -467,6 +467,17 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.push(ops::reshape(mc, &src, &dims)?);
                 self.pos = aft_pos;
             }
+            Instruction::ListCartesianProduct { len } => {
+                let sources: Vec<_> = match len {
+                    VariadicLen::Fixed(len) => {
+                        let stack_size = self.value_stack.len();
+                        self.value_stack.drain(stack_size - len..).map(|x| x.as_list()).collect::<Result<_,_>>()?
+                    }
+                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().map(|x| x.as_list()).collect::<Result<_,_>>()?,
+                };
+                self.value_stack.push(GcCell::allocate(mc, ops::cartesian_product(mc, &sources)).into());
+                self.pos = aft_pos;
+            }
 
             Instruction::ListJson => {
                 let value = self.value_stack.pop().unwrap().to_simple()?.into_json()?;
@@ -931,6 +942,24 @@ mod ops {
             }
         }
         Ok(reshape_impl(mc, &mut src.iter().cycle(), dims))
+    }
+    pub(super) fn cartesian_product<'gc>(mc: MutationContext<'gc, '_>, sources: &[GcCell<VecDeque<Value<'gc>>>]) -> VecDeque<Value<'gc>> {
+        if sources.is_empty() { return Default::default() }
+
+        fn cartesian_product_impl<'gc>(mc: MutationContext<'gc, '_>, res: &mut VecDeque<Value<'gc>>, partial: &mut VecDeque<Value<'gc>>, sources: &[GcCell<VecDeque<Value<'gc>>>]) {
+            match sources {
+                [] => res.push_back(GcCell::allocate(mc, partial.clone()).into()),
+                [first, rest @ ..] => for item in first.read().iter() {
+                    partial.push_back(*item);
+                    cartesian_product_impl(mc, res, partial, rest);
+                    partial.pop_back();
+                }
+            }
+        }
+        let mut res = VecDeque::with_capacity(sources.iter().fold(1, |a, b| a * b.read().len()));
+        let mut partial = VecDeque::with_capacity(sources.len());
+        cartesian_product_impl(mc, &mut res, &mut partial, sources);
+        res
     }
 
     const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
