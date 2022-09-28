@@ -641,7 +641,7 @@ pub enum KeyCode {
 }
 
 /// Types of [`System`] resources, grouped into feature categories.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum SystemFeature {
     /// The ability of a process to generate random numbers.
     Random,
@@ -649,14 +649,31 @@ pub enum SystemFeature {
     Time,
     /// The ability of a process to request keyboard input from the user.
     Input,
+    /// The ability of a process to perform a syscall of the given name.
+    Syscall { name: String },
+}
+/// Types of errors that can occur within the handler of a syscall.
+#[derive(Debug)]
+pub enum SyscallError {
+    /// An invalid number of arguments was supplied.
+    /// If `expected` is [`Some(n)`], then `n` arguments were expected ([`None`] conveys no information, e.g., for variadic syscalls).
+    InvalidArgCount { got: usize, expected: Option<usize> },
+    /// An invalid argument type was supplied.
+    /// If `expected` is [`Some(t)`] then argument `index` should have been type `t` ([`None`] conveys no information, e.g., for syscalls that accept multiple types).
+    InvalidArgType { index: usize, got: Type, expected: Option<Type> },
+    /// Any other type of syscall usage error, summarized as an error message string.
+    Other { desc: String },
 }
 /// An error resulting from improper use of [`System`] resources.
 #[derive(Debug)]
 pub enum SystemError {
     /// Attempt to use a feature which is not supported or not implemented.
     NotSupported { feature: SystemFeature },
-    /// Unknown system error with a description string.
-    Other { description: String },
+    /// An error caused by a syscall which does exist, as opposed to [`SystemError::NotSupported`]
+    /// with [`SystemFeature::Syscall`], which is for syscalls that don't exist).
+    Syscall { name: String, error: SyscallError },
+    /// Any other type of system error, summarized as an error message string.
+    Other { desc: String },
 }
 
 /// Represents all the features of an implementing system.
@@ -666,6 +683,8 @@ pub enum SystemError {
 /// When implementing [`System`] for some type, you may prefer to not support one or more features.
 /// This can be accomplished by returning the [`SystemError::NotSupported`] variant for the relevant [`SystemFeature`].
 pub trait System: 'static {
+    /// Key type used to await the result of a syscall.
+    type SyscallKey: Collect + 'static;
     /// Key type used to await the result of an RPC request.
     type RpcKey: Collect + 'static;
     /// Key type used to await the result of an "ask" block (string input from the user).
@@ -691,11 +710,23 @@ pub trait System: 'static {
     /// This operation should be infallible, but a no-op solution is sufficient.
     fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>);
 
+    /// Performs a system call on the local hardware to access device resources.
+    /// Returns a key that can be passed to [`System::poll_syscall`] to poll for the result.
+    /// If supported, this operation must be nn-blocking and eventually terminate and yield a value to [`System::poll_syscall`].
+    ///
+    /// This function returns [`MaybeAsync`] to facilitate synchronous behavior if the native resources can be accessed in a blocking fashion.
+    /// If this function always returns [`MaybeAsync::Sync`], then [`System::poll_syscall`] is never used and can be marked as [`unreachable`].
+    fn syscall(&self, name: String, args: Vec<SimpleValue>) -> Result<MaybeAsync<Result<SimpleValue, String>, Self::SyscallKey>, SystemError>;
+    /// Polls for the completion of an asynchronous call to [`System::syscall`].
+    /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
+    fn poll_syscall(&self, key: &Self::SyscallKey) -> AsyncPoll<Result<SimpleValue, String>>;
+
     /// Request input from the user.
     /// The `prompt` argument is either [`Some`] prompt to display, or [`None`] for no prompt.
     /// If supported, this operation must be non-blocking and eventually terminate and yield a value to [`System::poll_input`].
     ///
     /// This function returns [`MaybeAsync`] to facilitate synchronous behavior, such as if the input sequence is known ahead of time.
+    /// If this function always returns [`MaybeAsync::Sync`], then [`System::poll_input`] is never used and can be marked as [`unreachable`].
     fn input<'gc>(&self, prompt: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<MaybeAsync<String, Self::InputKey>, SystemError>;
     /// Polls for the completion of an asynchronous call to [`System::input`].
     /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
@@ -706,6 +737,7 @@ pub trait System: 'static {
     /// If supported, this operation must be non-blocking and eventually terminate and yield a value to [`System::poll_rpc`].
     ///
     /// This function returns [`MaybeAsync`] to facilitate synchronous behavior, such as if overriding RPCs with local implementations.
+    /// If this function always returns [`MaybeAsync::Sync`], then [`System::poll_rpc`] is never used and can be marked as [`unreachable`].
     fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<MaybeAsync<Result<Json, String>, Self::RpcKey>, SystemError>;
     /// Polls for the completion of an asynchronous call to [`System::call_rpc`].
     /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
@@ -748,6 +780,7 @@ mod std_system {
     const MESSAGE_REPLY_TIMEOUT_MS: u32 = 1500;
 
     new_key! {
+        pub struct SyscallKey;
         pub struct RpcKey;
         pub struct InputKey;
     }
@@ -806,6 +839,7 @@ mod std_system {
         value: Option<Json>,
     }
 
+    type SyscallResults = SlotMap<SyscallKey, Option<Result<SimpleValue, String>>>;
     type RpcResults = SlotMap<RpcKey, Option<Result<Json, String>>>;
     type InputResults = SlotMap<InputKey, Option<String>>;
     type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
@@ -824,6 +858,10 @@ mod std_system {
         /// If not specified (default), the system gives an error when processes attempt to request user input.
         #[builder(default = "None", setter(strip_option))]
         input: Option<Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>, InputKey)>>,
+
+        /// A function used to perform system calls on the local hardware.
+        #[builder(default = "None", setter(strip_option))]
+        syscall: Option<Rc<dyn Fn(String, Vec<SimpleValue>, SyscallKey) -> Result<(), SystemError>>>,
     }
     impl StdSystemConfig {
         /// Constructs a new default instance of [`StdSystemConfigBuilder`].
@@ -859,6 +897,8 @@ mod std_system {
         client: Arc<reqwest::Client>,
         start_time: Instant,
         rng: Mutex<ChaChaRng>,
+
+        syscall_results: Arc<Mutex<SyscallResults>>,
 
         input_results: Arc<Mutex<InputResults>>,
 
@@ -1027,6 +1067,7 @@ mod std_system {
                 config, context, client,
                 start_time: Instant::now(),
                 rng: Mutex::new(ChaChaRng::from_seed(seed)),
+                syscall_results: Default::default(),
                 input_results: Default::default(),
                 rpc_results, rpc_request_pipe,
                 message_replies, message_sender, message_receiver,
@@ -1050,6 +1091,7 @@ mod std_system {
         }
     }
     impl System for StdSystem {
+        type SyscallKey = SyscallKey;
         type RpcKey = RpcKey;
         type InputKey = InputKey;
         type ExternReplyKey = ExternReplyKey;
@@ -1065,6 +1107,24 @@ mod std_system {
 
         fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>) {
             self.config.print.as_ref()(value, entity)
+        }
+
+        fn syscall(&self, name: String, args: Vec<SimpleValue>) -> Result<MaybeAsync<Result<SimpleValue, String>, Self::SyscallKey>, SystemError> {
+            match self.config.syscall.as_ref() {
+                Some(syscall) => {
+                    let key = self.syscall_results.lock().unwrap().insert(None);
+                    syscall(name, args, key)?;
+                    Ok(MaybeAsync::Async(key))
+                }
+                None => Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }),
+            }
+        }
+        fn poll_syscall(&self, key: &Self::SyscallKey) -> AsyncPoll<Result<SimpleValue, String>> {
+            let mut syscall_results = self.syscall_results.lock().unwrap();
+            match syscall_results.get(*key).unwrap().is_some() {
+                true => AsyncPoll::Completed(syscall_results.remove(*key).unwrap().unwrap()),
+                false => AsyncPoll::Pending,
+            }
         }
 
         fn input<'gc>(&self, prompt: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<MaybeAsync<String, Self::InputKey>, SystemError> {

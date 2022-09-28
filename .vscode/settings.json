@@ -31,6 +31,8 @@
         "getrandom",
         "Listcat",
         "Seedable",
+        "syscall",
+        "syscalls",
         "tungstenite",
         "varargs"
     ]
