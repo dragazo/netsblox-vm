@@ -5,6 +5,11 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "nb"
+path = "src/main.rs"
+required-features = ["cli"]
+
 [profile.release]
 lto = true
 codegen-units = 1
@@ -17,13 +22,18 @@ std = [
     "no-std-compat/std",
     "tokio", "futures", "async-channel",
     "reqwest", "tokio-tungstenite",
-    "names", "uuid",
-    "clap", "crossterm",
-    "actix-web", "liquid",
     "rand_chacha", "getrandom",
+    "names", "uuid",
+]
+cli = [
+    "std",
+    "actix-web", "liquid",
+    "clap", "crossterm",
 ]
 
 [dependencies]
+
+# core deps
 no-std-compat = { version = "0.4.1", features = ["alloc"] }
 derive_builder = { version = "0.11.2", default-features = false }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
@@ -35,6 +45,7 @@ bin-pool = { version = "0.1.0", default-features = false }
 rand = { version = "0.8.5", default-features = false }
 libm = "0.2.2"
 
+# std deps
 tokio = { version = "1", features = ["full"], optional = true }
 futures = { version = "0.3.23", optional = true }
 async-channel = { version = "1.7.1", optional = true }
@@ -42,9 +53,11 @@ reqwest = { version = "0.11", features = ["json"], optional = true }
 tokio-tungstenite = { version = "0.17.2", features = ["native-tls"], optional = true }
 names = { version = "0.14.0", default-features = false, optional = true }
 uuid = { version = "1.1.2", features = ["v4", "fast-rng"], optional = true }
+rand_chacha = { version = "0.3.1", optional = true }
+getrandom = { version = "0.2.7", optional = true }
+
+# cli deps
 clap = { version = "3.2.14", features = ["derive"], optional = true }
 crossterm = { version = "0.24.0", optional = true }
 actix-web = { version = "4.1.0", optional = true }
 liquid = { version = "0.26.0", optional = true }
-rand_chacha = { version = "0.3.1", optional = true }
-getrandom = { version = "0.2.7", optional = true }

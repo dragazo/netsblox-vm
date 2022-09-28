@@ -50,4 +50,6 @@ pub mod runtime;
 pub mod process;
 pub mod project;
 
+#[cfg(feature = "cli")] pub mod cli;
+
 #[cfg(test)] mod test;
