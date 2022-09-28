@@ -92,7 +92,7 @@ impl<K: Key, T> SlotMap<K, T> {
         };
 
         #[cfg(test)] assert!(self.invariant());
-        key
+        #[allow(clippy::let_and_return)] key
     }
     /// Removes a value from the map and returns it (if it existed).
     /// It is guaranteed that all future accesses with the removed key will return [`None`].

@@ -625,7 +625,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     VariadicLen::Dynamic => {
                         let src = self.value_stack.pop().unwrap().as_list()?;
                         for item in src.read().iter() {
-                            value = ops::binary_op(mc, system, &value, &item, bin_op)?;
+                            value = ops::binary_op(mc, system, &value, item, bin_op)?;
                         }
                     }
                 }

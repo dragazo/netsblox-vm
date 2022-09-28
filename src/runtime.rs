@@ -877,7 +877,7 @@ mod std_system {
 
                 #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
                 async fn handler(base_url: String, client_id: String, project_name: String, message_replies: Arc<Mutex<MessageReplies>>, out_receiver: Receiver<OutgoingMessage>, in_sender: Sender<IncomingMessage>) {
-                    let ws_url = if base_url.starts_with("http") { format!("ws{}", &base_url[4..]) } else { format!("wss://{}", base_url) };
+                    let ws_url = if let Some(x) = base_url.strip_prefix("http") { format!("ws{}", x) } else { format!("wss://{}", base_url) };
                     let (ws, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
                     let (mut ws_sender, ws_receiver) = ws.split();
                     let (ws_sender_sender, ws_sender_receiver) = async_channel::unbounded();
@@ -910,7 +910,7 @@ mod std_system {
                                             _ => return,
                                         };
                                         if msg_type == "__reply__" {
-                                            let (value, reply_key) = match ((|x| x)(values).remove("body"), msg.remove("requestId")) {
+                                            let (value, reply_key) = match ({ values }.remove("body"), msg.remove("requestId")) {
                                                 (Some(value), Some(Json::String(request_id))) => (value, ExternReplyKey { request_id }),
                                                 _ => return,
                                             };
