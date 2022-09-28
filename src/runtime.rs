@@ -608,6 +608,15 @@ impl BarrierCondition {
     }
 }
 
+/// The result of an operation that might be synchronous or asynchronous.
+pub enum MaybeAsync<T, K> {
+    /// A synchronous result with a return value of type `T`.
+    Sync(T),
+    /// An asynchronous result with the given async key type `K`,
+    /// which is expected to be usable to later obtain an [`AsyncPoll<T>`].
+    Async(K),
+}
+
 /// The result of a successful call to [`System::poll_async`].
 pub enum AsyncPoll<T> {
     /// The async operation completed with the given value.
@@ -685,7 +694,9 @@ pub trait System: 'static {
     /// Request input from the user.
     /// The `prompt` argument is either [`Some`] prompt to display, or [`None`] for no prompt.
     /// If supported, this operation must be non-blocking and eventually terminate and yield a value to [`System::poll_input`].
-    fn input<'gc>(&self, prompt: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<Self::InputKey, SystemError>;
+    ///
+    /// This function returns [`MaybeAsync`] to facilitate synchronous behavior, such as if the input sequence is known ahead of time.
+    fn input<'gc>(&self, prompt: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<MaybeAsync<String, Self::InputKey>, SystemError>;
     /// Polls for the completion of an asynchronous call to [`System::input`].
     /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
     fn poll_input(&self, key: &Self::InputKey) -> AsyncPoll<String>;
@@ -693,7 +704,9 @@ pub trait System: 'static {
     /// Requests the system to execute the given RPC.
     /// Returns a key that can be passed to [`System::poll_rpc`] to poll for the result.
     /// If supported, this operation must be non-blocking and eventually terminate and yield a value to [`System::poll_rpc`].
-    fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<Self::RpcKey, SystemError>;
+    ///
+    /// This function returns [`MaybeAsync`] to facilitate synchronous behavior, such as if overriding RPCs with local implementations.
+    fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<MaybeAsync<Result<Json, String>, Self::RpcKey>, SystemError>;
     /// Polls for the completion of an asynchronous call to [`System::call_rpc`].
     /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
     fn poll_rpc(&self, key: &Self::RpcKey) -> AsyncPoll<Result<Json, String>>;
@@ -1054,12 +1067,12 @@ mod std_system {
             self.config.print.as_ref()(value, entity)
         }
 
-        fn input<'gc>(&self, prompt: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<Self::InputKey, SystemError> {
+        fn input<'gc>(&self, prompt: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<MaybeAsync<String, Self::InputKey>, SystemError> {
             match self.config.input.as_ref() {
                 Some(input) => {
                     let key = self.input_results.lock().unwrap().insert(None);
                     input(prompt, entity, key);
-                    Ok(key)
+                    Ok(MaybeAsync::Async(key))
                 }
                 None => Err(SystemError::NotSupported { feature: SystemFeature::Input }),
             }
@@ -1072,10 +1085,10 @@ mod std_system {
             }
         }
 
-        fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<Self::RpcKey, SystemError> {
+        fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<MaybeAsync<Result<Json, String>, Self::RpcKey>, SystemError> {
             let result_key = self.rpc_results.lock().unwrap().insert(None);
             self.rpc_request_pipe.send(RpcRequest { service, rpc, args, result_key }).unwrap();
-            Ok(result_key)
+            Ok(MaybeAsync::Async(result_key))
         }
         fn poll_rpc(&self, key: &Self::RpcKey) -> AsyncPoll<Result<Json, String>> {
             let mut rpc_results = self.rpc_results.lock().unwrap();

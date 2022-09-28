@@ -2,7 +2,7 @@
 
 [NetsBlox](https://netsblox.org/) is a browser-based visual programming environment (based on [Snap!](https://snap.berkeley.edu/)) that extends the typical block-based programming features with internet and distributed computing tools such as RPCs (remote procedure calls) that access network resources (e.g., databases), and message passing between projects over the internet.
 
-NetsBlox-VM is a native, `no-std` implementation of the NetsBlox code execution engine and runtime. This makes it possible to execute NetsBlox program code at blistering speeds on any device targeted by the Rust compiler. But more importantly, NetsBlox-VM has several extension APIs which make it possible to extend its features with new hardware peripheral access capabilities (e.g., controlling sensors and actuators through GPIO), all with safe, native Rust.
+NetsBlox-VM is a native Rust implementation of the NetsBlox code execution engine and runtime. This makes it possible to execute NetsBlox program code at blistering speeds on any device targeted by the Rust compiler. But more importantly, NetsBlox-VM has several extension APIs which make it possible to extend its features with new hardware peripheral access capabilities (e.g., controlling sensors and actuators through GPIO), all with safe, native Rust.
 
 ## Features
 

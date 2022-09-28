@@ -208,22 +208,41 @@ impl<'gc, S: System> Process<'gc, S> {
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
     fn step_impl(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> Result<ProcessStep<'gc>, ErrorCause> {
+        macro_rules! rpc_result {
+            ($res:ident => $aft_pos:expr) => {{
+                self.value_stack.push(match $res {
+                    Ok(x) => {
+                        self.last_rpc_error = None;
+                        ops::json_to_value(mc, x, None)?
+                    }
+                    Err(x) => {
+                        let x = Value::String(Gc::allocate(mc, x));
+                        self.last_rpc_error = Some(x);
+                        x
+                    }
+                });
+                self.pos = $aft_pos;
+            }}
+        }
+        macro_rules! input_result {
+            ($res:ident => $aft_pos:expr) => {{
+                self.last_answer = Some(Gc::allocate(mc, $res).into());
+                self.pos = $aft_pos;
+            }}
+        }
+
         match &self.defer {
             None => (),
             Some(Defer::RpcResult { key, aft_pos }) => match system.poll_rpc(key) {
                 AsyncPoll::Completed(x) => {
-                    self.value_stack.push(match x {
-                        Ok(x) => {
-                            self.last_rpc_error = None;
-                            ops::json_to_value(mc, x, None)?
-                        }
-                        Err(x) => {
-                            let x = Value::String(Gc::allocate(mc, x));
-                            self.last_rpc_error = Some(x);
-                            x
-                        }
-                    });
-                    self.pos = *aft_pos;
+                    rpc_result!(x => *aft_pos);
+                    self.defer = None;
+                }
+                AsyncPoll::Pending => return Ok(ProcessStep::Yield),
+            }
+            Some(Defer::InputResult { key, aft_pos }) => match system.poll_input(key) {
+                AsyncPoll::Completed(x) => {
+                    input_result!(x => *aft_pos);
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
@@ -235,14 +254,6 @@ impl<'gc, S: System> Process<'gc, S> {
                         None => Value::from_simple(mc, simple_value!("")),
                     };
                     self.value_stack.push(value);
-                    self.pos = *aft_pos;
-                    self.defer = None;
-                }
-                AsyncPoll::Pending => return Ok(ProcessStep::Yield),
-            }
-            Some(Defer::InputResult { key, aft_pos }) => match system.poll_input(key) {
-                AsyncPoll::Completed(x) => {
-                    self.last_answer = Some(Gc::allocate(mc, x).into());
                     self.pos = *aft_pos;
                     self.defer = None;
                 }
@@ -730,8 +741,10 @@ impl<'gc, S: System> Process<'gc, S> {
                     args_vec.push((arg_name, value));
                 }
                 args_vec.reverse();
-                let key = system.call_rpc(service.to_owned(), rpc.to_owned(), args_vec)?;
-                self.defer = Some(Defer::RpcResult { key, aft_pos });
+                match system.call_rpc(service.to_owned(), rpc.to_owned(), args_vec)? {
+                    MaybeAsync::Async(key) => self.defer = Some(Defer::RpcResult { key, aft_pos }),
+                    MaybeAsync::Sync(res) => rpc_result!(res => aft_pos),
+                }
             }
             Instruction::Return => {
                 let (return_point, _) = self.call_stack.pop().unwrap();
@@ -775,8 +788,10 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::Ask => {
                 let prompt = self.value_stack.pop().unwrap();
                 let is_empty = match prompt { Value::String(x) => x.is_empty(), _ => false };
-                let key = system.input(if is_empty { None } else { Some(prompt) }, &*entity)?;
-                self.defer = Some(Defer::InputResult { key, aft_pos });
+                match system.input(if is_empty { None } else { Some(prompt) }, &*entity)? {
+                    MaybeAsync::Async(key) => self.defer = Some(Defer::InputResult { key, aft_pos }),
+                    MaybeAsync::Sync(res) => input_result!(res => aft_pos),
+                }
             }
             Instruction::PushAnswer => {
                 self.value_stack.push(self.last_answer.unwrap_or_else(|| Gc::allocate(mc, String::new()).into()));
