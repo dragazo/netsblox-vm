@@ -1,7 +1,7 @@
 (function () {
-    class MetalExtension extends Extension {
+    class NativeExtension extends Extension {
         constructor(ide) {
-            super('Metal');
+            super('Native');
             this.ide = ide;
         }
 
@@ -18,21 +18,43 @@
         }
 
         getCategories() {
-            return [];
+            return [
+                new Extension.Category('native', new Color(160, 20, 20)),
+            ];
         }
 
         getPalette() {
-            return [];
+            const blocks = [
+                new Extension.Palette.Block('nativeRunSyscall'),
+                new Extension.Palette.Block('nativeCallSyscall'),
+            ];
+            return [
+                new Extension.PaletteCategory('native', blocks, SpriteMorph),
+                new Extension.PaletteCategory('native', blocks, StageMorph),
+            ];
         }
 
         getBlocks() {
-            return [];
+            const fail = () => {
+                throw Error("syscalls can't be used in the browser! run on native hardware!");
+            };
+            return [
+                new Extension.Block('nativeRunSyscall', 'command', 'native', 'syscall %syscall %exp', [], fail),
+                new Extension.Block('nativeCallSyscall', 'reporter', 'native', 'syscall %syscall %exp', [], fail),
+            ];
         }
 
         getLabelParts() {
-            return [];
+            return [
+                new Extension.LabelPart('syscall', () => new InputSlotMorph(
+                    null, // text
+                    false, // numeric
+                    {{syscalls}},
+                    true, // readonly
+                )),
+            ];
         }
     }
 
-    NetsBloxExtensions.register(MetalExtension);
+    NetsBloxExtensions.register(NativeExtension);
 })();

@@ -558,7 +558,7 @@ fn test_proc_say() {
     let output = Rc::new(RefCell::new(String::new()));
     let output_cpy = output.clone();
     let config = StdSystemConfig::builder()
-        .print(Rc::new(move |v, _| if let Some(v) = v { writeln!(*output_cpy.borrow_mut(), "{:?}", v).unwrap() }))
+        .print(Rc::new(move |v, _| Ok(if let Some(v) = v { writeln!(*output_cpy.borrow_mut(), "{:?}", v).unwrap() })))
         .build().unwrap();
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, config);
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),

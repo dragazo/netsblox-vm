@@ -1,14 +1,13 @@
-
-
 use std::prelude::v1::*;
 use std::fs::File;
 use std::rc::Rc;
 use std::time::Duration;
 use std::collections::VecDeque;
 use std::cell::{Cell, RefCell};
-use std::io::{self, Read, Write, stdout};
-use std::sync::{Arc, Mutex, Condvar};
-use std::sync::atomic::{AtomicBool, Ordering as MemOrder};
+use std::io::{self, Read, Write as IoWrite, stdout};
+use std::fmt::Write as FmtWrite;
+use std::sync::Mutex;
+use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::{thread, mem, fmt};
 
 use clap::Parser;
@@ -92,6 +91,35 @@ pub enum Mode {
     },
 }
 
+pub enum SyscallMenu<'a> {
+    Entry { label: &'a str },
+    Submenu { label: &'a str, content: &'a [SyscallMenu<'a>] },
+}
+impl SyscallMenu<'_> {
+    fn format(items: &[Self]) -> String {
+        fn format_impl(value: &SyscallMenu, res: &mut String) {
+            match value {
+                SyscallMenu::Entry { label } => write!(res, "'{label}':'{label}',").unwrap(),
+                SyscallMenu::Submenu { label, content } => {
+                    write!(res, "'{label}':{{").unwrap();
+                    for value in *content {
+                        format_impl(value, res);
+                    }
+                    res.push('}');
+                }
+            }
+        }
+        let mut res = String::with_capacity(64);
+        res.push('{');
+        for item in items {
+            format_impl(item, &mut res);
+        }
+        res.push('}');
+        res
+    }
+}
+
+#[derive(Debug)]
 enum OpenProjectError<'a> {
     ParseError { error: ast::Error },
     RoleNotFound { role: &'a str },
@@ -141,18 +169,7 @@ fn get_env(role: &ast::Role) -> EnvArena {
     })
 }
 
-trait StopFlag {
-    fn should_stop(&self) -> bool;
-}
-struct NeverStop;
-impl StopFlag for NeverStop {
-    fn should_stop(&self) -> bool { false }
-}
-impl StopFlag for Arc<AtomicBool> {
-    fn should_stop(&self) -> bool { self.load(MemOrder::SeqCst) }
-}
-
-fn run_proj_tty<T: StopFlag>(project_name: &str, server: String, mut env: EnvArena, stop_flag: T) {
+fn run_proj_tty(project_name: &str, server: String, mut env: EnvArena, overrides: StdSystemConfig) {
     terminal::enable_raw_mode().unwrap();
     execute!(stdout(), cursor::Hide).unwrap();
     let _tty_mode_guard = AtExit::new(|| {
@@ -171,7 +188,7 @@ fn run_proj_tty<T: StopFlag>(project_name: &str, server: String, mut env: EnvAre
     let mut term_size = terminal::size().unwrap();
     let mut input_value = String::new();
 
-    let config = StdSystemConfig::builder()
+    let config = overrides.or(StdSystemConfig::builder()
         .print({
             let update_flag = update_flag.clone();
             Rc::new(move |value, entity| {
@@ -179,6 +196,7 @@ fn run_proj_tty<T: StopFlag>(project_name: &str, server: String, mut env: EnvAre
                     print!("{entity:?} > {value:?}\r\n");
                     update_flag.set(true);
                 }
+                Ok(())
             })
         })
         .input({
@@ -187,9 +205,10 @@ fn run_proj_tty<T: StopFlag>(project_name: &str, server: String, mut env: EnvAre
             Rc::new(move |prompt, entity, key| {
                 input_queries.borrow_mut().push_back((format!("{entity:?} {prompt:?} > "), key));
                 update_flag.set(true);
+                Ok(())
             })
         })
-        .build().unwrap();
+        .build().unwrap());
     let system = StdSystem::new(server, Some(project_name), config);
     print!("public id: {}\r\n", system.get_public_id());
 
@@ -198,8 +217,6 @@ fn run_proj_tty<T: StopFlag>(project_name: &str, server: String, mut env: EnvAre
     let mut input_sequence = Vec::with_capacity(16);
     let in_input_mode = || !input_queries.borrow().is_empty();
     'program: loop {
-        if stop_flag.should_stop() { break }
-
         debug_assert_eq!(input_sequence.len(), 0);
         while event::poll(Duration::from_secs(0)).unwrap() {
             match event::read().unwrap() {
@@ -259,17 +276,95 @@ fn run_proj_tty<T: StopFlag>(project_name: &str, server: String, mut env: EnvAre
 
     execute!(stdout(), terminal::Clear(ClearType::CurrentLine)).unwrap();
 }
-fn run_proj_non_tty<T: StopFlag>(project_name: &str, server: String, mut env: EnvArena, stop_flag: T) {
-    let config = StdSystemConfig::builder()
-        .print(Rc::new(move |value, entity| { if let Some(value) = value { println!("{entity:?} > {value:?}") } }))
-        .build().unwrap();
+fn run_proj_non_tty(project_name: &str, server: String, mut env: EnvArena, overrides: StdSystemConfig) {
+    let config = overrides.or(StdSystemConfig::builder()
+        .print(Rc::new(move |value, entity| Ok(if let Some(value) = value { println!("{entity:?} > {value:?}") })))
+        .build().unwrap());
     let system = StdSystem::new(server, Some(project_name), config);
     println!("public id: {}", system.get_public_id());
 
     env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
 
     loop {
-        if stop_flag.should_stop() { break }
+        env.mutate(|mc, env| {
+            let mut proj = env.proj.write(mc);
+            for _ in 0..STEPS_PER_IO_ITER {
+                proj.step(mc, &system);
+            }
+        });
+    }
+}
+fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemConfig, syscalls: &[SyscallMenu<'_>]) {
+    println!(r#"connect from {nb_server}/?extensions=["http://{addr}:{port}/extension.js"]"#);
+
+    let config = overrides.or(StdSystemConfig::builder()
+        .print(Rc::new(move |value, entity| Ok(if let Some(value) = value { println!("{entity:?} > {value:?}") })))
+        .build().unwrap());
+    let system = StdSystem::new(nb_server, Some("native-server"), config);
+    println!("public id: {}", system.get_public_id());
+
+    let extension_template = liquid::ParserBuilder::with_stdlib().build().unwrap().parse(include_str!("assets/extension.js")).unwrap();
+    let extension = extension_template.render(&liquid::object!({
+        "addr": addr,
+        "port": port,
+        "syscalls": SyscallMenu::format(syscalls),
+    })).unwrap();
+
+    let (proj_sender, proj_receiver) = channel();
+
+    struct State {
+        extension: String,
+        proj_sender: Mutex<Sender<String>>,
+    }
+    let state = web::Data::new(State { extension, proj_sender: Mutex::new(proj_sender) });
+
+    #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
+    async fn run_http(state: web::Data<State>, port: u16) {
+        #[get("/extension.js")]
+        async fn get_extension(state: web::Data<State>) -> impl Responder {
+            HttpResponse::Ok()
+                .content_type("text/javascript")
+                .body(state.extension.clone())
+        }
+
+        #[post("/run")]
+        async fn run_project(state: web::Data<State>, body: web::Bytes) -> impl Responder {
+            match String::from_utf8(body.to_vec()) {
+                Ok(content) =>{
+                    state.proj_sender.lock().unwrap().send(content).unwrap();
+                    HttpResponse::Ok().body("loaded project")
+                }
+                Err(_) => HttpResponse::BadRequest().body("project was not valid utf8")
+            }
+        }
+
+        HttpServer::new(move || {
+            App::new()
+                .app_data(state.clone())
+                .service(get_extension)
+                .service(run_project)
+        })
+        .workers(1)
+        .bind(("localhost", port)).unwrap().run().await.unwrap();
+    }
+    thread::spawn(move || run_http(state, port));
+
+    let (_, empty_role) = open_project(include_str!("assets/empty-proj.xml"), None).unwrap_or_else(|_| crash!(666: "default project failed to load"));
+    let mut env = get_env(&empty_role);
+
+    loop {
+        match proj_receiver.try_recv() {
+            Ok(content) => match open_project(&content, None) {
+                Ok((proj_name, role)) => {
+                    println!("\n>>> loaded project '{proj_name}'\n");
+                    env = get_env(&role);
+                    env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
+                }
+                Err(e) => println!("\n>>> project load error: {e:?}\n>>> resuming previous project...\n"),
+            }
+            Err(TryRecvError::Disconnected) => break,
+            Err(TryRecvError::Empty) => (),
+        }
 
         env.mutate(|mc, env| {
             let mut proj = env.proj.write(mc);
@@ -279,88 +374,9 @@ fn run_proj_non_tty<T: StopFlag>(project_name: &str, server: String, mut env: En
         });
     }
 }
-#[tokio::main(flavor = "multi_thread", worker_threads = 1)]
-async fn run_server(nb_server: String, addr: String, port: u16) {
-    println!(r#"connect from {nb_server}/?extensions=["http://{addr}:{port}/extension.js"]"#);
-
-    let extension_template = liquid::ParserBuilder::with_stdlib().build().unwrap().parse(include_str!("assets/extension.js")).unwrap();
-    let extension = extension_template.render(&liquid::object!({
-        "addr": addr,
-        "port": port,
-    })).unwrap();
-
-    struct State {
-        nb_server: String,
-        extension: String,
-        project: Mutex<Option<(String, ast::Role)>>,
-        project_cond: Condvar,
-        stop_flag: Arc<AtomicBool>,
-    }
-    let state = web::Data::new(State {
-        nb_server, extension,
-        project: Mutex::new(None),
-        project_cond: Condvar::new(),
-        stop_flag: Arc::new(AtomicBool::new(false)),
-    });
-
-    fn project_runner(state: web::Data<State>) {
-        loop {
-            let (project_name, role) = {
-                let mut project_lock = state.project.lock().unwrap();
-                loop {
-                    match project_lock.take() {
-                        Some(x) => break x,
-                        None => project_lock = state.project_cond.wait(project_lock).unwrap(),
-                    }
-                }
-            };
-            state.stop_flag.store(false, MemOrder::SeqCst);
-
-            let env = get_env(&role);
-            run_proj_non_tty(&project_name, state.nb_server.clone(), env, state.stop_flag.clone());
-        }
-    }
-    let state_clone = state.clone();
-    thread::spawn(move || project_runner(state_clone));
-
-    #[get("/extension.js")]
-    async fn get_extension(state: web::Data<State>) -> impl Responder {
-        HttpResponse::Ok()
-            .content_type("text/javascript")
-            .body(state.extension.clone())
-    }
-
-    #[post("/run")]
-    async fn run_project(state: web::Data<State>, body: web::Bytes) -> impl Responder {
-        match String::from_utf8(body.to_vec()) {
-            Ok(content) => {
-                match open_project(&content, None) {
-                    Ok(x) => {
-                        let mut project_lock = state.project.lock().unwrap();
-                        *project_lock = Some(x);
-                        state.project_cond.notify_all();
-                        state.stop_flag.store(true, MemOrder::SeqCst);
-                        HttpResponse::Ok().body("loaded project")
-                    }
-                    Err(e) => HttpResponse::BadRequest().body(format!("failed to load project: {e}")),
-                }
-            }
-            Err(_) => HttpResponse::BadRequest().body("project was not valid utf8")
-        }
-    }
-
-    HttpServer::new(move || {
-        App::new()
-            .app_data(state.clone())
-            .service(get_extension)
-            .service(run_project)
-    })
-    .workers(1)
-    .bind(("localhost", port)).unwrap().run().await.unwrap();
-}
 
 /// Runs a CLI client using the given [`Mode`] configuration.
-pub fn run(mode: Mode) {
+pub fn run(mode: Mode, config: StdSystemConfig, syscalls: &[SyscallMenu]) {
     match mode {
         Mode::Run { src, role, server } => {
             let content = read_file(&src).unwrap_or_else(|_| crash!(1: "failed to read file '{src}'"));
@@ -369,9 +385,9 @@ pub fn run(mode: Mode) {
             let env = get_env(&role);
 
             if stdout().is_tty() {
-                run_proj_tty(&project_name, server, env, NeverStop);
+                run_proj_tty(&project_name, server, env, config);
             } else {
-                run_proj_non_tty(&project_name, server, env, NeverStop);
+                run_proj_non_tty(&project_name, server, env, config);
             }
         }
         Mode::Dump { src, role } => {
@@ -386,7 +402,7 @@ pub fn run(mode: Mode) {
             println!("\ntotal size: {}", bytecode.total_size());
         }
         Mode::Start { server, addr, port } => {
-            run_server(server, addr, port);
+            run_server(server, addr, port, config, syscalls);
         }
     }
 }

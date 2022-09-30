@@ -1,6 +1,7 @@
-use netsblox_vm::cli;
+use netsblox_vm::cli::{run, Mode};
+use netsblox_vm::runtime::StdSystemConfig;
 use clap::Parser;
 
 fn main() {
-    cli::run(cli::Mode::parse());
+    run(Mode::parse(), StdSystemConfig::builder().build().unwrap(), &[]);
 }

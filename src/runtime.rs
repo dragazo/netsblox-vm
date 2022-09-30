@@ -647,6 +647,8 @@ pub enum SystemFeature {
     Random,
     /// The ability of a process to get the current time (not necessarily wall time).
     Time,
+    /// The ability of a process to display information.
+    Print,
     /// The ability of a process to request keyboard input from the user.
     Input,
     /// The ability of a process to perform a syscall of the given name.
@@ -708,7 +710,7 @@ pub trait System: 'static {
     /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
     /// The [`Entity`] making the request is provided for context.
     /// This operation should be infallible, but a no-op solution is sufficient.
-    fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>);
+    fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<(), SystemError>;
 
     /// Performs a system call on the local hardware to access device resources.
     /// Returns a key that can be passed to [`System::poll_syscall`] to poll for the result.
@@ -844,20 +846,20 @@ mod std_system {
     type InputResults = SlotMap<InputKey, Option<String>>;
     type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
 
-    #[derive(Builder)]
+    #[derive(Builder, Clone)]
     pub struct StdSystemConfig {
         /// A function used to process all "say" and "think" blocks.
         /// The first argument is the actual message value, or [`None`] to clear the output (Snap!-style).
         /// The second argument is a reference to the entity making the request.
         /// The default printer is no-op, effectively ignoring all output requests.
-        #[builder(default = "Rc::new(|_, _| ())")]
-        print: Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>)>,
+        #[builder(default = "None", setter(strip_option))]
+        print: Option<Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>) -> Result<(), SystemError>>>,
         /// A function used to request input from the user.
         /// This should be non-blocking, and the provided [`InputKey`]
         /// should be given to [`StdSystem::finish_input`] when the value is entered by the user.
         /// If not specified (default), the system gives an error when processes attempt to request user input.
         #[builder(default = "None", setter(strip_option))]
-        input: Option<Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>, InputKey)>>,
+        input: Option<Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>, InputKey) -> Result<(), SystemError>>>,
 
         /// A function used to perform system calls on the local hardware.
         #[builder(default = "None", setter(strip_option))]
@@ -866,6 +868,16 @@ mod std_system {
     impl StdSystemConfig {
         /// Constructs a new default instance of [`StdSystemConfigBuilder`].
         pub fn builder() -> StdSystemConfigBuilder { Default::default() }
+
+        /// Constructs a new instance of [`StdSystemConfig`] using this object's settings,
+        /// or if not specified, from another configuration object.
+        pub fn or(self, other: StdSystemConfig) -> Self {
+            Self {
+                print: self.print.or(other.print),
+                input: self.input.or(other.input),
+                syscall: self.syscall.or(other.syscall),
+            }
+        }
     }
 
     async fn call_rpc_async(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<Json, String> {
@@ -1105,8 +1117,11 @@ mod std_system {
             Ok(self.start_time.elapsed().as_millis() as u64)
         }
 
-        fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>) {
-            self.config.print.as_ref()(value, entity)
+        fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<(), SystemError> {
+            match self.config.print.as_ref() {
+                Some(print) => print(value, entity),
+                None => Err(SystemError::NotSupported { feature: SystemFeature::Print }),
+            }
         }
 
         fn syscall(&self, name: String, args: Vec<SimpleValue>) -> Result<MaybeAsync<Result<SimpleValue, String>, Self::SyscallKey>, SystemError> {
@@ -1131,7 +1146,7 @@ mod std_system {
             match self.config.input.as_ref() {
                 Some(input) => {
                     let key = self.input_results.lock().unwrap().insert(None);
-                    input(prompt, entity, key);
+                    input(prompt, entity, key)?;
                     Ok(MaybeAsync::Async(key))
                 }
                 None => Err(SystemError::NotSupported { feature: SystemFeature::Input }),

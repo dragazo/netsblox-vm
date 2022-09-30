@@ -782,7 +782,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::Print => {
                 let value = self.value_stack.pop().unwrap();
                 let is_empty = match value { Value::String(x) => x.is_empty(), _ => false };
-                system.print(if is_empty { None } else { Some(value) }, &*entity);
+                system.print(if is_empty { None } else { Some(value) }, &*entity)?;
                 self.pos = aft_pos;
             }
             Instruction::Ask => {
