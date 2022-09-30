@@ -202,7 +202,7 @@ fn run_proj_tty(project_name: &str, server: String, mut env: EnvArena, overrides
         .input({
             let update_flag = update_flag.clone();
             let input_queries = input_queries.clone();
-            Rc::new(move |prompt, entity, key| {
+            Rc::new(move |_, key, prompt, entity| {
                 input_queries.borrow_mut().push_back((format!("{entity:?} {prompt:?} > "), key));
                 update_flag.set(true);
                 Ok(())

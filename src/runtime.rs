@@ -2,6 +2,7 @@ use std::prelude::v1::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
+use std::borrow::Cow;
 use std::fmt;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
@@ -27,18 +28,62 @@ pub enum SimpleValue {
     List(Vec<SimpleValue>),
 }
 impl SimpleValue {
-    /// Retrieves the value of the [`SimpleValue::Bool`] variant, or [`None`] if that is not the current variant.
-    pub fn as_bool(&self) -> Option<bool> { match self { SimpleValue::Bool(x) => Some(*x), _ => None } }
-    /// Retrieves the value of the [`SimpleValue::Number`] variant, or [`None`] if that is not the current variant.
-    pub fn as_number(&self) -> Option<f64> { match self { SimpleValue::Number(x) => Some(*x), _ => None } }
-    /// Retrieves the value of the [`SimpleValue::String`] variant, or [`None`] if that is not the current variant.
-    pub fn as_str(&self) -> Option<&str> { match self { SimpleValue::String(x) => Some(x), _ => None } }
-    /// Retrieves the value of the [`SimpleValue::List`] variant, or [`None`] if that is not the current variant.
-    pub fn as_list(&self) -> Option<&[SimpleValue]> { match self { SimpleValue::List(x) => Some(x), _ => None } }
-    /// Retrieves the value of the [`SimpleValue::String`] variant, or [`None`] if that is not the current variant.
-    pub fn into_string(self) -> Option<String> { match self { SimpleValue::String(x) => Some(x), _ => None } }
-    /// Retrieves the value of the [`SimpleValue::List`] variant, or [`None`] if that is not the current variant.
-    pub fn into_list(self) -> Option<Vec<SimpleValue>> { match self { SimpleValue::List(x) => Some(x), _ => None } }
+    /// Gets the type contained in this [`SimpleValue`].
+    /// Note that this does not cover the full range of types supported by [`Value`].
+    pub fn get_type(&self) -> Type {
+        match self {
+            SimpleValue::Bool(_) => Type::Bool,
+            SimpleValue::Number(_) => Type::Number,
+            SimpleValue::String(_) => Type::String,
+            SimpleValue::List(_) => Type::List,
+        }
+    }
+    /// Attempts to interpret this value as a bool.
+    pub fn to_bool(&self) -> Result<bool, ConversionError> {
+        Ok(match self {
+            SimpleValue::Bool(x) => *x,
+            SimpleValue::String(x) => !x.is_empty(),
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::Bool }),
+        })
+    }
+    /// Attempts to interpret this value as a number.
+    pub fn to_number(&self) -> Result<f64, ConversionError> {
+        Ok(match self {
+            SimpleValue::Number(x) => *x,
+            SimpleValue::String(x) => x.parse().map_err(|_| ConversionError { got: Type::String, expected: Type::Number })?,
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::Number }),
+        })
+    }
+    /// Attempts to interpret this value as a string.
+    pub fn to_string(&self) -> Result<Cow<str>, ConversionError> {
+        Ok(match self {
+            SimpleValue::String(x) => Cow::Borrowed(x.as_str()),
+            SimpleValue::Number(x) => Cow::Owned(x.to_string()),
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
+        })
+    }
+    /// Attempts to interpret this value as a string.
+    pub fn into_string(self) -> Result<String, ConversionError> {
+        Ok(match self {
+            SimpleValue::String(x) => x,
+            SimpleValue::Number(x) => x.to_string(),
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
+        })
+    }
+    /// Attempts to interpret this value as a list.
+    pub fn as_list(&self) -> Result<&[SimpleValue], ConversionError> {
+        Ok(match self {
+            SimpleValue::List(x) => x.as_slice(),
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::List }),
+        })
+    }
+    /// Attempts to interpret this value as a list.
+    pub fn into_list(self) -> Result<Vec<SimpleValue>, ConversionError> {
+        Ok(match self {
+            SimpleValue::List(x) => x,
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::List }),
+        })
+    }
 
     /// Create a new [`SimpleValue`] from a [`Json`] value.
     /// 
@@ -654,26 +699,11 @@ pub enum SystemFeature {
     /// The ability of a process to perform a syscall of the given name.
     Syscall { name: String },
 }
-/// Types of errors that can occur within the handler of a syscall.
-#[derive(Debug)]
-pub enum SyscallError {
-    /// An invalid number of arguments was supplied.
-    /// If `expected` is [`Some(n)`], then `n` arguments were expected ([`None`] conveys no information, e.g., for variadic syscalls).
-    InvalidArgCount { got: usize, expected: Option<usize> },
-    /// An invalid argument type was supplied.
-    /// If `expected` is [`Some(t)`] then argument `index` should have been type `t` ([`None`] conveys no information, e.g., for syscalls that accept multiple types).
-    InvalidArgType { index: usize, got: Type, expected: Option<Type> },
-    /// Any other type of syscall usage error, summarized as an error message string.
-    Other { desc: String },
-}
 /// An error resulting from improper use of [`System`] resources.
 #[derive(Debug)]
 pub enum SystemError {
     /// Attempt to use a feature which is not supported or not implemented.
     NotSupported { feature: SystemFeature },
-    /// An error caused by a syscall which does exist, as opposed to [`SystemError::NotSupported`]
-    /// with [`SystemFeature::Syscall`], which is for syscalls that don't exist).
-    Syscall { name: String, error: SyscallError },
     /// Any other type of system error, summarized as an error message string.
     Other { desc: String },
 }
@@ -854,16 +884,24 @@ mod std_system {
         /// The default printer is no-op, effectively ignoring all output requests.
         #[builder(default = "None", setter(strip_option))]
         print: Option<Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>) -> Result<(), SystemError>>>,
+
         /// A function used to request input from the user.
         /// This should be non-blocking, and the provided [`InputKey`]
         /// should be given to [`StdSystem::finish_input`] when the value is entered by the user.
         /// If not specified (default), the system gives an error when processes attempt to request user input.
         #[builder(default = "None", setter(strip_option))]
-        input: Option<Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>, InputKey) -> Result<(), SystemError>>>,
+        input: Option<Rc<dyn for<'gc> Fn(&StdSystem, InputKey, Option<Value<'gc>>, &Entity<'gc>) -> Result<(), SystemError>>>,
 
         /// A function used to perform system calls on the local hardware.
+        /// The provided [`SyscallKey`] should be given to [`StdSystem::finish_syscall`] when the result becomes available.
+        /// If not specified (default), the system gives an error when processes attempt to perform a syscall.
+        ///
+        /// This function is permitted to return a [`SystemError`] during its synchronous initialization;
+        /// however, this is intended for hard errors such as trying to invoke non-existent system calls.
+        /// Normal syscall failures should instead yield an [`Err`] value to [`StdSystem::finish_syscall`],
+        /// which lets the runtime treat it like an RPC error that user code can handle properly.
         #[builder(default = "None", setter(strip_option))]
-        syscall: Option<Rc<dyn Fn(String, Vec<SimpleValue>, SyscallKey) -> Result<(), SystemError>>>,
+        syscall: Option<Rc<dyn Fn(&StdSystem, SyscallKey, String, Vec<SimpleValue>) -> Result<(), SystemError>>>,
     }
     impl StdSystemConfig {
         /// Constructs a new default instance of [`StdSystemConfigBuilder`].
@@ -1091,10 +1129,16 @@ mod std_system {
         pub async fn call_rpc_async(&self, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<Json, String> {
             call_rpc_async(&self.context, &self.client, service, rpc, args).await
         }
+
         /// Finishes an asynchronous request to get input from the user.
         /// The key provided must only be used once - future usage of the same key will result in a panic.
         pub fn finish_input(&self, key: InputKey, content: String) {
             assert!(self.input_results.lock().unwrap().get_mut(key).unwrap().replace(content).is_none());
+        }
+        /// Finishes an asynchronous request to perform a syscall.
+        /// The key provided must only be used once - future usage of the same key will result in a panic.
+        pub fn finish_syscall(&self, key: SyscallKey, result: Result<SimpleValue, String>) {
+            assert!(self.syscall_results.lock().unwrap().get_mut(key).unwrap().replace(result).is_none());
         }
 
         /// Gets the public id of the running system that can be used to send messages to this client.
@@ -1128,7 +1172,7 @@ mod std_system {
             match self.config.syscall.as_ref() {
                 Some(syscall) => {
                     let key = self.syscall_results.lock().unwrap().insert(None);
-                    syscall(name, args, key)?;
+                    syscall(self, key, name, args)?;
                     Ok(MaybeAsync::Async(key))
                 }
                 None => Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }),
@@ -1146,7 +1190,7 @@ mod std_system {
             match self.config.input.as_ref() {
                 Some(input) => {
                     let key = self.input_results.lock().unwrap().insert(None);
-                    input(prompt, entity, key)?;
+                    input(self, key, prompt, entity)?;
                     Ok(MaybeAsync::Async(key))
                 }
                 None => Err(SystemError::NotSupported { feature: SystemFeature::Input }),

@@ -573,6 +573,49 @@ fn test_proc_say() {
 }
 
 #[test]
+fn test_proc_syscall() {
+    let buffer = Rc::new(RefCell::new(String::new()));
+    let buffer_cpy = buffer.clone();
+    let config = StdSystemConfig::builder()
+        .syscall(Rc::new(move |system, key, name, args| Ok(match name.as_str() {
+            "bar" => match args.is_empty() {
+                false => {
+                    let mut buffer = buffer_cpy.borrow_mut();
+                    for value in args {
+                        buffer.push_str(&value.into_string().unwrap());
+                    }
+                    system.finish_syscall(key, Ok(simple_value!(buffer.len() as f64)));
+                }
+                true => system.finish_syscall(key, Err("beep beep - called with empty args".to_owned())),
+            }
+            "foo" => {
+                let content = buffer_cpy.borrow().clone();
+                system.finish_syscall(key, Ok(simple_value!(content)));
+            }
+            _ => return Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }),
+        })))
+        .build().unwrap();
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, config);
+    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/syscall.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |mc, _, res| {
+        let expect = Value::from_simple(mc, simple_value!([
+            ["", ""],
+            "",
+            ["5test9", ""],
+            "beep beep - called with empty args",
+            ["5test9", ""],
+        ]));
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "syscall checks");
+    });
+}
+
+#[test]
 fn test_proc_timer_wait() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
     let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),

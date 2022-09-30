@@ -27,6 +27,7 @@
             const blocks = [
                 new Extension.Palette.Block('nativeRunSyscall'),
                 new Extension.Palette.Block('nativeCallSyscall'),
+                new Extension.Palette.Block('nativeSyscallError'),
             ];
             return [
                 new Extension.PaletteCategory('native', blocks, SpriteMorph),
@@ -41,6 +42,7 @@
             return [
                 new Extension.Block('nativeRunSyscall', 'command', 'native', 'syscall %syscall %exp', [], fail),
                 new Extension.Block('nativeCallSyscall', 'reporter', 'native', 'syscall %syscall %exp', [], fail),
+                new Extension.Block('nativeSyscallError', 'reporter', 'native', 'error', [], fail),
             ];
         }
 

@@ -252,6 +252,13 @@ pub(crate) enum Instruction<'a> {
     /// with the reported value being the (only) value remaining in the value stack.
     Return,
 
+    /// Consumes `len` values (in reverse order) representing arguments to a system call.
+    /// Consumes 1 addition value representing the system call name.
+    /// Invokes the given syscall, awaits the result, and pushes the result onto the value stack.
+    Syscall { len: VariadicLen },
+    /// Pushes the last syscall error message onto the value stack.
+    PushSyscallError,
+
     /// Consumes 1 value from the value stack, `msg_type`, and broadcasts a message to all scripts.
     /// The `wait` flag can be set to denote that the broadcasting script should wait until all receiving scripts have terminated.
     Broadcast { wait: bool },
@@ -598,20 +605,23 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             73 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
             74 => read_prefixed!(Instruction::Return),
 
-            75 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            76 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            75 => read_prefixed!(Instruction::Syscall {} : len),
+            76 => read_prefixed!(Instruction::PushSyscallError),
 
-            77 => read_prefixed!(Instruction::Print),
-            78 => read_prefixed!(Instruction::Ask),
-            79 => read_prefixed!(Instruction::PushAnswer),
+            77 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            78 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
-            80 => read_prefixed!(Instruction::ResetTimer),
-            81 => read_prefixed!(Instruction::PushTimer),
-            82 => read_prefixed!(Instruction::Sleep),
+            79 => read_prefixed!(Instruction::Print),
+            80 => read_prefixed!(Instruction::Ask),
+            81 => read_prefixed!(Instruction::PushAnswer),
 
-            83 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
-            84 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
-            85 => read_prefixed!(Instruction::SendNetworkReply),
+            82 => read_prefixed!(Instruction::ResetTimer),
+            83 => read_prefixed!(Instruction::PushTimer),
+            84 => read_prefixed!(Instruction::Sleep),
+
+            85 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
+            86 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
+            87 => read_prefixed!(Instruction::SendNetworkReply),
 
             _ => unreachable!(),
         }
@@ -740,20 +750,23 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::CallRpc { service, rpc, args } => append_prefixed!(73: move str service, move str rpc, args),
             Instruction::Return => append_prefixed!(74),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(75),
-            Instruction::Broadcast { wait: true } => append_prefixed!(76),
+            Instruction::Syscall { len } => append_prefixed!(75: len),
+            Instruction::PushSyscallError => append_prefixed!(76),
 
-            Instruction::Print => append_prefixed!(77),
-            Instruction::Ask => append_prefixed!(78),
-            Instruction::PushAnswer => append_prefixed!(79),
+            Instruction::Broadcast { wait: false } => append_prefixed!(77),
+            Instruction::Broadcast { wait: true } => append_prefixed!(78),
 
-            Instruction::ResetTimer => append_prefixed!(80),
-            Instruction::PushTimer => append_prefixed!(81),
-            Instruction::Sleep => append_prefixed!(82),
+            Instruction::Print => append_prefixed!(79),
+            Instruction::Ask => append_prefixed!(80),
+            Instruction::PushAnswer => append_prefixed!(81),
 
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(83: move str msg_type, values),
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(84: move str msg_type, values),
-            Instruction::SendNetworkReply => append_prefixed!(85),
+            Instruction::ResetTimer => append_prefixed!(82),
+            Instruction::PushTimer => append_prefixed!(83),
+            Instruction::Sleep => append_prefixed!(84),
+
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(85: move str msg_type, values),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(86: move str msg_type, values),
+            Instruction::SendNetworkReply => append_prefixed!(87),
         }
     }
 }
@@ -987,6 +1000,12 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
                 self.ins.push(Instruction::CallRpc { service, rpc, args: args.len() }.into());
             }
+            ast::Expr::Syscall { name, args, .. } => {
+                self.append_expr(name, entity);
+                let len = self.append_variadic(args, entity);
+                self.ins.push(Instruction::Syscall { len }.into());
+            }
+            ast::Expr::SyscallError { .. } => self.append_simple_ins(entity, &[], Instruction::PushSyscallError),
             ast::Expr::NetworkMessageReply { target, msg_type, values, .. } => {
                 for (field, value) in values {
                     self.append_expr(value, entity);
@@ -1376,6 +1395,12 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
                 self.append_expr(target, entity);
                 self.ins.push(Instruction::SendNetworkMessage { msg_type, values: values.len(), expect_reply: false }.into());
+            }
+            ast::Stmt::Syscall { name, args, .. } => {
+                self.append_expr(name, entity);
+                let len = self.append_variadic(args, entity);
+                self.ins.push(Instruction::Syscall { len }.into());
+                self.ins.push(Instruction::PopValue.into());
             }
             x => unimplemented!("{:?}", x),
         }

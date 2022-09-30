@@ -117,6 +117,7 @@ struct ReturnPoint {
 #[derive(Collect)]
 #[collect(require_static)]
 enum Defer<S: System> {
+    SyscallResult { key: S::SyscallKey, aft_pos: usize },
     RpcResult { key: S::RpcKey, aft_pos: usize },
     MessageReply { key: S::ExternReplyKey, aft_pos: usize },
     Barrier { condition: BarrierCondition, aft_pos: usize },
@@ -145,6 +146,7 @@ pub struct Process<'gc, S: System> {
     value_stack: Vec<Value<'gc>>,
     meta_stack: Vec<String>,
     defer: Option<Defer<S>>,
+    last_syscall_error: Option<Value<'gc>>,
     last_rpc_error: Option<Value<'gc>>,
     last_answer: Option<Value<'gc>>,
     timer_start: u64,
@@ -164,6 +166,7 @@ impl<'gc, S: System> Process<'gc, S> {
             value_stack: vec![],
             meta_stack: vec![],
             defer: None,
+            last_syscall_error: None,
             last_rpc_error: None,
             last_answer: None,
             timer_start: 0,
@@ -189,6 +192,7 @@ impl<'gc, S: System> Process<'gc, S> {
         self.value_stack.clear();
         self.meta_stack.clear();
         self.defer = None;
+        self.last_syscall_error = None;
         self.last_rpc_error = None;
         self.last_answer = None;
         self.timer_start = system.time_ms().unwrap_or(0);
@@ -208,6 +212,22 @@ impl<'gc, S: System> Process<'gc, S> {
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
     fn step_impl(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> Result<ProcessStep<'gc>, ErrorCause> {
+        macro_rules! syscall_result {
+            ($res:ident => $aft_pos:expr) => {{
+                self.value_stack.push(match $res {
+                    Ok(x) => {
+                        self.last_syscall_error = None;
+                        Value::from_simple(mc, x)
+                    }
+                    Err(x) => {
+                        let x = Value::String(Gc::allocate(mc, x));
+                        self.last_syscall_error = Some(x);
+                        x
+                    }
+                });
+                self.pos = $aft_pos;
+            }}
+        }
         macro_rules! rpc_result {
             ($res:ident => $aft_pos:expr) => {{
                 self.value_stack.push(match $res {
@@ -233,6 +253,13 @@ impl<'gc, S: System> Process<'gc, S> {
 
         match &self.defer {
             None => (),
+            Some(Defer::SyscallResult { key, aft_pos }) => match system.poll_syscall(key) {
+                AsyncPoll::Completed(x) => {
+                    syscall_result!(x => *aft_pos);
+                    self.defer = None;
+                }
+                AsyncPoll::Pending => return Ok(ProcessStep::Yield),
+            }
             Some(Defer::RpcResult { key, aft_pos }) => match system.poll_rpc(key) {
                 AsyncPoll::Completed(x) => {
                     rpc_result!(x => *aft_pos);
@@ -763,6 +790,25 @@ impl<'gc, S: System> Process<'gc, S> {
                     self.pos = return_point.pos;
                     self.warp_counter = return_point.warp_counter;
                 }
+            }
+            Instruction::Syscall { len } => {
+                let args = match len {
+                    VariadicLen::Fixed(len) => {
+                        let stack_size = self.value_stack.len();
+                        self.value_stack.drain(stack_size - len..).map(|x| x.to_simple()).collect::<Result<Vec<_>,_>>()?
+                    }
+                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().map(|x| x.to_simple()).collect::<Result<Vec<_>,_>>()?,
+                };
+                let name = self.value_stack.pop().unwrap().to_string(mc)?.as_str().to_owned();
+                match system.syscall(name, args)? {
+                    MaybeAsync::Async(key) => self.defer = Some(Defer::SyscallResult { key, aft_pos }),
+                    MaybeAsync::Sync(res) => syscall_result!(res => aft_pos),
+                }
+                self.pos = aft_pos;
+            }
+            Instruction::PushSyscallError => {
+                self.value_stack.push(self.last_syscall_error.unwrap_or_else(|| Gc::allocate(mc, String::new()).into()));
+                self.pos = aft_pos;
             }
             Instruction::Broadcast { wait } => {
                 let msg_type = self.value_stack.pop().unwrap().to_string(mc)?;
