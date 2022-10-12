@@ -601,7 +601,7 @@ fn test_proc_syscall() {
         fields = "",
         funcs = include_str!("blocks/syscall.xml"),
         methods = "",
-    ), Settings::builder().build().unwrap(), &system);
+    ), Settings::builder().syscall_error_scheme(ErrorScheme::Soft).build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let expect = Value::from_simple(mc, simple_value!([

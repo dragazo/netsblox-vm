@@ -67,6 +67,8 @@ pub enum ErrorCause {
     JsonHadBadNumber { value: String },
     /// Attempt to interpret an invalid unicode code point (number) as a character.
     InvalidUnicode { value: f64 },
+    /// A soft error (e.g., RPC or syscall failure) was promoted to a hard error.
+    Promoted { error: String },
 }
 impl From<ConversionError> for ErrorCause { fn from(e: ConversionError) -> Self { Self::ConversionError { got: e.got, expected: e.expected } } }
 impl From<SystemError> for ErrorCause { fn from(error: SystemError) -> Self { Self::SystemError { error } } }
@@ -92,6 +94,17 @@ pub enum ProcessStep<'gc> {
     Broadcast { msg_type: Gc<'gc, String>, barrier: Option<Barrier> },
 }
 
+/// The error promotion paradigm to use for certain types of runtime errors.
+#[derive(Clone, Copy)]
+pub enum ErrorScheme {
+    /// Emit errors as soft errors. This causes the error message to be returned as a [`Value::String`] object,
+    /// as well as being stored in a corresponding last-error process-local variable.
+    Soft,
+    /// Emit errors as hard errors. This treats certain classes of typically soft errors as hard errors that
+    /// must be caught or else terminate the [`Process`] (not the entire VM).
+    Hard,
+}
+
 /// Settings to use for a [`Process`].
 #[derive(Builder, Clone, Copy, Collect)]
 #[builder(no_std)]
@@ -100,6 +113,11 @@ pub struct Settings {
     /// The maximum depth of the call stack (default `1024`).
     #[builder(default = "1024")]
     max_call_depth: usize,
+
+    #[builder(default = "ErrorScheme::Hard")]
+    rpc_error_scheme: ErrorScheme,
+    #[builder(default = "ErrorScheme::Hard")]
+    syscall_error_scheme: ErrorScheme,
 }
 impl Settings {
     /// Constructs a new default instance of [`SettingsBuilder`].
@@ -212,35 +230,32 @@ impl<'gc, S: System> Process<'gc, S> {
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
     fn step_impl(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> Result<ProcessStep<'gc>, ErrorCause> {
-        macro_rules! syscall_result {
-            ($res:ident => $aft_pos:expr) => {{
-                self.value_stack.push(match $res {
-                    Ok(x) => {
-                        self.last_syscall_error = None;
-                        Value::from_simple(mc, x)
-                    }
-                    Err(x) => {
+        fn process_result<'gc, T>(mc: MutationContext<'gc, '_>, result: Result<T, String>, error_scheme: ErrorScheme, value_stack: &mut Vec<Value<'gc>>, last_error: &mut Option<Value<'gc>>, f: fn(MutationContext<'gc, '_>, T) -> Result<Value<'gc>, ErrorCause>) -> Result<(), ErrorCause> {
+            Ok(value_stack.push(match result {
+                Ok(x) => {
+                    *last_error = None;
+                    f(mc, x)?
+                }
+                Err(x) => match error_scheme {
+                    ErrorScheme::Soft => {
                         let x = Value::String(Gc::allocate(mc, x));
-                        self.last_syscall_error = Some(x);
+                        *last_error = Some(x);
                         x
                     }
-                });
+                    ErrorScheme::Hard => return Err(ErrorCause::Promoted { error: x }),
+                }
+            }))
+        }
+
+        macro_rules! syscall_result {
+            ($res:ident => $aft_pos:expr) => {{
+                process_result(mc, $res, self.settings.syscall_error_scheme, &mut self.value_stack, &mut self.last_syscall_error, |mc, x| Ok(Value::from_simple(mc, x)))?;
                 self.pos = $aft_pos;
             }}
         }
         macro_rules! rpc_result {
             ($res:ident => $aft_pos:expr) => {{
-                self.value_stack.push(match $res {
-                    Ok(x) => {
-                        self.last_rpc_error = None;
-                        ops::json_to_value(mc, x, None)?
-                    }
-                    Err(x) => {
-                        let x = Value::String(Gc::allocate(mc, x));
-                        self.last_rpc_error = Some(x);
-                        x
-                    }
-                });
+                process_result(mc, $res, self.settings.rpc_error_scheme, &mut self.value_stack, &mut self.last_rpc_error, |mc, x| ops::json_to_value(mc, x, None))?;
                 self.pos = $aft_pos;
             }}
         }
