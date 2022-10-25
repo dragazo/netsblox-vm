@@ -791,6 +791,18 @@ pub struct EntityLocations<'a> {
 pub struct Locations<'a> {
     pub funcs: Vec<(&'a ast::Function, usize)>,
     pub entities: Vec<(&'a ast::Entity, EntityLocations<'a>)>,
+    pub instructions: BTreeMap<usize, &'a str>,
+}
+impl<'a> Locations<'a> {
+    /// Looks up a bytecode position and returns the most local block location provided by the ast.
+    /// If the ast came from a standard NetsBlox XML file, this is the collab id of the looked up bytecode address.
+    /// In other cases, this could be some other localization mechanism for error reporting.
+    ///
+    /// Note that it is possible for blocks to not have location information,
+    /// hence returning the most local location that was provided in the ast.
+    pub fn lookup_bytecode_pos(&self, bytecode_pos: usize) -> Option<&'a str> {
+        self.instructions.range(..=bytecode_pos).last().map(|x| *x.1)
+    }
 }
 
 #[derive(Default)]
@@ -798,6 +810,7 @@ struct ByteCodeBuilder<'a> {
     ins: Vec<InternalInstruction<'a>>,
     call_holes: Vec<(usize, &'a ast::FnRef, Option<&'a ast::Entity>)>, // (hole pos, function, entity)
     closure_holes: VecDeque<(usize, &'a [ast::VariableDef], &'a [ast::VariableRef], &'a [ast::Stmt], Option<&'a ast::Entity>)>, // (hole pos, params, captures, stmts, entity)
+    ins_locations: BTreeMap<usize, &'a str>,
 }
 impl<'a> ByteCodeBuilder<'a> {
     fn append_simple_ins(&mut self, entity: Option<&'a ast::Entity>, values: &[&'a ast::Expr], op: Instruction<'a>) {
@@ -1412,19 +1425,19 @@ impl<'a> ByteCodeBuilder<'a> {
         self.ins.push(Instruction::PushString { value: "" }.into());
         self.ins.push(Instruction::Return.into());
     }
-    fn link(mut self, locations: Locations<'a>) -> (ByteCode, Locations<'a>) {
+    fn link(mut self, funcs: Vec<(&'a ast::Function, usize)>, entities: Vec<(&'a ast::Entity, EntityLocations<'a>)>) -> (ByteCode, Locations<'a>) {
         assert!(self.closure_holes.is_empty());
 
         let global_fn_to_info = {
             let mut res = BTreeMap::new();
-            for (func, pos) in locations.funcs.iter() {
+            for (func, pos) in funcs.iter() {
                 res.insert(&*func.trans_name, (*pos, &*func.params));
             }
             res
         };
         let entity_fn_to_info = {
             let mut res = BTreeMap::new();
-            for (entity, entity_locs) in locations.entities.iter() {
+            for (entity, entity_locs) in entities.iter() {
                 let mut inner = BTreeMap::new();
                 for (func, pos) in entity_locs.funcs.iter() {
                     inner.insert(&*func.trans_name, (*pos, &*func.params));
@@ -1448,9 +1461,9 @@ impl<'a> ByteCodeBuilder<'a> {
             self.ins[*hole_pos] = InternalInstruction::Packed(ins_pack);
         }
 
-        self.finalize(locations)
+        self.finalize(funcs, entities)
     }
-    fn finalize(self, mut locations: Locations<'a>) -> (ByteCode, Locations<'a>) {
+    fn finalize(self, funcs: Vec<(&'a ast::Function, usize)>, entities: Vec<(&'a ast::Entity, EntityLocations<'a>)>) -> (ByteCode, Locations<'a>) {
         let mut code = Vec::with_capacity(self.ins.len() * 4);
         let mut data = BinPool::new();
         let mut relocate_info = Vec::with_capacity(64);
@@ -1467,15 +1480,6 @@ impl<'a> ByteCodeBuilder<'a> {
             }
         }
 
-        fn update_locations<F: Fn(usize) -> usize>(locations: &mut Locations, f: F) {
-            for func in locations.funcs.iter_mut() { func.1 = f(func.1); }
-            for entity in locations.entities.iter_mut() {
-                for func in entity.1.funcs.iter_mut() { func.1 = f(func.1); }
-                for script in entity.1.scripts.iter_mut() { script.1 = f(script.1); }
-            }
-        }
-        update_locations(&mut locations, |x| final_ins_pos[x]);
-
         let data_backing = data.into_backing();
         let (data, data_backing_pos) = {
             let mut data = Vec::with_capacity(data_backing.0.iter().map(Vec::len).sum::<usize>());
@@ -1487,7 +1491,7 @@ impl<'a> ByteCodeBuilder<'a> {
             (data, data_backing_pos)
         };
 
-        fn apply_shrinking_plan(plan: &[(usize, usize, usize)], final_relocates: &mut [usize], code: &mut Vec<u8>, final_ins_pos: &mut [usize], locations: &mut Locations) -> usize {
+        fn apply_shrinking_plan(plan: &[(usize, usize, usize)], final_relocates: &mut [usize], code: &mut Vec<u8>, final_ins_pos: &mut [usize]) -> usize {
             let old_pos_to_ins: BTreeMap<usize, usize> = final_ins_pos.iter().copied().enumerate().map(|(a, b)| (b, a)).collect();
             let orig_code_size = code.len();
 
@@ -1523,8 +1527,6 @@ impl<'a> ByteCodeBuilder<'a> {
                 code[*code_addr..old_pos.1].copy_from_slice(&buf);
             }
 
-            update_locations(locations, |x| final_ins_pos[old_pos_to_ins[&x]]);
-
             total_shift
         }
 
@@ -1552,7 +1554,7 @@ impl<'a> ByteCodeBuilder<'a> {
             code[code_addr..code_addr + fmt_buf.len()].copy_from_slice(&fmt_buf);
         }
 
-        apply_shrinking_plan(&shrinking_plan, &mut final_relocates, &mut code, &mut final_ins_pos, &mut locations);
+        apply_shrinking_plan(&shrinking_plan, &mut final_relocates, &mut code, &mut final_ins_pos);
 
         for _ in 0..SHRINK_CYCLES {
             shrinking_plan.clear();
@@ -1564,11 +1566,20 @@ impl<'a> ByteCodeBuilder<'a> {
                 code[code_addr..code_addr + fmt_buf.len()].copy_from_slice(&fmt_buf);
                 shrinking_plan.push((code_addr, val.1 - code_addr, fmt_buf.len()));
             }
-            let delta = apply_shrinking_plan(&shrinking_plan, &mut final_relocates, &mut code, &mut final_ins_pos, &mut locations);
+            let delta = apply_shrinking_plan(&shrinking_plan, &mut final_relocates, &mut code, &mut final_ins_pos);
             if delta == 0 { break }
         }
 
-        (ByteCode { code: code.into_boxed_slice(), data: data.into_boxed_slice() }, locations)
+        let (mut funcs, mut entities) = (funcs, entities);
+
+        for func in funcs.iter_mut() { func.1 = final_ins_pos[func.1]; }
+        for entity in entities.iter_mut() {
+            for func in entity.1.funcs.iter_mut() { func.1 = final_ins_pos[func.1]; }
+            for script in entity.1.scripts.iter_mut() { script.1 = final_ins_pos[script.1]; }
+        }
+        let instructions = self.ins_locations.iter().map(|(p, v)| (final_ins_pos[*p], *v)).collect();
+
+        (ByteCode { code: code.into_boxed_slice(), data: data.into_boxed_slice() }, Locations { funcs, entities, instructions })
     }
 }
 
@@ -1618,7 +1629,7 @@ impl ByteCode {
             code.ins[hole_pos] = InternalInstruction::Packed(ins_pack);
         }
 
-        code.link(Locations { funcs, entities })
+        code.link(funcs, entities)
     }
     /// Generates a hex dump of the stored code, including instructions and addresses.
     pub fn dump_code(&self, f: &mut dyn Write) -> io::Result<()> {
