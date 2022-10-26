@@ -1,6 +1,74 @@
 (function () {
     const SERVER = 'http://{{addr}}:{{port}}';
 
+    function TerminalMorph(ext) {
+        this.init();
+        this.ext = ext;
+    }
+    TerminalMorph.prototype = new DialogBoxMorph();
+    TerminalMorph.prototype.constructor = TerminalMorph;
+    TerminalMorph.uber = DialogBoxMorph.prototype;
+
+    TerminalMorph.prototype.init = function() {
+        TerminalMorph.uber.init.call(this);
+
+        this.labelString = 'Native Terminal';
+        this.createLabel();
+
+        this.minWidth = 500;
+        this.minHeight = 400;
+        this.titleOffset = 5;
+        this.padding = 20;
+
+        this.bounds.setWidth(this.minWidth);
+        this.bounds.setHeight(this.minHeight);
+
+        this.handle = new HandleMorph(this, this.minWidth, this.minHeight, this.corner, this.corner);
+
+        this.add(this.tools = new AlignmentMorph('row'));
+
+        function makeSpacer(width) {
+            const res = new Morph();
+            res.setWidth(width);
+            res.setHeight(1);
+            res.alpha = 0;
+            return res;
+        }
+
+        this.tools.add(this.runButton = new PushButtonMorph(null, async () => {
+            const req = new XMLHttpRequest();
+            req.onreadystatechange = () => {
+                if (req.readyState !== XMLHttpRequest.DONE) return;
+                if (req.status !== 200) {
+                    alert(req.responseText);
+                }
+            };
+            req.open('POST', `${SERVER}/run`, true);
+            req.send(await this.ext.ide.cloud.exportRole());
+        }, 'Run'));
+
+        this.tools.add(makeSpacer(this.padding));
+
+        this.tools.add(this.stopButton = new PushButtonMorph(null, () => {
+            console.log('stop pressed');
+        }, 'Stop'));
+
+        this.fixLayout();
+    };
+
+    TerminalMorph.prototype.fixLayout = function () {
+        if (this.tools) {
+            this.tools.fixLayout();
+            this.tools.setBottom(this.bottom() - this.padding);
+            this.tools.setLeft(this.left() + this.padding);
+        }
+
+        if (this.label) {
+            this.label.setCenter(this.center());
+            this.label.setTop(this.top() + this.titleOffset);
+        }
+    };
+
     class NativeExtension extends Extension {
         constructor(ide) {
             super('Native');
@@ -11,10 +79,8 @@
 
         getMenu() {
             return {
-                'Run on Device': async () => {
-                    const req = new XMLHttpRequest();
-                    req.open('POST', `${SERVER}/run`, true);
-                    req.send(await this.ide.cloud.exportRole());
+                'Open Terminal': async () => {
+                    new TerminalMorph(this).popUp(world);
                 },
             };
         }

@@ -331,7 +331,7 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
         #[post("/run")]
         async fn run_project(state: web::Data<State>, body: web::Bytes) -> impl Responder {
             match String::from_utf8(body.to_vec()) {
-                Ok(content) =>{
+                Ok(content) => {
                     state.proj_sender.lock().unwrap().send(content).unwrap();
                     HttpResponse::Ok()
                         .content_type("text/plain")
