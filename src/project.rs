@@ -144,11 +144,11 @@ impl<'gc, S: System> Project<'gc, S> {
             for (script, loc) in iter::zip(&ast_entity.scripts, &locs.scripts) {
                 if let Some(hat) = &script.hat {
                     scripts.push(Script {
-                        hat: match hat {
-                            ast::Hat::OnFlag { .. } => Hat::OnFlag,
-                            ast::Hat::LocalMessage { msg_type, .. } => Hat::LocalMessage { msg_type: msg_type.clone() },
-                            ast::Hat::NetworkMessage { msg_type, fields, .. } => Hat::NetworkMessage { msg_type: msg_type.clone(), fields: fields.iter().map(|x| x.trans_name.clone()).collect() },
-                            ast::Hat::OnKey { key, .. } => Hat::OnKey { key: parse_key(key) },
+                        hat: match &hat.kind {
+                            ast::HatKind::OnFlag => Hat::OnFlag,
+                            ast::HatKind::LocalMessage { msg_type } => Hat::LocalMessage { msg_type: msg_type.clone() },
+                            ast::HatKind::NetworkMessage { msg_type, fields } => Hat::NetworkMessage { msg_type: msg_type.clone(), fields: fields.iter().map(|x| x.trans_name.clone()).collect() },
+                            ast::HatKind::OnKey { key } => Hat::OnKey { key: parse_key(key) },
                             x => unimplemented!("{:?}", x),
                         },
                         entity: *entity,

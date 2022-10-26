@@ -19,23 +19,23 @@ struct Env<'gc> {
 }
 make_arena!(EnvArena, Env);
 
-fn get_running_proc(xml: &str, settings: Settings, system: &StdSystem) -> EnvArena {
-    EnvArena::new(Default::default(), |mc| {
-        let parser = ast::ParserBuilder::default().build().unwrap();
-        let ast = parser.parse(xml).unwrap();
-        assert_eq!(ast.roles.len(), 1);
+fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: &StdSystem) -> (EnvArena, InsLocations<String>) {
+    let parser = ast::ParserBuilder::default().build().unwrap();
+    let ast = parser.parse(xml).unwrap();
+    assert_eq!(ast.roles.len(), 1);
 
+    let (code, locs) = ByteCode::compile(&ast.roles[0]);
+    let main = locs.funcs.iter().find(|x| x.0.trans_name.trim() == "main").expect("no main function at global scope");
+
+    (EnvArena::new(Default::default(), |mc| {
         let glob = GcCell::allocate(mc, GlobalContext::from_ast(mc, &ast.roles[0]));
-        let (code, locs) = ByteCode::compile(&ast.roles[0]);
-        let main = locs.funcs.iter().find(|x| x.0.trans_name.trim() == "main").expect("no main function at global scope");
-
         let mut proc = Process::new(Rc::new(code), main.1, glob, glob.read().entities[0], settings);
         assert!(!proc.is_running());
         proc.initialize(Default::default(), None, None, system);
         assert!(proc.is_running());
 
         Env { glob, proc: GcCell::allocate(mc, proc) }
-    })
+    }), locs.instructions.transform(ToOwned::to_owned))
 }
 
 fn run_till_term<F>(env: &mut EnvArena, system: &StdSystem, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc>>, usize), ExecError>) {
@@ -63,7 +63,7 @@ fn run_till_term<F>(env: &mut EnvArena, system: &StdSystem, and_then: F) where F
 #[test]
 fn test_proc_ret() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/ret.xml"),
@@ -79,7 +79,7 @@ fn test_proc_ret() {
 #[test]
 fn test_proc_sum_123n() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/sum-123n.xml"),
@@ -102,7 +102,7 @@ fn test_proc_sum_123n() {
 #[test]
 fn test_proc_recursive_factorial() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/recursive-factorial.xml"),
@@ -125,7 +125,7 @@ fn test_proc_recursive_factorial() {
 #[test]
 fn test_proc_loops_lists_basic() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/loops-lists-basic.xml"),
@@ -165,7 +165,7 @@ fn test_proc_loops_lists_basic() {
 #[test]
 fn test_proc_recursively_self_containing_lists() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/recursively-self-containing-lists.xml"),
@@ -210,7 +210,7 @@ fn test_proc_recursively_self_containing_lists() {
 #[test]
 fn test_proc_sieve_of_eratosthenes() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/sieve-of-eratosthenes.xml"),
@@ -236,7 +236,7 @@ fn test_proc_sieve_of_eratosthenes() {
 #[test]
 fn test_proc_early_return() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/early-return.xml"),
@@ -252,7 +252,7 @@ fn test_proc_early_return() {
 #[test]
 fn test_proc_short_circuit() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/short-circuit.xml"),
@@ -280,7 +280,7 @@ fn test_proc_short_circuit() {
 #[test]
 fn test_proc_all_arithmetic() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/all-arithmetic.xml"),
@@ -324,7 +324,7 @@ fn test_proc_all_arithmetic() {
 #[test]
 fn test_proc_lambda_local_shadow_capture() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/lambda-local-shadow-capture.xml"),
@@ -340,7 +340,7 @@ fn test_proc_lambda_local_shadow_capture() {
 #[test]
 fn test_proc_generators_nested() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/generators-nested.xml"),
@@ -356,7 +356,7 @@ fn test_proc_generators_nested() {
 #[test]
 fn test_proc_call_in_closure() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/call-in-closure.xml"),
@@ -375,7 +375,7 @@ fn test_proc_call_in_closure() {
 #[test]
 fn test_proc_warp_yields() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="counter"><l>0</l></variable>"#,
         fields = "",
         funcs = include_str!("blocks/warp-yields.xml"),
@@ -402,7 +402,7 @@ fn test_proc_warp_yields() {
 #[test]
 fn test_proc_string_ops() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/string-ops.xml"),
@@ -461,7 +461,7 @@ fn test_proc_string_ops() {
 #[test]
 fn test_proc_str_cmp_case_insensitive() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/str-cmp-case-insensitive.xml"),
@@ -483,7 +483,7 @@ fn test_proc_str_cmp_case_insensitive() {
 #[test]
 fn test_proc_rpc_call_basic() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/rpc-call-basic.xml"),
@@ -507,7 +507,7 @@ fn test_proc_rpc_call_basic() {
 #[test]
 fn test_proc_list_index_blocks() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-index-blocks.xml"),
@@ -540,7 +540,7 @@ fn test_proc_list_index_blocks() {
 #[test]
 fn test_proc_literal_types() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/literal-types.xml"),
@@ -561,7 +561,7 @@ fn test_proc_say() {
         .print(Rc::new(move |v, _| Ok(if let Some(v) = v { writeln!(*output_cpy.borrow_mut(), "{:?}", v).unwrap() })))
         .build().unwrap();
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, config);
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/say.xml"),
@@ -596,7 +596,7 @@ fn test_proc_syscall() {
         })))
         .build().unwrap();
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, config);
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/syscall.xml"),
@@ -618,7 +618,7 @@ fn test_proc_syscall() {
 #[test]
 fn test_proc_timer_wait() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/timer-wait.xml"),
@@ -637,7 +637,7 @@ fn test_proc_timer_wait() {
 #[test]
 fn test_proc_cons_cdr() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/cons-cdr.xml"),
@@ -664,7 +664,7 @@ fn test_proc_cons_cdr() {
 #[test]
 fn test_proc_list_find_contains() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-find-contains.xml"),
@@ -692,7 +692,7 @@ fn test_proc_list_find_contains() {
 #[test]
 fn test_proc_append() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/append.xml"),
@@ -715,7 +715,7 @@ fn test_proc_append() {
 #[test]
 fn test_proc_foreach_mutate() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/foreach-mutate.xml"),
@@ -735,7 +735,7 @@ fn test_proc_foreach_mutate() {
 #[test]
 fn test_proc_map() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
         funcs = include_str!("blocks/map.xml"),
@@ -755,7 +755,7 @@ fn test_proc_map() {
 #[test]
 fn test_proc_keep_find() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
         funcs = include_str!("blocks/keep-find.xml"),
@@ -777,7 +777,7 @@ fn test_proc_keep_find() {
 #[test]
 fn test_proc_combine() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
         funcs = include_str!("blocks/combine.xml"),
@@ -804,7 +804,7 @@ fn test_proc_combine() {
 #[test]
 fn test_proc_autofill_closure_params() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
         funcs = include_str!("blocks/autofill-closure-params.xml"),
@@ -826,7 +826,7 @@ fn test_proc_autofill_closure_params() {
 #[test]
 fn test_proc_pick_random() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/pick-random.xml"),
@@ -887,7 +887,7 @@ fn test_proc_pick_random() {
 #[test]
 fn test_proc_rand_list_ops() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/rand-list-ops.xml"),
@@ -941,7 +941,7 @@ fn test_proc_rand_list_ops() {
 #[test]
 fn test_proc_variadic_sum_product() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/variadic-sum-product.xml"),
@@ -968,7 +968,7 @@ fn test_proc_variadic_sum_product() {
 #[test]
 fn test_proc_variadic_min_max() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/variadic-min-max.xml"),
@@ -984,7 +984,7 @@ fn test_proc_variadic_min_max() {
 #[test]
 fn test_proc_atan2_new_cmp() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/atan2-new-cmp.xml"),
@@ -1009,7 +1009,7 @@ fn test_proc_atan2_new_cmp() {
 #[test]
 fn test_proc_flatten() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/flatten.xml"),
@@ -1030,7 +1030,7 @@ fn test_proc_flatten() {
 #[test]
 fn test_proc_list_len_rank_dims() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-len-rank-dims.xml"),
@@ -1056,7 +1056,7 @@ fn test_proc_list_len_rank_dims() {
 #[test]
 fn test_proc_list_rev() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-rev.xml"),
@@ -1076,7 +1076,7 @@ fn test_proc_list_rev() {
 #[test]
 fn test_proc_list_reshape() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-reshape.xml"),
@@ -1111,7 +1111,7 @@ fn test_proc_list_reshape() {
 #[test]
 fn test_proc_list_json() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-json.xml"),
@@ -1134,7 +1134,7 @@ fn test_proc_list_json() {
 #[test]
 fn test_proc_list_combinations() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut env = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-combinations.xml"),
@@ -1171,5 +1171,28 @@ fn test_proc_list_combinations() {
             [],
         ]));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list combinations");
+    });
+}
+
+#[test]
+fn test_proc_index_over_bounds() {
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let (mut env, ins_locs) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/index-over-bounds.xml"),
+        methods = "",
+    ), Settings::builder().build().unwrap(), &system);
+
+    run_till_term(&mut env, &system, |_, _, res| {
+        let res = res.unwrap_err();
+        match &res.cause {
+            ErrorCause::IndexOutOfBounds { index, list_len } => {
+                assert!((index - 11.0).abs() < 1e-10);
+                assert_eq!(*list_len, 10);
+            }
+            x => panic!("{x:?}"),
+        }
+        assert_eq!(ins_locs.lookup(res.pos).as_deref().unwrap(), "item_18_4");
     });
 }
