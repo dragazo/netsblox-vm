@@ -12,6 +12,7 @@ use std::{thread, mem, fmt};
 
 use clap::Parser;
 use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
+use actix_cors::Cors;
 
 use crossterm::{cursor, execute, queue};
 use crossterm::tty::IsTty;
@@ -332,14 +333,21 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
             match String::from_utf8(body.to_vec()) {
                 Ok(content) =>{
                     state.proj_sender.lock().unwrap().send(content).unwrap();
-                    HttpResponse::Ok().body("loaded project")
+                    HttpResponse::Ok()
+                        .content_type("text/plain")
+                        .body("loaded project")
                 }
-                Err(_) => HttpResponse::BadRequest().body("project was not valid utf8")
+                Err(_) => {
+                    HttpResponse::BadRequest()
+                        .content_type("text/plain")
+                        .body("project was not valid utf8")
+                }
             }
         }
 
         HttpServer::new(move || {
             App::new()
+                .wrap(Cors::permissive())
                 .app_data(state.clone())
                 .service(get_extension)
                 .service(run_project)

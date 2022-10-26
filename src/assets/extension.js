@@ -1,4 +1,6 @@
 (function () {
+    const SERVER = 'http://{{addr}}:{{port}}';
+
     class NativeExtension extends Extension {
         constructor(ide) {
             super('Native');
@@ -11,7 +13,7 @@
             return {
                 'Run on Device': async () => {
                     const req = new XMLHttpRequest();
-                    req.open('POST', 'http://{{addr}}:{{port}}/run', true);
+                    req.open('POST', `${SERVER}/run`, true);
                     req.send(await this.ide.cloud.exportRole());
                 },
             };
