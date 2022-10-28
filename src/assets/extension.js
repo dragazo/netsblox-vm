@@ -53,6 +53,15 @@
 
         this.leftTools.add(this.stopButton = new PushButtonMorph(null, () => {
             console.log('stop pressed');
+
+            const req = new XMLHttpRequest();
+            req.onreadystatechange = () => {
+                if (req.readyState !== XMLHttpRequest.DONE) return;
+                console.log(req.responseText);
+            };
+            req.open('GET', `${SERVER}/output`, true);
+            req.send(null);
+
         }, 'Stop'));
 
         this.rightTools.add(this.closeButton = new PushButtonMorph(null, () => {

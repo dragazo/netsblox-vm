@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::cell::{Cell, RefCell};
 use std::io::{self, Read, Write as IoWrite, stdout};
 use std::fmt::Write as FmtWrite;
-use std::sync::Mutex;
+use std::sync::{Arc, Weak, Mutex};
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::{thread, mem, fmt};
 
@@ -28,6 +28,74 @@ use crate::process::*;
 use crate::project::*;
 
 const STEPS_PER_IO_ITER: usize = 64;
+const OUTPUT_BUFFER_SIZE: usize = 1 * 1024 * 1024;
+
+mod util {
+    use super::*;
+
+    pub struct OutputBuffer {
+        lines: VecDeque<String>,
+        bytes: usize,
+        max_bytes: usize,
+    }
+    impl OutputBuffer {
+        pub fn with_capacity(max_bytes: usize) -> Self {
+            Self { lines: Default::default(), bytes: 0, max_bytes }
+        }
+        pub fn append_line(&mut self, content: &str) {
+            for line in content.lines() {
+                while let Some(first) = self.lines.front() {
+                    if !first.is_empty() && self.bytes + line.len() <= self.max_bytes { break }
+                    self.bytes -= first.len();
+                    self.lines.pop_front();
+                }
+                debug_assert!(self.lines.is_empty() || self.bytes + line.len() <= self.max_bytes);
+                if self.bytes + line.len() <= self.max_bytes {
+                    self.lines.push_back(line.to_owned());
+                    self.bytes += line.len();
+                }
+            }
+            if content.ends_with("\n") {
+                self.lines.push_back(String::new());
+            }
+        }
+        pub fn clear(&mut self) {
+            self.lines.clear();
+            self.bytes = 0;
+        }
+        pub fn content(&self) -> &VecDeque<String> {
+            &self.lines
+        }
+    }
+    #[test]
+    fn test_output_buffer() {
+        let mut buf = OutputBuffer::with_capacity(32);
+        fn get(buf: &OutputBuffer) -> Vec<&str> {
+            buf.content().iter().map(String::as_str).collect()
+        }
+
+        assert_eq!(&get(&buf), &[] as &[&str]);
+        buf.append_line("hello world");
+        assert_eq!(&get(&buf), &["hello world"]);
+        buf.append_line("a");
+        assert_eq!(&get(&buf), &["hello world", "a"]);
+        buf.append_line("\nb");
+        assert_eq!(&get(&buf), &["hello world", "a", "", "b"]);
+        buf.append_line("\n\n\nc");
+        assert_eq!(&get(&buf), &["hello world", "a", "", "b", "", "", "", "c"]);
+        buf.append_line("d\n");
+        assert_eq!(&get(&buf), &["hello world", "a", "", "b", "", "", "", "c", "d", ""]);
+        buf.append_line("e\n\n\n");
+        assert_eq!(&get(&buf), &["hello world", "a", "", "b", "", "", "", "c", "d", "", "e", "", "", ""]);
+        buf.append_line("this is another test");
+        assert_eq!(&get(&buf), &["a", "", "b", "", "", "", "c", "d", "", "e", "", "", "", "this is another test"]);
+        buf.append_line("an other");
+        assert_eq!(&get(&buf), &["b", "", "", "", "c", "d", "", "e", "", "", "", "this is another test", "an other"]);
+        buf.append_line("j");
+        assert_eq!(&get(&buf), &["c", "d", "", "e", "", "", "", "this is another test", "an other", "j"]);
+    }
+}
+use util::*;
 
 macro_rules! crash {
     ($ret:literal : $($tt:tt)*) => {{
@@ -298,12 +366,6 @@ fn run_proj_non_tty(project_name: &str, server: String, mut env: EnvArena, overr
 fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemConfig, syscalls: &[SyscallMenu<'_>]) {
     println!(r#"connect from {nb_server}/?extensions=["http://{addr}:{port}/extension.js"]"#);
 
-    let config = overrides.or(StdSystemConfig::builder()
-        .print(Rc::new(move |value, entity| Ok(if let Some(value) = value { println!("{entity:?} > {value:?}") })))
-        .build().unwrap());
-    let system = StdSystem::new(nb_server, Some("native-server"), config);
-    println!("public id: {}", system.get_public_id());
-
     let extension_template = liquid::ParserBuilder::with_stdlib().build().unwrap().parse(include_str!("assets/extension.js")).unwrap();
     let extension = extension_template.render(&liquid::object!({
         "addr": addr,
@@ -316,16 +378,44 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
     struct State {
         extension: String,
         proj_sender: Mutex<Sender<String>>,
+        output: Mutex<OutputBuffer>,
     }
-    let state = web::Data::new(State { extension, proj_sender: Mutex::new(proj_sender) });
+    let state = web::Data::new(State {
+        extension,
+        proj_sender: Mutex::new(proj_sender),
+        output: Mutex::new(OutputBuffer::with_capacity(OUTPUT_BUFFER_SIZE)),
+    });
+
+    macro_rules! tee_println {
+        ($state:expr => $($t:tt)*) => {{
+            let content = format!($($t)*);
+            if let Some(state) = $state {
+                state.output.lock().unwrap().append_line(&content);
+            }
+            println!("{content}");
+        }}
+    }
+
+    let weak_state = Arc::downgrade(&state);
+    let config = overrides.or(StdSystemConfig::builder()
+        .print(Rc::new(move |value, entity| Ok(if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") })))
+        .build().unwrap());
+    let system = StdSystem::new(nb_server, Some("native-server"), config);
+    println!("public id: {}", system.get_public_id());
 
     #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
     async fn run_http(state: web::Data<State>, port: u16) {
         #[get("/extension.js")]
         async fn get_extension(state: web::Data<State>) -> impl Responder {
-            HttpResponse::Ok()
-                .content_type("text/javascript")
-                .body(state.extension.clone())
+            HttpResponse::Ok().content_type("text/javascript").body(state.extension.clone())
+        }
+
+        #[get("/output")]
+        async fn get_output(state: web::Data<State>) -> impl Responder {
+            match serde_json::to_string(state.output.lock().unwrap().content()) {
+                Ok(content) => HttpResponse::Ok().content_type("text/javascript").body(content),
+                Err(err) => HttpResponse::InternalServerError().content_type("text/plain").body(format!("{err:?}")),
+            }
         }
 
         #[post("/run")]
@@ -333,15 +423,9 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
             match String::from_utf8(body.to_vec()) {
                 Ok(content) => {
                     state.proj_sender.lock().unwrap().send(content).unwrap();
-                    HttpResponse::Ok()
-                        .content_type("text/plain")
-                        .body("loaded project")
+                    HttpResponse::Ok().content_type("text/plain").body("loaded project")
                 }
-                Err(_) => {
-                    HttpResponse::BadRequest()
-                        .content_type("text/plain")
-                        .body("project was not valid utf8")
-                }
+                Err(_) => HttpResponse::BadRequest().content_type("text/plain").body("project was not valid utf8")
             }
         }
 
@@ -350,11 +434,13 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
                 .wrap(Cors::permissive())
                 .app_data(state.clone())
                 .service(get_extension)
+                .service(get_output)
                 .service(run_project)
         })
         .workers(1)
         .bind(("localhost", port)).unwrap().run().await.unwrap();
     }
+    let weak_state = Arc::downgrade(&state);
     thread::spawn(move || run_http(state, port));
 
     let (_, empty_role) = open_project(include_str!("assets/empty-proj.xml"), None).unwrap_or_else(|_| crash!(666: "default project failed to load"));
@@ -364,11 +450,11 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
         match proj_receiver.try_recv() {
             Ok(content) => match open_project(&content, None) {
                 Ok((proj_name, role)) => {
-                    println!("\n>>> loaded project '{proj_name}'\n");
+                    tee_println!(weak_state.upgrade() => "\n>>> loaded project '{proj_name}'\n");
                     env = get_env(&role);
                     env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
                 }
-                Err(e) => println!("\n>>> project load error: {e:?}\n>>> resuming previous project...\n"),
+                Err(e) => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> resuming previous project...\n"),
             }
             Err(TryRecvError::Disconnected) => break,
             Err(TryRecvError::Empty) => (),
