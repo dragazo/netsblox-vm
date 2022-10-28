@@ -8,6 +8,7 @@
     TerminalMorph.prototype = new DialogBoxMorph();
     TerminalMorph.prototype.constructor = TerminalMorph;
     TerminalMorph.uber = DialogBoxMorph.prototype;
+    TerminalMorph.instance = null;
 
     TerminalMorph.prototype.init = function() {
         TerminalMorph.uber.init.call(this);
@@ -25,7 +26,8 @@
 
         this.handle = new HandleMorph(this, this.minWidth, this.minHeight, this.corner, this.corner);
 
-        this.add(this.tools = new AlignmentMorph('row'));
+        this.add(this.leftTools = new AlignmentMorph('row'));
+        this.add(this.rightTools = new AlignmentMorph('row'));
 
         function makeSpacer(width) {
             const res = new Morph();
@@ -35,7 +37,7 @@
             return res;
         }
 
-        this.tools.add(this.runButton = new PushButtonMorph(null, async () => {
+        this.leftTools.add(this.runButton = new PushButtonMorph(null, async () => {
             const req = new XMLHttpRequest();
             req.onreadystatechange = () => {
                 if (req.readyState !== XMLHttpRequest.DONE) return;
@@ -47,20 +49,30 @@
             req.send(await this.ext.ide.cloud.exportRole());
         }, 'Run'));
 
-        this.tools.add(makeSpacer(this.padding));
+        this.leftTools.add(makeSpacer(10));
 
-        this.tools.add(this.stopButton = new PushButtonMorph(null, () => {
+        this.leftTools.add(this.stopButton = new PushButtonMorph(null, () => {
             console.log('stop pressed');
         }, 'Stop'));
+
+        this.rightTools.add(this.closeButton = new PushButtonMorph(null, () => {
+            this.hide();
+        }, 'Close'));
 
         this.fixLayout();
     };
 
     TerminalMorph.prototype.fixLayout = function () {
-        if (this.tools) {
-            this.tools.fixLayout();
-            this.tools.setBottom(this.bottom() - this.padding);
-            this.tools.setLeft(this.left() + this.padding);
+        if (this.leftTools) {
+            this.leftTools.fixLayout();
+            this.leftTools.setBottom(this.bottom() - this.padding);
+            this.leftTools.setLeft(this.left() + this.padding);
+        }
+
+        if (this.rightTools) {
+            this.rightTools.fixLayout();
+            this.rightTools.setBottom(this.bottom() - this.padding);
+            this.rightTools.setRight(this.right() - this.padding - this.handle.width());
         }
 
         if (this.label) {
@@ -79,8 +91,13 @@
 
         getMenu() {
             return {
-                'Open Terminal': async () => {
-                    new TerminalMorph(this).popUp(world);
+                'Open Terminal': () => {
+                    if (!TerminalMorph.instance) {
+                        TerminalMorph.instance = new TerminalMorph(this);
+                        TerminalMorph.instance.popUp(world);
+                    } else {
+                        TerminalMorph.instance.show();
+                    }
                 },
             };
         }
