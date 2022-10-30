@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::cell::{Cell, RefCell};
 use std::io::{self, Read, Write as IoWrite, stdout};
 use std::fmt::Write as FmtWrite;
-use std::sync::{Arc, Weak, Mutex};
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::{thread, mem, fmt};
 
@@ -28,74 +28,6 @@ use crate::process::*;
 use crate::project::*;
 
 const STEPS_PER_IO_ITER: usize = 64;
-const OUTPUT_BUFFER_SIZE: usize = 1 * 1024 * 1024;
-
-mod util {
-    use super::*;
-
-    pub struct OutputBuffer {
-        lines: VecDeque<String>,
-        bytes: usize,
-        max_bytes: usize,
-    }
-    impl OutputBuffer {
-        pub fn with_capacity(max_bytes: usize) -> Self {
-            Self { lines: Default::default(), bytes: 0, max_bytes }
-        }
-        pub fn append_line(&mut self, content: &str) {
-            for line in content.lines() {
-                while let Some(first) = self.lines.front() {
-                    if !first.is_empty() && self.bytes + line.len() <= self.max_bytes { break }
-                    self.bytes -= first.len();
-                    self.lines.pop_front();
-                }
-                debug_assert!(self.lines.is_empty() || self.bytes + line.len() <= self.max_bytes);
-                if self.bytes + line.len() <= self.max_bytes {
-                    self.lines.push_back(line.to_owned());
-                    self.bytes += line.len();
-                }
-            }
-            if content.ends_with("\n") {
-                self.lines.push_back(String::new());
-            }
-        }
-        pub fn clear(&mut self) {
-            self.lines.clear();
-            self.bytes = 0;
-        }
-        pub fn content(&self) -> &VecDeque<String> {
-            &self.lines
-        }
-    }
-    #[test]
-    fn test_output_buffer() {
-        let mut buf = OutputBuffer::with_capacity(32);
-        fn get(buf: &OutputBuffer) -> Vec<&str> {
-            buf.content().iter().map(String::as_str).collect()
-        }
-
-        assert_eq!(&get(&buf), &[] as &[&str]);
-        buf.append_line("hello world");
-        assert_eq!(&get(&buf), &["hello world"]);
-        buf.append_line("a");
-        assert_eq!(&get(&buf), &["hello world", "a"]);
-        buf.append_line("\nb");
-        assert_eq!(&get(&buf), &["hello world", "a", "", "b"]);
-        buf.append_line("\n\n\nc");
-        assert_eq!(&get(&buf), &["hello world", "a", "", "b", "", "", "", "c"]);
-        buf.append_line("d\n");
-        assert_eq!(&get(&buf), &["hello world", "a", "", "b", "", "", "", "c", "d", ""]);
-        buf.append_line("e\n\n\n");
-        assert_eq!(&get(&buf), &["hello world", "a", "", "b", "", "", "", "c", "d", "", "e", "", "", ""]);
-        buf.append_line("this is another test");
-        assert_eq!(&get(&buf), &["a", "", "b", "", "", "", "c", "d", "", "e", "", "", "", "this is another test"]);
-        buf.append_line("an other");
-        assert_eq!(&get(&buf), &["b", "", "", "", "c", "d", "", "e", "", "", "", "this is another test", "an other"]);
-        buf.append_line("j");
-        assert_eq!(&get(&buf), &["c", "d", "", "e", "", "", "", "this is another test", "an other", "j"]);
-    }
-}
-use util::*;
 
 macro_rules! crash {
     ($ret:literal : $($tt:tt)*) => {{
@@ -378,19 +310,21 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
     struct State {
         extension: String,
         proj_sender: Mutex<Sender<String>>,
-        output: Mutex<OutputBuffer>,
+        output: Mutex<String>,
     }
     let state = web::Data::new(State {
         extension,
         proj_sender: Mutex::new(proj_sender),
-        output: Mutex::new(OutputBuffer::with_capacity(OUTPUT_BUFFER_SIZE)),
+        output: Mutex::new(String::with_capacity(1024)),
     });
 
     macro_rules! tee_println {
         ($state:expr => $($t:tt)*) => {{
             let content = format!($($t)*);
             if let Some(state) = $state {
-                state.output.lock().unwrap().append_line(&content);
+                let mut output = state.output.lock().unwrap();
+                output.push_str(&content);
+                output.push('\n');
             }
             println!("{content}");
         }}
@@ -412,10 +346,10 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
 
         #[get("/output")]
         async fn get_output(state: web::Data<State>) -> impl Responder {
-            match serde_json::to_string(state.output.lock().unwrap().content()) {
-                Ok(content) => HttpResponse::Ok().content_type("text/javascript").body(content),
-                Err(err) => HttpResponse::InternalServerError().content_type("text/plain").body(format!("{err:?}")),
-            }
+            let mut output = state.output.lock().unwrap();
+            let res = HttpResponse::Ok().content_type("text/plain").body(output.clone());
+            output.clear();
+            res
         }
 
         #[post("/run")]

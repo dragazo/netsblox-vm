@@ -18,6 +18,7 @@ strip = true
 
 [features]
 default = ["std"]
+all = ["std", "cli"]
 std = [
     "no-std-compat/std",
     "tokio", "futures", "async-channel",
