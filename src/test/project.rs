@@ -22,7 +22,7 @@ fn get_running_project(xml: &str, system: &StdSystem) -> EnvArena {
         assert_eq!(ast.roles.len(), 1);
 
         let settings = Settings::builder().build().unwrap();
-        let mut proj = Project::from_ast(mc, &ast.roles[0], settings);
+        let (mut proj, _) = Project::from_ast(mc, &ast.roles[0], settings);
         proj.input(Input::Start, system);
         Env { proj: GcCell::allocate(mc, proj) }
     })
@@ -31,7 +31,7 @@ fn get_running_project(xml: &str, system: &StdSystem) -> EnvArena {
 fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdSystem>, system: &StdSystem) {
     loop {
         match proj.step(mc, &system) {
-            ProjectStep::Idle => return,
+            ProjectStep::Idle | ProjectStep::Error { .. } => return,
             ProjectStep::Normal | ProjectStep::Yield => (),
         }
     }

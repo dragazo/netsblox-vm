@@ -782,7 +782,8 @@ pub struct ByteCode {
 }
 
 /// Instruction location lookup table from bytecode address to original AST location.
-#[derive(Debug)]
+#[derive(Debug, Collect)]
+#[collect(require_static)]
 pub struct InsLocations<T> {
     locs: BTreeMap<usize, T>,
 }

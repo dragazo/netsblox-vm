@@ -35,14 +35,18 @@
         this.labelString = 'Native Terminal';
         this.createLabel();
 
-        this.minWidth = 500;
-        this.minHeight = 400;
+        this.minWidth = 300;
+        this.minHeight = 300;
+
+        this.defaultWidth = 700;
+        this.defaultHeight = 500;
+
         this.titleOffset = 5;
         this.topOffset = 20;
         this.padding = 20;
 
-        this.bounds.setWidth(this.minWidth);
-        this.bounds.setHeight(this.minHeight);
+        this.bounds.setWidth(Math.max(this.defaultWidth, this.minWidth));
+        this.bounds.setHeight(Math.max(this.defaultHeight, this.minHeight));
 
         this.handle = new HandleMorph(this, this.minWidth, this.minHeight, this.corner, this.corner);
 
@@ -88,20 +92,23 @@
                 method: 'GET',
                 url: `${SERVER}/pull`,
                 onOk: res => {
-                    res = JSON.parse(res);
+                    const { output, errors } = JSON.parse(res);
                     try {
-                        if (res.output.length > 0) {
-                            const full = this.content.text + res.output;
+                        if (output.length > 0) {
+                            const full = this.content.text + output;
                             const clipped = full.substring(full.length - OUTPUT_MAX_SIZE);
                             this.setText(clipped);
                             this.gotoBottom();
+                        }
+                        if (errors.length > 0) {
+                            console.log('errors', errors);
                         }
                     } finally {
                         this.updateLoopTimer = setTimeout(updateLoop, OUTPUT_UPDATE_INTERVAL_MS);
                     }
                 },
                 onErr: (status, res) => {
-                    console.error('get output failed', status, res);
+                    console.error('pull status failed', status, res);
                     this.updateLoopTimer = setTimeout(updateLoop, OUTPUT_FAILED_UPDATE_INTERVAL_MS);
                 },
             });

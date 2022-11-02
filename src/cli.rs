@@ -11,6 +11,7 @@ use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::{thread, mem, fmt};
 
 use clap::Parser;
+use serde::Serialize;
 use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
 use actix_cors::Cors;
 
@@ -40,7 +41,7 @@ impl IdleSleeper {
     pub fn new() -> Self {
         IdleSleeper { yield_count: 0 }
     }
-    pub fn consume(&mut self, res: ProjectStep) {
+    pub fn consume<S: System>(&mut self, res: &ProjectStep<'_, S>) {
         match res {
             ProjectStep::Idle | ProjectStep::Yield => {
                 self.yield_count += 1;
@@ -49,7 +50,7 @@ impl IdleSleeper {
                     thread::sleep(IDLE_SLEEP_TIME);
                 }
             }
-            ProjectStep::Normal => self.yield_count = 0,
+            ProjectStep::Normal | ProjectStep::Error { .. } => self.yield_count = 0,
         }
     }
 }
@@ -76,6 +77,7 @@ impl<F: FnOnce()> Drop for AtExit<F> {
 #[collect(no_drop)]
 struct Env<'gc> {
     proj: GcCell<'gc, Project<'gc, StdSystem>>,
+    locs: InsLocations<String>,
 }
 make_arena!(EnvArena, Env);
 
@@ -190,8 +192,8 @@ fn open_project<'a>(content: &str, role: Option<&'a str>) -> Result<(String, ast
 fn get_env(role: &ast::Role) -> EnvArena {
     EnvArena::new(Default::default(), |mc| {
         let settings = Settings::builder().build().unwrap();
-        let proj = Project::from_ast(mc, role, settings);
-        Env { proj: GcCell::allocate(mc, proj) }
+        let (proj, locs) = Project::from_ast(mc, role, settings);
+        Env { proj: GcCell::allocate(mc, proj), locs: locs.instructions.transform(ToOwned::to_owned) }
     })
 }
 
@@ -278,7 +280,7 @@ fn run_proj_tty(project_name: &str, server: String, mut env: EnvArena, overrides
             for input in input_sequence.drain(..) { proj.input(input, &system); }
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc, &system);
-                idle_sleeper.consume(res);
+                idle_sleeper.consume(&res);
             }
         });
 
@@ -319,7 +321,7 @@ fn run_proj_non_tty(project_name: &str, server: String, mut env: EnvArena, overr
             let mut proj = env.proj.write(mc);
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc, &system);
-                idle_sleeper.consume(res);
+                idle_sleeper.consume(&res);
             }
         });
     }
@@ -336,15 +338,23 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
 
     let (proj_sender, proj_receiver) = channel();
 
+    #[derive(Serialize)]
+    struct Error {
+        cause: String,
+        entity: String,
+        location: Option<String>,
+    }
     struct State {
         extension: String,
         proj_sender: Mutex<Sender<String>>,
         output: Mutex<String>,
+        errors: Mutex<Vec<Error>>,
     }
     let state = web::Data::new(State {
         extension,
         proj_sender: Mutex::new(proj_sender),
         output: Mutex::new(String::with_capacity(1024)),
+        errors: Mutex::new(Vec::with_capacity(8)),
     });
 
     macro_rules! tee_println {
@@ -377,9 +387,14 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
         #[get("/pull")]
         async fn pull_status(state: web::Data<State>) -> impl Responder {
             let mut output = state.output.lock().unwrap();
-            let res = HttpResponse::Ok().content_type("text/plain").body(json!({
+            let mut errors = state.errors.lock().unwrap();
+
+            let res = HttpResponse::Ok().content_type("application/json").body(json!({
                 "output": output.as_str(),
+                "errors": errors.as_slice(),
             }).to_string());
+
+            errors.clear();
             output.clear();
             res
         }
@@ -431,7 +446,18 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
             let mut proj = env.proj.write(mc);
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc, &system);
-                idle_sleeper.consume(res);
+                if let ProjectStep::Error { error, proc } = &res {
+                    if let Some(state) = weak_state.upgrade() {
+                        let entity = proc.get_entity().read().name.clone();
+                        tee_println!(Some(&state) => "\n>>> runtime error in entity {entity:?}: {:?}\n>>> see red error comments...\n", error.cause);
+                        state.errors.lock().unwrap().push(Error {
+                            cause: format!("{:?}", error.cause),
+                            location: env.locs.lookup(error.pos).map(Clone::clone),
+                            entity,
+                        });
+                    }
+                }
+                idle_sleeper.consume(&res);
             }
         });
     }

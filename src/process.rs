@@ -195,6 +195,10 @@ impl<'gc, S: System> Process<'gc, S> {
     pub fn is_running(&self) -> bool {
         self.running
     }
+    /// Gets the entity that this process is tied to (see [`Process::new`]).
+    pub fn get_entity(&self) -> &GcCell<'gc, Entity<'gc>> {
+        &self.entity
+    }
     /// Prepares the process to execute starting at the main entry point (see [`Process::new`]) with the provided input local variables.
     /// A [`Barrier`] may also be set, which will be destroyed upon termination, either due to completion or an error.
     /// 

@@ -50,13 +50,15 @@ pub enum Input {
 }
 
 /// Result of stepping through the execution of a [`Project`].
-pub enum ProjectStep {
+pub enum ProjectStep<'gc, S: System> {
     /// There were no running processes to execute.
     Idle,
     /// The project had a running process, which yielded.
     Yield,
     /// The project had a running process, which did any non-yielding operation.
     Normal,
+    /// The project had a running process, which which encountered a runtime error.
+    Error { error: ExecError, proc: Process<'gc, S> },
 }
 
 #[derive(Collect)]
@@ -137,7 +139,7 @@ pub struct Project<'gc, S: System> {
     scripts: Vec<Script<'gc, S>>,
 }
 impl<'gc, S: System> Project<'gc, S> {
-    pub fn from_ast(mc: MutationContext<'gc, '_>, role: &ast::Role, settings: Settings) -> Self {
+    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, role: &'a ast::Role, settings: Settings) -> (Self, Locations<'a>) {
         let global_context = GlobalContext::from_ast(mc, role);
         let (code, locations) = ByteCode::compile(role);
 
@@ -162,7 +164,7 @@ impl<'gc, S: System> Project<'gc, S> {
             }
         }
 
-        Self {
+        (Self {
             scripts,
             state: State {
                 global_context: GcCell::allocate(mc, global_context),
@@ -171,7 +173,7 @@ impl<'gc, S: System> Project<'gc, S> {
                 processes: Default::default(),
                 process_queue: Default::default(),
             }
-        }
+        }, locations)
     }
     pub fn input(&mut self, input: Input, system: &S) {
         match input {
@@ -199,7 +201,7 @@ impl<'gc, S: System> Project<'gc, S> {
             Input::KeyUp(_) => unimplemented!(),
         }
     }
-    pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> ProjectStep {
+    pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> ProjectStep<'gc, S> {
         if let Some((msg_type, values, reply_key)) = system.receive_message() {
             let values: BTreeMap<_,_> = values.into_iter().collect();
             for script in self.scripts.iter_mut() {
@@ -249,7 +251,10 @@ impl<'gc, S: System> Project<'gc, S> {
                     ProjectStep::Normal
                 }
             }
-            Err(e) => unimplemented!("{e:?}"),
+            Err(error) => ProjectStep::Error {
+                error,
+                proc: self.state.processes.remove(proc_key).unwrap(),
+            },
         }
     }
     pub fn global_context(&self) -> GcCell<'gc, GlobalContext<'gc>> {
