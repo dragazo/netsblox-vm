@@ -32,7 +32,7 @@ fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdS
     loop {
         match proj.step(mc, &system) {
             ProjectStep::Idle => return,
-            ProjectStep::Normal => (),
+            ProjectStep::Normal | ProjectStep::Yield => (),
         }
     }
 }

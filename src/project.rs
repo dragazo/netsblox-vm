@@ -51,10 +51,12 @@ pub enum Input {
 
 /// Result of stepping through the execution of a [`Project`].
 pub enum ProjectStep {
-    /// The project had running processes to execute and did so.
-    Normal,
     /// There were no running processes to execute.
     Idle,
+    /// The project had a running process, which yielded.
+    Yield,
+    /// The project had a running process, which did any non-yielding operation.
+    Normal,
 }
 
 #[derive(Collect)]
@@ -224,9 +226,15 @@ impl<'gc, S: System> Project<'gc, S> {
 
         match proc.step(mc, system) {
             Ok(x) => match x {
-                ProcessStep::Normal => self.state.process_queue.push_front(proc_key),
-                ProcessStep::Yield => self.state.process_queue.push_back(proc_key),
-                ProcessStep::Terminate { .. } => (),
+                ProcessStep::Normal => {
+                    self.state.process_queue.push_front(proc_key);
+                    ProjectStep::Normal
+                }
+                ProcessStep::Yield => {
+                    self.state.process_queue.push_back(proc_key);
+                    ProjectStep::Yield
+                }
+                ProcessStep::Terminate { .. } => ProjectStep::Normal,
                 ProcessStep::Idle => unreachable!(),
                 ProcessStep::Broadcast { msg_type, barrier } => {
                     for script in self.scripts.iter_mut() {
@@ -238,12 +246,11 @@ impl<'gc, S: System> Project<'gc, S> {
                         }
                     }
                     self.state.process_queue.push_front(proc_key); // keep executing same process, if it was a wait, it'll yield next step
+                    ProjectStep::Normal
                 }
             }
             Err(e) => unimplemented!("{e:?}"),
         }
-
-        ProjectStep::Normal
     }
     pub fn global_context(&self) -> GcCell<'gc, GlobalContext<'gc>> {
         self.state.global_context

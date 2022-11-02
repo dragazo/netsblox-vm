@@ -28,6 +28,29 @@ use crate::process::*;
 use crate::project::*;
 
 const STEPS_PER_IO_ITER: usize = 64;
+const YIELDS_BEFORE_IDLE_SLEEP: usize = 1024;
+const IDLE_SLEEP_TIME: Duration = Duration::from_micros(500);
+
+struct IdleSleeper {
+    yield_count: usize,
+}
+impl IdleSleeper {
+    pub fn new() -> Self {
+        IdleSleeper { yield_count: 0 }
+    }
+    pub fn consume(&mut self, res: ProjectStep) {
+        match res {
+            ProjectStep::Idle | ProjectStep::Yield => {
+                self.yield_count += 1;
+                if self.yield_count >= YIELDS_BEFORE_IDLE_SLEEP {
+                    self.yield_count = 0;
+                    thread::sleep(IDLE_SLEEP_TIME);
+                }
+            }
+            ProjectStep::Normal => self.yield_count = 0,
+        }
+    }
+}
 
 macro_rules! crash {
     ($ret:literal : $($tt:tt)*) => {{
@@ -211,6 +234,7 @@ fn run_proj_tty(project_name: &str, server: String, mut env: EnvArena, overrides
         })
         .build().unwrap());
     let system = StdSystem::new(server, Some(project_name), config);
+    let mut idle_sleeper = IdleSleeper::new();
     print!("public id: {}\r\n", system.get_public_id());
 
     env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
@@ -251,7 +275,8 @@ fn run_proj_tty(project_name: &str, server: String, mut env: EnvArena, overrides
             let mut proj = env.proj.write(mc);
             for input in input_sequence.drain(..) { proj.input(input, &system); }
             for _ in 0..STEPS_PER_IO_ITER {
-                proj.step(mc, &system);
+                let res = proj.step(mc, &system);
+                idle_sleeper.consume(res);
             }
         });
 
@@ -282,6 +307,7 @@ fn run_proj_non_tty(project_name: &str, server: String, mut env: EnvArena, overr
         .print(Rc::new(move |value, entity| Ok(if let Some(value) = value { println!("{entity:?} > {value:?}") })))
         .build().unwrap());
     let system = StdSystem::new(server, Some(project_name), config);
+    let mut idle_sleeper = IdleSleeper::new();
     println!("public id: {}", system.get_public_id());
 
     env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
@@ -290,7 +316,8 @@ fn run_proj_non_tty(project_name: &str, server: String, mut env: EnvArena, overr
         env.mutate(|mc, env| {
             let mut proj = env.proj.write(mc);
             for _ in 0..STEPS_PER_IO_ITER {
-                proj.step(mc, &system);
+                let res = proj.step(mc, &system);
+                idle_sleeper.consume(res);
             }
         });
     }
@@ -335,6 +362,7 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
         .print(Rc::new(move |value, entity| Ok(if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") })))
         .build().unwrap());
     let system = StdSystem::new(nb_server, Some("native-server"), config);
+    let mut idle_sleeper = IdleSleeper::new();
     println!("public id: {}", system.get_public_id());
 
     #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
@@ -397,7 +425,8 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
         env.mutate(|mc, env| {
             let mut proj = env.proj.write(mc);
             for _ in 0..STEPS_PER_IO_ITER {
-                proj.step(mc, &system);
+                let res = proj.step(mc, &system);
+                idle_sleeper.consume(res);
             }
         });
     }
