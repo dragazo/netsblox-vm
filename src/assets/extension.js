@@ -67,7 +67,7 @@
                 method: 'POST',
                 url: `${SERVER}/run`,
                 onErr: alert,
-                body: await this.ext.ide.cloud.exportRole(),
+                body: this.ext.ide.getSerializedRole(),
             });
         }, 'Run'));
 
@@ -86,11 +86,12 @@
         const updateLoop = () => {
             request({
                 method: 'GET',
-                url: `${SERVER}/output`,
+                url: `${SERVER}/pull`,
                 onOk: res => {
+                    res = JSON.parse(res);
                     try {
-                        if (res.length > 0) {
-                            const full = this.content.text + res;
+                        if (res.output.length > 0) {
+                            const full = this.content.text + res.output;
                             const clipped = full.substring(full.length - OUTPUT_MAX_SIZE);
                             this.setText(clipped);
                             this.gotoBottom();

@@ -22,13 +22,15 @@ use crossterm::style::{ResetColor, SetForegroundColor, Color, Print};
 
 use crate::*;
 use crate::gc::{GcCell, Collect, make_arena};
+use crate::json::*;
 use crate::bytecode::*;
 use crate::runtime::*;
 use crate::process::*;
 use crate::project::*;
 
 const STEPS_PER_IO_ITER: usize = 64;
-const YIELDS_BEFORE_IDLE_SLEEP: usize = 1024;
+const MAX_REQUEST_SIZE_BYTES: usize = 1024 * 1024 * 1024;
+const YIELDS_BEFORE_IDLE_SLEEP: usize = 256;
 const IDLE_SLEEP_TIME: Duration = Duration::from_micros(500);
 
 struct IdleSleeper {
@@ -372,10 +374,12 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
             HttpResponse::Ok().content_type("text/javascript").body(state.extension.clone())
         }
 
-        #[get("/output")]
-        async fn get_output(state: web::Data<State>) -> impl Responder {
+        #[get("/pull")]
+        async fn pull_status(state: web::Data<State>) -> impl Responder {
             let mut output = state.output.lock().unwrap();
-            let res = HttpResponse::Ok().content_type("text/plain").body(output.clone());
+            let res = HttpResponse::Ok().content_type("text/plain").body(json!({
+                "output": output.as_str(),
+            }).to_string());
             output.clear();
             res
         }
@@ -394,9 +398,10 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
         HttpServer::new(move || {
             App::new()
                 .wrap(Cors::permissive())
+                .app_data(web::PayloadConfig::new(MAX_REQUEST_SIZE_BYTES))
                 .app_data(state.clone())
                 .service(get_extension)
-                .service(get_output)
+                .service(pull_status)
                 .service(run_project)
         })
         .workers(1)
