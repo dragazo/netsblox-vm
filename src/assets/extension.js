@@ -47,7 +47,7 @@
         this.handle = new HandleMorph(this, this.minWidth, this.minHeight, this.corner, this.corner);
 
         this.add(this.contentFrame = new ScrollFrameMorph());
-        this.contentFrame.addContents(this.content = new TextMorph('Loading...'));
+        this.contentFrame.addContents(this.content = new TextMorph(''));
         this.contentFrame.color = new Color(41, 41, 41);
         this.content.color = new Color(255, 255, 255);
 
