@@ -101,7 +101,42 @@
                             this.gotoBottom();
                         }
                         if (errors.length > 0) {
-                            console.log('errors', errors);
+                            const codeRoot = this.ext.ide.room.ide;
+                            const lookup = {};
+                            const walk = root => {
+                                lookup[root.id] = root;
+                                for (const child of root.children) {
+                                    walk(child);
+                                }
+                            };
+
+                            for (const entity of [codeRoot.stage, ...codeRoot.sprites.contents]) {
+                                for (const script of entity.scripts.children) {
+                                    walk(script);
+                                }
+                            }
+
+                            for (const error of errors) {
+                                const block = lookup[error.location];
+                                if (block !== undefined) {
+                                    const comment = new CommentMorph(error.cause);
+                                    comment.color = new Color(200, 0, 0);
+                                    comment.borderColor = new Color(160, 0, 0);
+                                    comment.titleBar.color = new Color(160, 0, 0);
+                                    comment.titleBar.borderColor = new Color(120, 0, 0);
+                                    comment.contents.color = new Color(255, 255, 255);
+
+                                    if (block.comment) block.comment.destroy();
+
+                                    block.comment = comment;
+                                    comment.block = block;
+                                    comment.align();
+                                    block.fixLayout();
+                                    block.rerender();
+                                } else {
+                                    console.warn('failed to find block', error);
+                                }
+                            }
                         }
                     } finally {
                         this.updateLoopTimer = setTimeout(updateLoop, OUTPUT_UPDATE_INTERVAL_MS);
