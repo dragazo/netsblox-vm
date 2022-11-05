@@ -55,6 +55,9 @@
         this.contentFrame.color = new Color(41, 41, 41);
         this.content.color = new Color(255, 255, 255);
 
+        this.contentFrame.acceptsDrops = false;
+        this.contentFrame.contents.acceptsDrops = false;
+
         this.add(this.leftTools = new AlignmentMorph('row'));
         this.add(this.rightTools = new AlignmentMorph('row'));
 
@@ -101,40 +104,62 @@
                             this.gotoBottom();
                         }
                         if (errors.length > 0) {
-                            const codeRoot = this.ext.ide.room.ide;
+                            const ide = this.ext.ide;
                             const lookup = {};
                             const walk = root => {
-                                lookup[root.id] = root;
+                                if (root.id) (lookup[root.id] || (lookup[root.id] = [])).push(root);
                                 for (const child of root.children) {
                                     walk(child);
                                 }
                             };
 
-                            for (const entity of [codeRoot.stage, ...codeRoot.sprites.contents]) {
-                                for (const script of entity.scripts.children) {
-                                    walk(script);
+                            walk(world);
+                            for (const block of ide.stage.globalBlocks) {
+                                walk(block.body.expression);
+                            }
+                            for (const entity of [ide.stage, ...ide.sprites.contents]) {
+                                for (const block of entity.customBlocks) {
+                                    walk(block.body.expression);
                                 }
                             }
 
                             for (const error of errors) {
-                                const block = lookup[error.location];
-                                if (block !== undefined) {
-                                    const comment = new CommentMorph(error.cause);
+                                const commentFamily = [];
+                                const errorComment = comment => {
+                                    commentFamily.push(comment);
+
                                     comment.color = new Color(200, 0, 0);
                                     comment.borderColor = new Color(160, 0, 0);
                                     comment.titleBar.color = new Color(160, 0, 0);
                                     comment.titleBar.borderColor = new Color(120, 0, 0);
                                     comment.contents.color = new Color(255, 255, 255);
 
-                                    if (block.comment) block.comment.destroy();
+                                    comment.destroy = () => {
+                                        for (const x of commentFamily) {
+                                            CommentMorph.prototype.destroy.apply(x);
+                                        }
+                                    };
+                                    comment.fullCopy = () => errorComment(CommentMorph.prototype.fullCopy.apply(comment));
 
-                                    block.comment = comment;
-                                    comment.block = block;
-                                    comment.align();
-                                    block.fixLayout();
-                                    block.rerender();
-                                } else {
-                                    console.warn('failed to find block', error);
+                                    return comment;
+                                };
+                                for (const location of error.trace) {
+                                    const blocks = lookup[location];
+                                    if (blocks !== undefined) {
+                                        for (const block of blocks) {
+                                            const comment = errorComment(new CommentMorph(error.cause));
+
+                                            if (block.comment) block.comment.destroy();
+
+                                            block.comment = comment;
+                                            comment.block = block;
+                                            comment.align();
+                                            block.fixLayout();
+                                            block.rerender();
+                                        }
+                                    } else {
+                                        console.warn('failed to find block', location, error);
+                                    }
                                 }
                             }
                         }

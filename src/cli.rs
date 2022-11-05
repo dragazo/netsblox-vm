@@ -8,7 +8,7 @@ use std::io::{self, Read, Write as IoWrite, stdout};
 use std::fmt::Write as FmtWrite;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, TryRecvError};
-use std::{thread, mem, fmt};
+use std::{thread, mem, fmt, iter};
 
 use clap::Parser;
 use serde::Serialize;
@@ -342,7 +342,7 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
     struct Error {
         cause: String,
         entity: String,
-        location: Option<String>,
+        trace: Vec<String>,
     }
     struct State {
         extension: String,
@@ -449,12 +449,19 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
                 if let ProjectStep::Error { error, proc } = &res {
                     if let Some(state) = weak_state.upgrade() {
                         let entity = proc.get_entity().read().name.clone();
-                        tee_println!(Some(&state) => "\n>>> runtime error in entity {entity:?}: {:?}\n>>> see red error comments...\n", error.cause);
-                        state.errors.lock().unwrap().push(Error {
-                            cause: format!("{:?}", error.cause),
-                            location: env.locs.lookup(error.pos).map(Clone::clone),
-                            entity,
-                        });
+                        let call_stack = proc.get_call_stack();
+
+                        let cause = format!("{:?}", error.cause);
+                        tee_println!(Some(&state) => "\n>>> runtime error in entity {entity:?}: {cause:?}\n>>> see red error comments...\n");
+
+                        let mut trace = Vec::with_capacity(call_stack.len() + 1);
+                        for pos in call_stack[1..].iter().map(|x| x.called_from).chain(iter::once(error.pos)) {
+                            if let Some(loc) = env.locs.lookup(pos) {
+                                trace.push(loc.clone());
+                            }
+                        }
+
+                        state.errors.lock().unwrap().push(Error { entity, cause, trace });
                     }
                 }
                 idle_sleeper.consume(&res);

@@ -125,9 +125,12 @@ impl Settings {
 }
 
 #[derive(Collect)]
-#[collect(require_static)]
-struct ReturnPoint {
-    pos: usize,
+#[collect(no_drop)]
+pub struct CallStackEntry<'gc> {
+    pub called_from: usize,
+    pub locals: SymbolTable<'gc>,
+
+    return_to: usize,
     warp_counter: usize,
     value_stack_size: usize,
 }
@@ -160,7 +163,7 @@ pub struct Process<'gc, S: System> {
     barrier: Option<Barrier>,
     reply_key: Option<S::InternReplyKey>,
     warp_counter: usize,
-    call_stack: Vec<(ReturnPoint, SymbolTable<'gc>)>, // tuples of (ret pos, locals)
+    call_stack: Vec<CallStackEntry<'gc>>,
     value_stack: Vec<Value<'gc>>,
     meta_stack: Vec<String>,
     defer: Option<Defer<S>>,
@@ -195,9 +198,20 @@ impl<'gc, S: System> Process<'gc, S> {
     pub fn is_running(&self) -> bool {
         self.running
     }
+    /// Gets the global context that this process is tied to (see [`Process::new`]).
+    pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc>> {
+        self.global_context
+    }
     /// Gets the entity that this process is tied to (see [`Process::new`]).
-    pub fn get_entity(&self) -> &GcCell<'gc, Entity<'gc>> {
-        &self.entity
+    pub fn get_entity(&self) -> GcCell<'gc, Entity<'gc>> {
+        self.entity
+    }
+    /// Gets a reference to the current call stack.
+    /// This gives access to stack trace information including all local scopes in the call chain.
+    /// Note that the call stack is never empty, and that the always-present first element (denoting the initial execution request) is a special
+    /// entry which has an invalid value for [`CallStackEntry::return_to`], namely [`usize::MAX`].
+    pub fn get_call_stack(&self) -> &[CallStackEntry<'gc>] {
+        &self.call_stack
     }
     /// Prepares the process to execute starting at the main entry point (see [`Process::new`]) with the provided input local variables.
     /// A [`Barrier`] may also be set, which will be destroyed upon termination, either due to completion or an error.
@@ -210,7 +224,13 @@ impl<'gc, S: System> Process<'gc, S> {
         self.reply_key = reply_key;
         self.warp_counter = 0;
         self.call_stack.clear();
-        self.call_stack.push((ReturnPoint { pos: usize::MAX, warp_counter: 0, value_stack_size: 0 }, locals));
+        self.call_stack.push(CallStackEntry {
+            called_from: usize::MAX,
+            return_to: usize::MAX,
+            warp_counter: 0,
+            value_stack_size: 0,
+            locals,
+        });
         self.value_stack.clear();
         self.meta_stack.clear();
         self.defer = None;
@@ -325,7 +345,7 @@ impl<'gc, S: System> Process<'gc, S> {
         if !entity.alive { return Ok(ProcessStep::Terminate { result: None }) }
 
         let mut global_context = self.global_context.write(mc);
-        let mut context = [&mut global_context.globals, &mut entity.fields, &mut self.call_stack.last_mut().unwrap().1];
+        let mut context = [&mut global_context.globals, &mut entity.fields, &mut self.call_stack.last_mut().unwrap().locals];
         let mut context = LookupGroup::new(&mut context);
 
         macro_rules! lookup_var {
@@ -746,7 +766,13 @@ impl<'gc, S: System> Process<'gc, S> {
                 for var in params.iter().rev() {
                     locals.redefine_or_define(var, self.value_stack.pop().unwrap().into());
                 }
-                self.call_stack.push((ReturnPoint { pos: aft_pos, warp_counter: self.warp_counter, value_stack_size: self.value_stack.len() }, locals));
+                self.call_stack.push(CallStackEntry {
+                    called_from: self.pos,
+                    return_to: aft_pos,
+                    warp_counter: self.warp_counter,
+                    value_stack_size: self.value_stack.len(),
+                    locals
+                });
                 self.pos = pos;
             }
             Instruction::MakeClosure { pos, params, captures } => {
@@ -775,7 +801,13 @@ impl<'gc, S: System> Process<'gc, S> {
                 for var in closure.params.iter().rev() {
                     locals.redefine_or_define(var, self.value_stack.pop().unwrap().into());
                 }
-                self.call_stack.push((ReturnPoint { pos: aft_pos, warp_counter: self.warp_counter, value_stack_size: self.value_stack.len() }, locals));
+                self.call_stack.push(CallStackEntry {
+                    called_from: self.pos,
+                    return_to: aft_pos,
+                    warp_counter: self.warp_counter,
+                    value_stack_size: self.value_stack.len(),
+                    locals,
+                });
                 self.pos = closure.pos;
             }
             Instruction::CallRpc { service, rpc, args } => {
@@ -793,7 +825,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 }
             }
             Instruction::Return => {
-                let (return_point, _) = self.call_stack.pop().unwrap();
+                let return_point = self.call_stack.pop().unwrap();
                 let return_value = self.value_stack.pop().unwrap();
                 self.value_stack.drain(return_point.value_stack_size..);
                 debug_assert_eq!(self.value_stack.len(), return_point.value_stack_size);
@@ -801,12 +833,13 @@ impl<'gc, S: System> Process<'gc, S> {
 
                 if self.call_stack.is_empty() {
                     debug_assert_eq!(self.value_stack.len(), 1);
-                    debug_assert_eq!(return_point.pos, usize::MAX);
+                    debug_assert_eq!(return_point.called_from, usize::MAX);
+                    debug_assert_eq!(return_point.return_to, usize::MAX);
                     debug_assert_eq!(return_point.warp_counter, 0);
                     debug_assert_eq!(return_point.value_stack_size, 0);
                     return Ok(ProcessStep::Terminate { result: Some(self.value_stack.pop().unwrap()) });
                 } else {
-                    self.pos = return_point.pos;
+                    self.pos = return_point.return_to;
                     self.warp_counter = return_point.warp_counter;
                 }
             }
