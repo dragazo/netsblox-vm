@@ -299,7 +299,7 @@ impl fmt::Debug for Value<'_> {
         }
         let mut cache = Default::default();
         let res = print(self, &mut cache, f);
-        debug_assert_eq!(cache.len(), 0);
+        if res.is_ok() { debug_assert_eq!(cache.len(), 0); }
         res
     }
 }
@@ -349,7 +349,7 @@ impl<'gc> Value<'gc> {
         }
         let mut cache = Default::default();
         let res = simplify(self, &mut cache);
-        debug_assert_eq!(cache.len(), 0);
+        if res.is_ok() { debug_assert_eq!(cache.len(), 0); }
         res
     }
     /// Returns a value representing this object that implements [`Eq`] such that
@@ -531,6 +531,10 @@ impl<'gc> SymbolTable<'gc> {
     pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Shared<'gc, Value<'gc>>> {
         self.0.get_mut(var)
     }
+    /// Gets the number of symbols currently stored in the symbol table.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
     /// Iterates over the key value pairs stored in the symbol table.
     pub fn iter(&self) -> symbol_table::Iter<'gc, '_> {
         symbol_table::Iter(self.0.iter())
@@ -544,6 +548,16 @@ impl<'gc> IntoIterator for SymbolTable<'gc> {
     type Item = (String, Shared<'gc, Value<'gc>>);
     type IntoIter = symbol_table::IntoIter<'gc>;
     fn into_iter(self) -> Self::IntoIter { symbol_table::IntoIter(self.0.into_iter()) }
+}
+impl<'gc, 'a> IntoIterator for &'a SymbolTable<'gc> {
+    type Item = <symbol_table::Iter<'gc, 'a> as Iterator>::Item;
+    type IntoIter = symbol_table::Iter<'gc, 'a>;
+    fn into_iter(self) -> Self::IntoIter { self.iter() }
+}
+impl<'gc, 'a> IntoIterator for &'a mut SymbolTable<'gc> {
+    type Item = <symbol_table::IterMut<'gc, 'a> as Iterator>::Item;
+    type IntoIter = symbol_table::IterMut<'gc, 'a>;
+    fn into_iter(self) -> Self::IntoIter { self.iter_mut() }
 }
 pub mod symbol_table {
     //! Special types for working with a [`SymbolTable`].

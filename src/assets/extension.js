@@ -2,7 +2,7 @@
     const SERVER = 'http://{{addr}}:{{port}}';
 
     const OUTPUT_UPDATE_INTERVAL_MS = 250;
-    const OUTPUT_FAILED_UPDATE_INTERVAL_MS = 10000;
+    const OUTPUT_FAILED_UPDATE_INTERVAL_MS = 1000;
     const OUTPUT_MAX_SIZE = 1024 * 1024;
 
     function request(info) {
@@ -123,7 +123,12 @@
                                 }
                             }
 
+                            const formatVars = entries => entries.map(entry => `${entry.name} = ${entry.value}`).join('\n');
+
                             for (const error of errors) {
+                                const globals = formatVars(error.globals);
+                                const fields = formatVars(error.fields);
+
                                 const commentFamily = [];
                                 const errorComment = comment => {
                                     commentFamily.push(comment);
@@ -143,11 +148,16 @@
 
                                     return comment;
                                 };
-                                for (const location of error.trace) {
-                                    const blocks = lookup[location];
+                                for (const entry of error.trace) {
+                                    const locals = formatVars(entry.locals);
+                                    const blocks = lookup[entry.location];
                                     if (blocks !== undefined) {
                                         for (const block of blocks) {
-                                            const comment = errorComment(new CommentMorph(error.cause));
+                                            const vars = [locals, fields, globals].filter(x => x.length).join('\n\n');
+                                            let content = error.cause;
+                                            if (vars.length) content += `\n\n${vars}`;
+
+                                            const comment = errorComment(new CommentMorph(content));
 
                                             if (block.comment) block.comment.destroy();
 
@@ -158,7 +168,7 @@
                                             block.rerender();
                                         }
                                     } else {
-                                        console.warn('failed to find block', location, error);
+                                        console.warn('failed to find block', entry.location, error);
                                     }
                                 }
                             }

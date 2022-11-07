@@ -339,10 +339,22 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
     let (proj_sender, proj_receiver) = channel();
 
     #[derive(Serialize)]
+    struct VarEntry {
+        name: String,
+        value: String,
+    }
+    #[derive(Serialize)]
+    struct TraceEntry {
+        location: String,
+        locals: Vec<VarEntry>,
+    }
+    #[derive(Serialize)]
     struct Error {
         cause: String,
         entity: String,
-        trace: Vec<String>,
+        globals: Vec<VarEntry>,
+        fields: Vec<VarEntry>,
+        trace: Vec<TraceEntry>,
     }
     struct State {
         extension: String,
@@ -448,20 +460,31 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
                 let res = proj.step(mc, &system);
                 if let ProjectStep::Error { error, proc } = &res {
                     if let Some(state) = weak_state.upgrade() {
-                        let entity = proc.get_entity().read().name.clone();
-                        let call_stack = proc.get_call_stack();
-
+                        let raw_entity = proc.get_entity();
+                        let entity = raw_entity.read().name.clone();
                         let cause = format!("{:?}", error.cause);
                         tee_println!(Some(&state) => "\n>>> runtime error in entity {entity:?}: {cause:?}\n>>> see red error comments...\n");
 
-                        let mut trace = Vec::with_capacity(call_stack.len() + 1);
-                        for pos in call_stack[1..].iter().map(|x| x.called_from).chain(iter::once(error.pos)) {
+                        fn summarize_symbols(symbols: &SymbolTable) -> Vec<VarEntry> {
+                            let mut res = Vec::with_capacity(symbols.len());
+                            for (k, v) in symbols {
+                                res.push(VarEntry { name: k.clone(), value: format!("{:?}", v.get()) });
+                            }
+                            res
+                        }
+                        let globals = summarize_symbols(&proc.get_global_context().read().globals);
+                        let fields = summarize_symbols(&raw_entity.read().fields);
+
+                        let call_stack = proc.get_call_stack();
+                        let mut trace = Vec::with_capacity(call_stack.len());
+                        for (pos, locals) in iter::zip(call_stack[1..].iter().map(|x| x.called_from).chain(iter::once(error.pos)), call_stack.iter().map(|x| &x.locals)) {
                             if let Some(loc) = env.locs.lookup(pos) {
-                                trace.push(loc.clone());
+                                trace.push(TraceEntry { location: loc.clone(), locals: summarize_symbols(locals) });
                             }
                         }
+                        debug_assert_eq!(trace.len(), call_stack.len());
 
-                        state.errors.lock().unwrap().push(Error { entity, cause, trace });
+                        state.errors.lock().unwrap().push(Error { entity, cause, globals, fields, trace });
                     }
                 }
                 idle_sleeper.consume(&res);
