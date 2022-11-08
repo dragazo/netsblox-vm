@@ -8,6 +8,7 @@ use std::io::{self, Read, Write as IoWrite, stdout};
 use std::fmt::Write as FmtWrite;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, TryRecvError};
+use std::sync::atomic::{AtomicBool, Ordering as MemoryOrder};
 use std::{thread, mem, fmt, iter};
 
 use clap::Parser;
@@ -46,12 +47,15 @@ impl IdleSleeper {
             ProjectStep::Idle | ProjectStep::Yield => {
                 self.yield_count += 1;
                 if self.yield_count >= YIELDS_BEFORE_IDLE_SLEEP {
-                    self.yield_count = 0;
-                    thread::sleep(IDLE_SLEEP_TIME);
+                    self.sleep_now();
                 }
             }
             ProjectStep::Normal | ProjectStep::Error { .. } => self.yield_count = 0,
         }
+    }
+    pub fn sleep_now(&mut self) {
+        self.yield_count = 0;
+        thread::sleep(IDLE_SLEEP_TIME);
     }
 }
 
@@ -336,6 +340,11 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
         "syscalls": SyscallMenu::format(syscalls),
     })).unwrap();
 
+    enum Command {
+        SetProject(String),
+        Input(Input),
+    }
+
     let (proj_sender, proj_receiver) = channel();
 
     #[derive(Serialize)]
@@ -358,12 +367,14 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
     }
     struct State {
         extension: String,
-        proj_sender: Mutex<Sender<String>>,
+        running: AtomicBool,
+        proj_sender: Mutex<Sender<Command>>,
         output: Mutex<String>,
         errors: Mutex<Vec<Error>>,
     }
     let state = web::Data::new(State {
         extension,
+        running: AtomicBool::new(true),
         proj_sender: Mutex::new(proj_sender),
         output: Mutex::new(String::with_capacity(1024)),
         errors: Mutex::new(Vec::with_capacity(8)),
@@ -396,12 +407,13 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
             HttpResponse::Ok().content_type("text/javascript").body(state.extension.clone())
         }
 
-        #[get("/pull")]
+        #[post("/pull")]
         async fn pull_status(state: web::Data<State>) -> impl Responder {
             let mut output = state.output.lock().unwrap();
             let mut errors = state.errors.lock().unwrap();
 
             let res = HttpResponse::Ok().content_type("application/json").body(json!({
+                "running": state.running.load(MemoryOrder::Relaxed),
                 "output": output.as_str(),
                 "errors": errors.as_slice(),
             }).to_string());
@@ -411,15 +423,35 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
             res
         }
 
-        #[post("/run")]
-        async fn run_project(state: web::Data<State>, body: web::Bytes) -> impl Responder {
+        #[post("/set-project")]
+        async fn set_project(state: web::Data<State>, body: web::Bytes) -> impl Responder {
             match String::from_utf8(body.to_vec()) {
                 Ok(content) => {
-                    state.proj_sender.lock().unwrap().send(content).unwrap();
+                    state.proj_sender.lock().unwrap().send(Command::SetProject(content)).unwrap();
                     HttpResponse::Ok().content_type("text/plain").body("loaded project")
                 }
                 Err(_) => HttpResponse::BadRequest().content_type("text/plain").body("project was not valid utf8")
             }
+        }
+
+        #[post("/send-input")]
+        async fn send_input(state: web::Data<State>, input: web::Bytes) -> impl Responder {
+            let input = match String::from_utf8(input.to_vec()) {
+                Ok(input) => match input.as_str() {
+                    "start" => Input::Start,
+                    "stop" => Input::Stop,
+                    _ => return HttpResponse::BadRequest().content_type("text/plain").body(format!("unknown input: {input:?}")),
+                }
+                Err(_) => return HttpResponse::BadRequest().content_type("text/plain").body("input was not valid utf8")
+            };
+            state.proj_sender.lock().unwrap().send(Command::Input(input)).unwrap();
+            HttpResponse::Ok().content_type("text/plain").body("sent input")
+        }
+
+        #[post("/toggle-paused")]
+        async fn toggle_paused(state: web::Data<State>) -> impl Responder {
+            state.running.fetch_xor(true, MemoryOrder::Relaxed);
+            HttpResponse::Ok().content_type("text/plain").body("toggled pause state")
         }
 
         HttpServer::new(move || {
@@ -429,7 +461,9 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
                 .app_data(state.clone())
                 .service(get_extension)
                 .service(pull_status)
-                .service(run_project)
+                .service(set_project)
+                .service(send_input)
+                .service(toggle_paused)
         })
         .workers(1)
         .bind(("localhost", port)).unwrap().run().await.unwrap();
@@ -440,18 +474,33 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
     let (_, empty_role) = open_project(include_str!("assets/empty-proj.xml"), None).unwrap_or_else(|_| crash!(666: "default project failed to load"));
     let mut env = get_env(&empty_role);
 
-    loop {
-        match proj_receiver.try_recv() {
-            Ok(content) => match open_project(&content, None) {
-                Ok((proj_name, role)) => {
-                    tee_println!(weak_state.upgrade() => "\n>>> loaded project '{proj_name}'\n");
-                    env = get_env(&role);
-                    env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
+    'program: loop {
+        'input: loop {
+            match proj_receiver.try_recv() {
+                Ok(command) => match command {
+                    Command::SetProject(content) => match open_project(&content, None) {
+                        Ok((proj_name, role)) => {
+                            tee_println!(weak_state.upgrade() => "\n>>> loaded project '{proj_name}'\n");
+                            env = get_env(&role);
+                        }
+                        Err(e) => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> keeping previous project...\n"),
+                    }
+                    Command::Input(input) => {
+                        if let Input::Start = &input {
+                            if let Some(state) = weak_state.upgrade() {
+                                state.running.store(true, MemoryOrder::Relaxed);
+                            }
+                        }
+                        env.mutate(|mc, env| env.proj.write(mc).input(input, &system));
+                    }
                 }
-                Err(e) => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> resuming previous project...\n"),
+                Err(TryRecvError::Disconnected) => break 'program,
+                Err(TryRecvError::Empty) => break 'input,
             }
-            Err(TryRecvError::Disconnected) => break,
-            Err(TryRecvError::Empty) => (),
+        }
+        if !weak_state.upgrade().map(|state| state.running.load(MemoryOrder::Relaxed)).unwrap_or(true) {
+            idle_sleeper.sleep_now();
+            continue;
         }
 
         env.mutate(|mc, env| {

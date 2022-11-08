@@ -45,6 +45,8 @@
         this.topOffset = 20;
         this.padding = 20;
 
+        this.previousRunning = null;
+
         this.bounds.setWidth(Math.max(this.defaultWidth, this.minWidth));
         this.bounds.setHeight(Math.max(this.defaultHeight, this.minHeight));
 
@@ -59,6 +61,7 @@
         this.contentFrame.contents.acceptsDrops = false;
 
         this.add(this.leftTools = new AlignmentMorph('row'));
+        this.add(this.centerTools = new AlignmentMorph('row'));
         this.add(this.rightTools = new AlignmentMorph('row'));
 
         function makeSpacer(width) {
@@ -69,34 +72,85 @@
             return res;
         }
 
-        this.leftTools.add(this.runButton = new PushButtonMorph(null, async () => {
-            request({
-                method: 'POST',
-                url: `${SERVER}/run`,
-                onErr: alert,
-                body: this.ext.ide.getSerializedRole(),
-            });
-        }, 'Run'));
+        const darkBackgroundColor = new Color(67, 67, 67);
+        const darkHighlightColor = new Color(41, 41, 41);
+
+        // ----------------------------------------------------------------------------------------
+
+        this.leftTools.add(this.uploadButton = new PushButtonMorph(null, () => request({
+            method: 'POST',
+            url: `${SERVER}/set-project`,
+            onErr: alert,
+            body: this.ext.ide.getSerializedRole(),
+        }), 'Upload'));
 
         this.leftTools.add(makeSpacer(10));
 
-        this.leftTools.add(this.stopButton = new PushButtonMorph(null, () => {
-            this.setText('');
-        }, 'Clear'));
+        this.leftTools.add(this.clearButton = new PushButtonMorph(null, () => this.setText(''), 'Clear'));
+
+        // ----------------------------------------------------------------------------------------
+
+        this.centerTools.add(this.runButton = new PushButtonMorph(null, () => request({
+            method: 'POST',
+            url: `${SERVER}/send-input`,
+            onErr: alert,
+            body: 'start',
+        }), new SymbolMorph('flag', 12)));
+        this.runButton.color = darkBackgroundColor;
+        this.runButton.highlightColor = darkHighlightColor;
+        this.runButton.label.color = new Color(0, 200, 0);
+        this.runButton.label.shadowColor = null;
+
+        this.centerTools.add(makeSpacer(10));
+
+        this.centerTools.add(this.togglePausedButton = new PushButtonMorph(null, () => request({
+            method: 'POST',
+            url: `${SERVER}/toggle-paused`,
+            onErr: alert,
+        }), '$'));
+        this.togglePausedButton.color = darkBackgroundColor;
+        this.togglePausedButton.highlightColor = darkHighlightColor;
+        this.togglePausedButton.labelColor = new Color(255, 220, 0);
+        this.togglePausedButton.labelShadowColor = null;
+
+        this.centerTools.add(makeSpacer(10));
+
+        this.centerTools.add(this.stopButton = new PushButtonMorph(null, () => request({
+            method: 'POST',
+            url: `${SERVER}/send-input`,
+            onErr: alert,
+            body: 'stop',
+        }), new SymbolMorph('octagon', 12)));
+        this.stopButton.color = darkBackgroundColor;
+        this.stopButton.highlightColor = darkHighlightColor;
+        this.stopButton.label.color = new Color(200, 0, 0);
+        this.stopButton.label.shadowColor = null;
+
+        // ----------------------------------------------------------------------------------------
 
         this.rightTools.add(this.closeButton = new PushButtonMorph(null, () => {
             this.hide();
         }, 'Close'));
 
+        // ----------------------------------------------------------------------------------------
+
         this.fixLayout();
 
         const updateLoop = () => {
             request({
-                method: 'GET',
+                method: 'POST',
                 url: `${SERVER}/pull`,
                 onOk: res => {
-                    const { output, errors } = JSON.parse(res);
+                    const { running, output, errors } = JSON.parse(res);
                     try {
+                        if (this.previousRunning !== running) {
+                            this.previousRunning = running;
+                            this.togglePausedButton.labelString = running ? new SymbolMorph('pause', 12) : new SymbolMorph('pointRight', 12);
+                            this.togglePausedButton.createLabel();
+                            this.togglePausedButton.fixLayout();
+                            this.togglePausedButton.rerender();
+                            this.fixLayout();
+                        }
                         if (output.length > 0) {
                             const full = this.content.text + output;
                             const clipped = full.substring(full.length - OUTPUT_MAX_SIZE);
@@ -202,6 +256,12 @@
             this.leftTools.fixLayout();
             this.leftTools.setBottom(this.bottom() - this.padding);
             this.leftTools.setLeft(this.left() + this.padding);
+        }
+
+        if (this.centerTools) {
+            this.centerTools.fixLayout();
+            this.centerTools.setCenter(this.center());
+            this.centerTools.setBottom(this.bottom() - this.padding);
         }
 
         if (this.rightTools) {
