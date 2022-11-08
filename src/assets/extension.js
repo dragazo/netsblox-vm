@@ -35,7 +35,7 @@
         this.labelString = 'Native Terminal';
         this.createLabel();
 
-        this.minWidth = 300;
+        this.minWidth = 400;
         this.minHeight = 300;
 
         this.defaultWidth = 700;
@@ -74,6 +74,7 @@
 
         const darkBackgroundColor = new Color(67, 67, 67);
         const darkHighlightColor = new Color(41, 41, 41);
+        const darkPressColor = new Color(20, 20, 20);
 
         // ----------------------------------------------------------------------------------------
 
@@ -98,6 +99,7 @@
         }), new SymbolMorph('flag', 12)));
         this.runButton.color = darkBackgroundColor;
         this.runButton.highlightColor = darkHighlightColor;
+        this.runButton.pressColor = darkPressColor;
         this.runButton.label.color = new Color(0, 200, 0);
         this.runButton.label.shadowColor = null;
 
@@ -110,6 +112,7 @@
         }), '$'));
         this.togglePausedButton.color = darkBackgroundColor;
         this.togglePausedButton.highlightColor = darkHighlightColor;
+        this.togglePausedButton.pressColor = darkPressColor;
         this.togglePausedButton.labelColor = new Color(255, 220, 0);
         this.togglePausedButton.labelShadowColor = null;
 
@@ -123,6 +126,7 @@
         }), new SymbolMorph('octagon', 12)));
         this.stopButton.color = darkBackgroundColor;
         this.stopButton.highlightColor = darkHighlightColor;
+        this.stopButton.pressColor = darkPressColor;
         this.stopButton.label.color = new Color(200, 0, 0);
         this.stopButton.label.shadowColor = null;
 
