@@ -147,8 +147,6 @@
                 return;
             }
 
-            console.log('update', Date.now());
-
             request({
                 method: 'POST',
                 url: `${SERVER}/pull`,
