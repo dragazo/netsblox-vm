@@ -2,7 +2,6 @@
     const SERVER = 'http://{{addr}}:{{port}}';
 
     const OUTPUT_UPDATE_INTERVAL_MS = 250;
-    const OUTPUT_FAILED_UPDATE_INTERVAL_MS = 1000;
     const OUTPUT_MAX_SIZE = 1024 * 1024;
 
     function request(info) {
@@ -45,6 +44,7 @@
         this.topOffset = 20;
         this.padding = 20;
 
+        this.doUpdates = false;
         this.previousRunning = null;
 
         this.bounds.setWidth(Math.max(this.defaultWidth, this.minWidth));
@@ -78,7 +78,7 @@
 
         // ----------------------------------------------------------------------------------------
 
-        this.leftTools.add(this.uploadButton = new PushButtonMorph(null, () => request({
+        this.leftTools.add(this.setProjectButton = new PushButtonMorph(null, () => request({
             method: 'POST',
             url: `${SERVER}/set-project`,
             onErr: alert,
@@ -91,17 +91,17 @@
 
         // ----------------------------------------------------------------------------------------
 
-        this.centerTools.add(this.runButton = new PushButtonMorph(null, () => request({
+        this.centerTools.add(this.startButton = new PushButtonMorph(null, () => request({
             method: 'POST',
             url: `${SERVER}/send-input`,
             onErr: alert,
             body: 'start',
         }), new SymbolMorph('flag', 12)));
-        this.runButton.color = darkBackgroundColor;
-        this.runButton.highlightColor = darkHighlightColor;
-        this.runButton.pressColor = darkPressColor;
-        this.runButton.label.color = new Color(0, 200, 0);
-        this.runButton.label.shadowColor = null;
+        this.startButton.color = darkBackgroundColor;
+        this.startButton.highlightColor = darkHighlightColor;
+        this.startButton.pressColor = darkPressColor;
+        this.startButton.label.color = new Color(0, 200, 0);
+        this.startButton.label.shadowColor = null;
 
         this.centerTools.add(makeSpacer(10));
 
@@ -133,6 +133,7 @@
         // ----------------------------------------------------------------------------------------
 
         this.rightTools.add(this.closeButton = new PushButtonMorph(null, () => {
+            this.stopUpdates();
             this.hide();
         }, 'Close'));
 
@@ -141,6 +142,13 @@
         this.fixLayout();
 
         const updateLoop = () => {
+            if (!this.doUpdates) {
+                this.updateLoopTimer = setTimeout(updateLoop, OUTPUT_UPDATE_INTERVAL_MS);
+                return;
+            }
+
+            console.log('update', Date.now());
+
             request({
                 method: 'POST',
                 url: `${SERVER}/pull`,
@@ -209,7 +217,7 @@
                                 for (const entry of error.trace) {
                                     const locals = formatVars(entry.locals);
                                     const blocks = lookup[entry.location];
-                                    if (blocks !== undefined) {
+                                    if (blocks !== null) {
                                         for (const block of blocks) {
                                             const vars = [locals, fields, globals].filter(x => x.length).join('\n\n');
                                             let content = error.cause;
@@ -226,22 +234,31 @@
                                             block.rerender();
                                         }
                                     } else {
-                                        console.warn('failed to find block', entry.location, error);
+                                        console.warn('failed to find block (maybe deleted?)', entry.location, error);
                                     }
                                 }
                             }
                         }
+                    } catch (ex) {
+                        console.error('update loop error', ex);
                     } finally {
                         this.updateLoopTimer = setTimeout(updateLoop, OUTPUT_UPDATE_INTERVAL_MS);
                     }
                 },
                 onErr: (status, res) => {
-                    console.error('pull status failed', status, res);
-                    this.updateLoopTimer = setTimeout(updateLoop, OUTPUT_FAILED_UPDATE_INTERVAL_MS);
+                    console.warn('pull status failed', status, res);
+                    this.updateLoopTimer = setTimeout(updateLoop, OUTPUT_UPDATE_INTERVAL_MS);
                 },
             });
         };
         this.updateLoopTimer = setTimeout(updateLoop, OUTPUT_UPDATE_INTERVAL_MS);
+    };
+
+    TerminalMorph.prototype.startUpdates = function () {
+        this.doUpdates = true;
+    };
+    TerminalMorph.prototype.stopUpdates = function () {
+        this.doUpdates = false;
     };
 
     TerminalMorph.prototype.setText = function (txt) {
@@ -304,6 +321,7 @@
                     else TerminalMorph.instance.show();
 
                     TerminalMorph.instance.popUp(world);
+                    TerminalMorph.instance.startUpdates();
                 },
             };
         }
