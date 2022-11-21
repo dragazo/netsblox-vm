@@ -201,7 +201,7 @@ fn get_env(role: &ast::Role) -> EnvArena {
     })
 }
 
-fn run_proj_tty(project_name: &str, server: String, mut env: EnvArena, overrides: StdSystemConfig) {
+fn run_proj_tty(project_name: &str, server: String, env: EnvArena, overrides: StdSystemConfig) {
     terminal::enable_raw_mode().unwrap();
     execute!(stdout(), cursor::Hide).unwrap();
     let _tty_mode_guard = AtExit::new(|| {
@@ -310,7 +310,7 @@ fn run_proj_tty(project_name: &str, server: String, mut env: EnvArena, overrides
 
     execute!(stdout(), terminal::Clear(ClearType::CurrentLine)).unwrap();
 }
-fn run_proj_non_tty(project_name: &str, server: String, mut env: EnvArena, overrides: StdSystemConfig) {
+fn run_proj_non_tty(project_name: &str, server: String, env: EnvArena, overrides: StdSystemConfig) {
     let config = overrides.or(StdSystemConfig::builder()
         .print(Rc::new(move |value, entity| Ok(if let Some(value) = value { println!("{entity:?} > {value:?}") })))
         .build().unwrap());
@@ -514,7 +514,7 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
                         let cause = format!("{:?}", error.cause);
                         tee_println!(Some(&state) => "\n>>> runtime error in entity {entity:?}: {cause:?}\n>>> see red error comments...\n");
 
-                        fn summarize_symbols(symbols: &SymbolTable) -> Vec<VarEntry> {
+                        fn summarize_symbols<'gc>(symbols: &SymbolTable<'gc, StdSystem>) -> Vec<VarEntry> {
                             let mut res = Vec::with_capacity(symbols.len());
                             for (k, v) in symbols {
                                 res.push(VarEntry { name: k.clone(), value: format!("{:?}", v.get()) });

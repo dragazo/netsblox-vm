@@ -2,6 +2,7 @@ use std::prelude::v1::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
+use std::cmp::Ordering;
 use std::borrow::Cow;
 use std::fmt;
 
@@ -248,13 +249,23 @@ pub enum SimplifyError {
 }
 
 /// A value representing the identity of a [`Value`].
-#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq,)]
-pub struct Identity<'gc>(*const (), PhantomData<&'gc Value<'gc>>);
+pub struct Identity<'gc, S: System>(*const (), PhantomData<&'gc Value<'gc, S>>);
+
+impl<'gc, S: System> fmt::Debug for Identity<'gc, S> { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{:?}", self.0) } }
+
+impl<'gc, S: System> Copy for Identity<'gc, S> {}
+impl<'gc, S: System> Clone for Identity<'gc, S> { fn clone(&self) -> Self { *self } }
+
+impl<'gc, S: System> Ord for Identity<'gc, S> { fn cmp(&self, other: &Self) -> Ordering { self.0.cmp(&other.0) } }
+impl<'gc, S: System> PartialOrd for Identity<'gc, S> { fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) } }
+
+impl<'gc, S: System> Eq for Identity<'gc, S> {}
+impl<'gc, S: System> PartialEq for Identity<'gc, S> { fn eq(&self, other: &Self) -> bool { self.0 == other.0 } }
 
 /// Any primitive value.
-#[derive(Clone, Copy, Collect)]
-#[collect(no_drop)]
-pub enum Value<'gc> {
+#[derive(Collect)]
+#[collect(no_drop, bound = "")]
+pub enum Value<'gc, S: System> {
     /// A primitive boolean value.
     Bool(bool),
     /// A primitive numeric value. Snap! and NetsBlox use 64-bit floating point values for all numbers.
@@ -264,15 +275,18 @@ pub enum Value<'gc> {
     /// include strings in its calculation of the total memory footprint (and allows [`Value`] to be [`Copy`]).
     String(Gc<'gc, String>),
     /// A primitive list type, which is a mutable reference type.
-    List(GcCell<'gc, VecDeque<Value<'gc>>>),
+    List(GcCell<'gc, VecDeque<Value<'gc, S>>>),
     /// A closure/lambda function. This contains information about the closure's bytecode location, parameters, and captures from the parent scope.
-    Closure(GcCell<'gc, Closure<'gc>>),
+    Closure(GcCell<'gc, Closure<'gc, S>>),
     /// A reference to an [`Entity`] in the environment.
-    Entity(GcCell<'gc, Entity<'gc>>),
+    Entity(GcCell<'gc, Entity<'gc, S>>),
 }
-impl fmt::Debug for Value<'_> {
+impl<'gc, S: System> Copy for Value<'gc, S> {}
+impl<'gc, S: System> Clone for Value<'gc, S> { fn clone(&self) -> Self { *self } }
+
+impl<S: System> fmt::Debug for Value<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn print<'gc>(value: &Value<'gc>, cache: &mut BTreeSet<Identity<'gc>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn print<'gc, S: System>(value: &Value<'gc, S>, cache: &mut BTreeSet<Identity<'gc, S>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match value {
                 Value::Bool(x) => write!(f, "{x}"),
                 Value::Number(x) => write!(f, "{x}"),
@@ -303,13 +317,13 @@ impl fmt::Debug for Value<'_> {
         res
     }
 }
-impl<'gc> From<bool> for Value<'gc> { fn from(v: bool) -> Self { Value::Bool(v) } }
-impl<'gc> From<f64> for Value<'gc> { fn from(v: f64) -> Self { Value::Number(v) } }
-impl<'gc> From<Gc<'gc, String>> for Value<'gc> { fn from(v: Gc<'gc, String>) -> Self { Value::String(v) } }
-impl<'gc> From<GcCell<'gc, VecDeque<Value<'gc>>>> for Value<'gc> { fn from(v: GcCell<'gc, VecDeque<Value<'gc>>>) -> Self { Value::List(v) } }
-impl<'gc> From<GcCell<'gc, Closure<'gc>>> for Value<'gc> { fn from(v: GcCell<'gc, Closure<'gc>>) -> Self { Value::Closure(v) } }
-impl<'gc> From<GcCell<'gc, Entity<'gc>>> for Value<'gc> { fn from(v: GcCell<'gc, Entity<'gc>>) -> Self { Value::Entity(v) } }
-impl<'gc> Value<'gc> {
+impl<'gc, S: System> From<bool> for Value<'gc, S> { fn from(v: bool) -> Self { Value::Bool(v) } }
+impl<'gc, S: System> From<f64> for Value<'gc, S> { fn from(v: f64) -> Self { Value::Number(v) } }
+impl<'gc, S: System> From<Gc<'gc, String>> for Value<'gc, S> { fn from(v: Gc<'gc, String>) -> Self { Value::String(v) } }
+impl<'gc, S: System> From<GcCell<'gc, VecDeque<Value<'gc, S>>>> for Value<'gc, S> { fn from(v: GcCell<'gc, VecDeque<Value<'gc, S>>>) -> Self { Value::List(v) } }
+impl<'gc, S: System> From<GcCell<'gc, Closure<'gc, S>>> for Value<'gc, S> { fn from(v: GcCell<'gc, Closure<'gc, S>>) -> Self { Value::Closure(v) } }
+impl<'gc, S: System> From<GcCell<'gc, Entity<'gc, S>>> for Value<'gc, S> { fn from(v: GcCell<'gc, Entity<'gc, S>>) -> Self { Value::Entity(v) } }
+impl<'gc, S: System> Value<'gc, S> {
     /// Creates a new value from an abstract syntax tree.
     pub fn from_ast(mc: MutationContext<'gc, '_>, value: &ast::Value) -> Self {
         match value {
@@ -331,7 +345,7 @@ impl<'gc> Value<'gc> {
         }
     }
     pub fn to_simple(&self) -> Result<SimpleValue, SimplifyError> {
-        fn simplify<'gc>(value: &Value<'gc>, cache: &mut BTreeSet<Identity<'gc>>) -> Result<SimpleValue, SimplifyError> {
+        fn simplify<'gc, S: System>(value: &Value<'gc, S>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<SimpleValue, SimplifyError> {
             Ok(match value {
                 Value::Bool(x) => SimpleValue::Bool(*x),
                 Value::Number(x) => SimpleValue::Number(*x),
@@ -355,14 +369,14 @@ impl<'gc> Value<'gc> {
     /// Returns a value representing this object that implements [`Eq`] such that
     /// two values are equal if and only if they are references to the same object.
     /// This is primarily useful for testing for reference equality of lists.
-    pub fn identity(&self) -> Identity<'gc> {
+    pub fn identity(&self) -> Identity<'gc, S> {
         match self {
             Value::Bool(x) => Identity(x as *const bool as *const (), PhantomData),
             Value::Number(x) => Identity(x as *const f64 as *const (), PhantomData),
             Value::String(x) => Identity(x.as_ptr() as *const String as *const (), PhantomData),
-            Value::List(x) => Identity(x.as_ptr() as *const Vec<Value> as *const (), PhantomData),
-            Value::Closure(x) => Identity(x.as_ptr() as *const Closure as *const (), PhantomData),
-            Value::Entity(x) => Identity(x.as_ptr() as *const Entity as *const (), PhantomData),
+            Value::List(x) => Identity(x.as_ptr() as *const Vec<Value<'gc, S>> as *const (), PhantomData),
+            Value::Closure(x) => Identity(x.as_ptr() as *const Closure<'gc, S> as *const (), PhantomData),
+            Value::Entity(x) => Identity(x.as_ptr() as *const Entity<'gc, S> as *const (), PhantomData),
         }
     }
     /// Gets the type of value that is stored.
@@ -401,21 +415,21 @@ impl<'gc> Value<'gc> {
         })
     }
     /// Attempts to interpret this value as a list.
-    pub fn as_list(&self) -> Result<GcCell<'gc, VecDeque<Value<'gc>>>, ConversionError> {
+    pub fn as_list(&self) -> Result<GcCell<'gc, VecDeque<Value<'gc, S>>>, ConversionError> {
         match self {
             Value::List(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::List }),
         }
     }
     /// Attempts to interpret this value as a closure.
-    pub fn as_closure(&self) -> Result<GcCell<'gc, Closure<'gc>>, ConversionError> {
+    pub fn as_closure(&self) -> Result<GcCell<'gc, Closure<'gc, S>>, ConversionError> {
         match self {
             Value::Closure(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Closure }),
         }
     }
     /// Attempts to interpret this value as an entity.
-    pub fn as_entity(&self) -> Result<GcCell<'gc, Entity<'gc>>, ConversionError> {
+    pub fn as_entity(&self) -> Result<GcCell<'gc, Entity<'gc, S>>, ConversionError> {
         match self {
             Value::Entity(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Entity }),
@@ -425,13 +439,13 @@ impl<'gc> Value<'gc> {
 
 /// Information about a closure/lambda function.
 #[derive(Collect)]
-#[collect(no_drop)]
-pub struct Closure<'gc> {
+#[collect(no_drop, bound = "")]
+pub struct Closure<'gc, S: System> {
     pub pos: usize,
     pub params: Vec<String>,
-    pub captures: SymbolTable<'gc>,
+    pub captures: SymbolTable<'gc, S>,
 }
-impl fmt::Debug for Closure<'_> {
+impl<S: System> fmt::Debug for Closure<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Closure {:#08x}", self.pos)
     }
@@ -439,13 +453,13 @@ impl fmt::Debug for Closure<'_> {
 
 /// Information about an entity (sprite or stage).
 #[derive(Collect)]
-#[collect(no_drop)]
-pub struct Entity<'gc> {
+#[collect(no_drop, bound = "")]
+pub struct Entity<'gc, S: System> {
     pub name: String,
-    pub fields: SymbolTable<'gc>,
+    pub fields: SymbolTable<'gc, S>,
     pub alive: bool,
 }
-impl fmt::Debug for Entity<'_> {
+impl<S: System> fmt::Debug for Entity<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}Entity {:?}", if self.alive { "" } else { "Dead " }, self.name)
     }
@@ -499,10 +513,11 @@ impl<'gc, T: Collect + Copy> From<T> for Shared<'gc, T> { fn from(value: T) -> S
 /// [`SymbolTable`] has utilities to extract variables from an abstract syntax tree, or to explicitly define variables.
 /// Simple methods are provided to perform value lookups in the table.
 /// To perform hierarchical value lookups, use the higher-level utility [`LookupGroup`].
-#[derive(Default, Collect)]
-#[collect(no_drop)]
-pub struct SymbolTable<'gc>(BTreeMap<String, Shared<'gc, Value<'gc>>>);
-impl<'gc> SymbolTable<'gc> {
+#[derive(Collect)]
+#[collect(no_drop, bound = "")]
+pub struct SymbolTable<'gc, S: System>(BTreeMap<String, Shared<'gc, Value<'gc, S>>>);
+impl<'gc, S: System> Default for SymbolTable<'gc, S> { fn default() -> Self { Self(Default::default()) } }
+impl<'gc, S: System> SymbolTable<'gc, S> {
     /// Creates a symbol table containing all the provided variable definitions.
     pub fn from_ast(mc: MutationContext<'gc, '_>, vars: &[ast::VariableDef]) -> Self {
         Self(vars.iter().map(|x| (x.trans_name.clone(), Value::from_ast(mc, &x.value).into())).collect())
@@ -510,7 +525,7 @@ impl<'gc> SymbolTable<'gc> {
     /// Sets the value of an existing variable (as if by [`Shared::set`]) or defines it if it does not exist.
     /// If the variable does not exist, creates a [`Shared::Unique`] instance for the new `value`.
     /// If you would prefer to always create a new, non-aliased value, consider using [`SymbolTable::redefine_or_define`] instead.
-    pub fn set_or_define(&mut self, mc: MutationContext<'gc, '_>, var: &str, value: Value<'gc>) {
+    pub fn set_or_define(&mut self, mc: MutationContext<'gc, '_>, var: &str, value: Value<'gc, S>) {
         match self.0.get_mut(var) {
             Some(x) => x.set(mc, value),
             None => { self.0.insert(var.to_owned(), value.into()); }
@@ -519,16 +534,16 @@ impl<'gc> SymbolTable<'gc> {
     /// Defines or redefines a value in the symbol table to a new instance of [`Shared<Value>`].
     /// Note that this is not the same as [`SymbolTable::set_or_define`], which sets a value on a potentially aliased variable.
     /// If a variable named `var` already existed and was [`Shared::Aliased`], its value is not modified.
-    pub fn redefine_or_define(&mut self, var: &str, value: Shared<'gc, Value<'gc>>) {
+    pub fn redefine_or_define(&mut self, var: &str, value: Shared<'gc, Value<'gc, S>>) {
         self.0.insert(var.to_owned(), value);
     }
     /// Looks up the given variable in the symbol table.
     /// If a variable with the given name does not exist, returns [`None`].
-    pub fn lookup(&self, var: &str) -> Option<&Shared<'gc, Value<'gc>>> {
+    pub fn lookup(&self, var: &str) -> Option<&Shared<'gc, Value<'gc, S>>> {
         self.0.get(var)
     }
     /// Equivalent to [`SymbolTable::lookup`] except that it returns a mutable reference.
-    pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Shared<'gc, Value<'gc>>> {
+    pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Shared<'gc, Value<'gc, S>>> {
         self.0.get_mut(var)
     }
     /// Gets the number of symbols currently stored in the symbol table.
@@ -536,54 +551,54 @@ impl<'gc> SymbolTable<'gc> {
         self.0.len()
     }
     /// Iterates over the key value pairs stored in the symbol table.
-    pub fn iter(&self) -> symbol_table::Iter<'gc, '_> {
+    pub fn iter(&self) -> symbol_table::Iter<'gc, '_, S> {
         symbol_table::Iter(self.0.iter())
     }
     /// Iterates over the key value pairs stored in the symbol table.
-    pub fn iter_mut(&mut self) -> symbol_table::IterMut<'gc, '_> {
+    pub fn iter_mut(&mut self) -> symbol_table::IterMut<'gc, '_, S> {
         symbol_table::IterMut(self.0.iter_mut())
     }
 }
-impl<'gc> IntoIterator for SymbolTable<'gc> {
-    type Item = (String, Shared<'gc, Value<'gc>>);
-    type IntoIter = symbol_table::IntoIter<'gc>;
+impl<'gc, S: System> IntoIterator for SymbolTable<'gc, S> {
+    type Item = (String, Shared<'gc, Value<'gc, S>>);
+    type IntoIter = symbol_table::IntoIter<'gc, S>;
     fn into_iter(self) -> Self::IntoIter { symbol_table::IntoIter(self.0.into_iter()) }
 }
-impl<'gc, 'a> IntoIterator for &'a SymbolTable<'gc> {
-    type Item = <symbol_table::Iter<'gc, 'a> as Iterator>::Item;
-    type IntoIter = symbol_table::Iter<'gc, 'a>;
+impl<'gc, 'a, S: System> IntoIterator for &'a SymbolTable<'gc, S> {
+    type Item = <symbol_table::Iter<'gc, 'a, S> as Iterator>::Item;
+    type IntoIter = symbol_table::Iter<'gc, 'a, S>;
     fn into_iter(self) -> Self::IntoIter { self.iter() }
 }
-impl<'gc, 'a> IntoIterator for &'a mut SymbolTable<'gc> {
-    type Item = <symbol_table::IterMut<'gc, 'a> as Iterator>::Item;
-    type IntoIter = symbol_table::IterMut<'gc, 'a>;
+impl<'gc, 'a, S: System> IntoIterator for &'a mut SymbolTable<'gc, S> {
+    type Item = <symbol_table::IterMut<'gc, 'a, S> as Iterator>::Item;
+    type IntoIter = symbol_table::IterMut<'gc, 'a, S>;
     fn into_iter(self) -> Self::IntoIter { self.iter_mut() }
 }
 pub mod symbol_table {
     //! Special types for working with a [`SymbolTable`].
     use super::*;
-    pub struct IntoIter<'gc>(pub(crate) std::collections::btree_map::IntoIter<String, Shared<'gc, Value<'gc>>>);
-    pub struct Iter<'gc, 'a>(pub(crate) std::collections::btree_map::Iter<'a, String, Shared<'gc, Value<'gc>>>);
-    pub struct IterMut<'gc, 'a>(pub(crate) std::collections::btree_map::IterMut<'a, String, Shared<'gc, Value<'gc>>>);
-    impl<'gc> Iterator for IntoIter<'gc> { type Item = (String, Shared<'gc, Value<'gc>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
-    impl<'gc, 'a> Iterator for Iter<'gc, 'a> { type Item = (&'a String, &'a Shared<'gc, Value<'gc>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
-    impl<'gc, 'a> Iterator for IterMut<'gc, 'a> { type Item = (&'a String, &'a mut Shared<'gc, Value<'gc>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
+    pub struct IntoIter<'gc, S: System>(pub(crate) std::collections::btree_map::IntoIter<String, Shared<'gc, Value<'gc, S>>>);
+    pub struct Iter<'gc, 'a, S: System>(pub(crate) std::collections::btree_map::Iter<'a, String, Shared<'gc, Value<'gc, S>>>);
+    pub struct IterMut<'gc, 'a, S: System>(pub(crate) std::collections::btree_map::IterMut<'a, String, Shared<'gc, Value<'gc, S>>>);
+    impl<'gc, S: System> Iterator for IntoIter<'gc, S> { type Item = (String, Shared<'gc, Value<'gc, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
+    impl<'gc, 'a, S: System> Iterator for Iter<'gc, 'a, S> { type Item = (&'a String, &'a Shared<'gc, Value<'gc, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
+    impl<'gc, 'a, S: System> Iterator for IterMut<'gc, 'a, S> { type Item = (&'a String, &'a mut Shared<'gc, Value<'gc, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
 }
 
 /// A collection of symbol tables with hierarchical context searching.
-pub struct LookupGroup<'gc, 'a, 'b>(&'a mut [&'b mut SymbolTable<'gc>]);
-impl<'gc, 'a, 'b> LookupGroup<'gc, 'a, 'b> {
+pub struct LookupGroup<'gc, 'a, 'b, S: System>(&'a mut [&'b mut SymbolTable<'gc, S>]);
+impl<'gc, 'a, 'b, S: System> LookupGroup<'gc, 'a, 'b, S> {
     /// Creates a new lookup group.
     /// The first symbol table is intended to be the most-global, and subsequent tables are increasingly more-local.
     /// Panics if `tables` is empty.
-    pub fn new(tables: &'a mut [&'b mut SymbolTable<'gc>]) -> Self {
+    pub fn new(tables: &'a mut [&'b mut SymbolTable<'gc, S>]) -> Self {
         debug_assert!(!tables.is_empty());
         Self(tables)
     }
     /// Searches for the given variable in this group of lookup tables,
     /// starting with the last (most-local) table and working towards the first (most-global) table.
     /// Returns a reference to the value if it is found, otherwise returns [`None`].
-    pub fn lookup(&self, var: &str) -> Option<&Shared<'gc, Value<'gc>>> {
+    pub fn lookup(&self, var: &str) -> Option<&Shared<'gc, Value<'gc, S>>> {
         for src in self.0.iter().rev() {
             if let Some(val) = src.lookup(var) {
                 return Some(val);
@@ -592,7 +607,7 @@ impl<'gc, 'a, 'b> LookupGroup<'gc, 'a, 'b> {
         None
     }
     /// As [`LookupGroup::lookup`], but returns a mutable reference.
-    pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Shared<'gc, Value<'gc>>> {
+    pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Shared<'gc, Value<'gc, S>>> {
         for src in self.0.iter_mut().rev() {
             if let Some(val) = src.lookup_mut(var) {
                 return Some(val);
@@ -603,31 +618,31 @@ impl<'gc, 'a, 'b> LookupGroup<'gc, 'a, 'b> {
     /// Performs a lookup for the given variable.
     /// If it already exists, assigns it a new value.
     /// Otherwise, defines it in the last (most-local) context equivalently to [`SymbolTable::set_or_define`].
-    pub fn set_or_define(&mut self, mc: MutationContext<'gc, '_>, var: &str, value: Value<'gc>) {
+    pub fn set_or_define(&mut self, mc: MutationContext<'gc, '_>, var: &str, value: Value<'gc, S>) {
         match self.lookup_mut(var) {
             Some(x) => x.set(mc, value),
             None => self.0.last_mut().unwrap().set_or_define(mc, var, value),
         }
     }
     /// Gets a reference to the last (most-local) context.
-    pub fn locals(&mut self) -> &SymbolTable<'gc> {
+    pub fn locals(&mut self) -> &SymbolTable<'gc, S> {
         self.0.last().unwrap()
     }
     /// Gets a mutable reference to the last (most-local) context.
-    pub fn locals_mut(&mut self) -> &mut SymbolTable<'gc> {
+    pub fn locals_mut(&mut self) -> &mut SymbolTable<'gc, S> {
         self.0.last_mut().unwrap()
     }
 }
 
 /// Global information about the execution state of an entire project.
 #[derive(Collect)]
-#[collect(no_drop)]
-pub struct GlobalContext<'gc> {
+#[collect(no_drop, bound = "")]
+pub struct GlobalContext<'gc, S: System> {
     pub proj_name: String,
-    pub globals: SymbolTable<'gc>,
-    pub entities: Vec<GcCell<'gc, Entity<'gc>>>,
+    pub globals: SymbolTable<'gc, S>,
+    pub entities: Vec<GcCell<'gc, Entity<'gc, S>>>,
 }
-impl<'gc> GlobalContext<'gc> {
+impl<'gc, S: System> GlobalContext<'gc, S> {
     pub fn from_ast(mc: MutationContext<'gc, '_>, role: &ast::Role) -> Self {
         Self {
             proj_name: role.name.clone(),
@@ -676,7 +691,7 @@ pub enum MaybeAsync<T, K> {
     Async(K),
 }
 
-/// The result of a successful call to [`System::poll_async`].
+/// The result of a successful call to an async poller operation such as in [`System`].
 pub enum AsyncPoll<T> {
     /// The async operation completed with the given value.
     Completed(T),
@@ -728,7 +743,7 @@ pub enum SystemError {
 /// 
 /// When implementing [`System`] for some type, you may prefer to not support one or more features.
 /// This can be accomplished by returning the [`SystemError::NotSupported`] variant for the relevant [`SystemFeature`].
-pub trait System: 'static {
+pub trait System: 'static + Sized {
     /// Key type used to await the result of a syscall.
     type SyscallKey: Collect + 'static;
     /// Key type used to await the result of an RPC request.
@@ -754,7 +769,7 @@ pub trait System: 'static {
     /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
     /// The [`Entity`] making the request is provided for context.
     /// This operation should be infallible, but a no-op solution is sufficient.
-    fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<(), SystemError>;
+    fn print<'gc>(&self, value: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<(), SystemError>;
 
     /// Performs a system call on the local hardware to access device resources.
     /// Returns a key that can be passed to [`System::poll_syscall`] to poll for the result.
@@ -773,7 +788,7 @@ pub trait System: 'static {
     ///
     /// This function returns [`MaybeAsync`] to facilitate synchronous behavior, such as if the input sequence is known ahead of time.
     /// If this function always returns [`MaybeAsync::Sync`], then [`System::poll_input`] is never used and can be marked as [`unreachable`].
-    fn input<'gc>(&self, prompt: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<MaybeAsync<String, Self::InputKey>, SystemError>;
+    fn input<'gc>(&self, prompt: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<String, Self::InputKey>, SystemError>;
     /// Polls for the completion of an asynchronous call to [`System::input`].
     /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
     fn poll_input(&self, key: &Self::InputKey) -> AsyncPoll<String>;
@@ -897,14 +912,14 @@ mod std_system {
         /// The second argument is a reference to the entity making the request.
         /// The default printer is no-op, effectively ignoring all output requests.
         #[builder(default = "None", setter(strip_option))]
-        print: Option<Rc<dyn for<'gc> Fn(Option<Value<'gc>>, &Entity<'gc>) -> Result<(), SystemError>>>,
+        print: Option<Rc<dyn for<'gc> Fn(Option<Value<'gc, StdSystem>>, &Entity<'gc, StdSystem>) -> Result<(), SystemError>>>,
 
         /// A function used to request input from the user.
         /// This should be non-blocking, and the provided [`InputKey`]
         /// should be given to [`StdSystem::finish_input`] when the value is entered by the user.
         /// If not specified (default), the system gives an error when processes attempt to request user input.
         #[builder(default = "None", setter(strip_option))]
-        input: Option<Rc<dyn for<'gc> Fn(&StdSystem, InputKey, Option<Value<'gc>>, &Entity<'gc>) -> Result<(), SystemError>>>,
+        input: Option<Rc<dyn for<'gc> Fn(&StdSystem, InputKey, Option<Value<'gc, StdSystem>>, &Entity<'gc, StdSystem>) -> Result<(), SystemError>>>,
 
         /// A function used to perform system calls on the local hardware.
         /// The provided [`SyscallKey`] should be given to [`StdSystem::finish_syscall`] when the result becomes available.
@@ -1175,7 +1190,7 @@ mod std_system {
             Ok(self.start_time.elapsed().as_millis() as u64)
         }
 
-        fn print<'gc>(&self, value: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<(), SystemError> {
+        fn print<'gc>(&self, value: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<(), SystemError> {
             match self.config.print.as_ref() {
                 Some(print) => print(value, entity),
                 None => Err(SystemError::NotSupported { feature: SystemFeature::Print }),
@@ -1200,7 +1215,7 @@ mod std_system {
             }
         }
 
-        fn input<'gc>(&self, prompt: Option<Value<'gc>>, entity: &Entity<'gc>) -> Result<MaybeAsync<String, Self::InputKey>, SystemError> {
+        fn input<'gc>(&self, prompt: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<String, Self::InputKey>, SystemError> {
             match self.config.input.as_ref() {
                 Some(input) => {
                     let key = self.input_results.lock().unwrap().insert(None);

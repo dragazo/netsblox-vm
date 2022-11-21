@@ -76,7 +76,7 @@ impl From<SimplifyError> for ErrorCause { fn from(error: SimplifyError) -> Self 
 impl From<ToJsonError> for ErrorCause { fn from(error: ToJsonError) -> Self { Self::ToJsonError { error } } }
 
 /// Result of stepping through a [`Process`].
-pub enum ProcessStep<'gc> {
+pub enum ProcessStep<'gc, S: System> {
     /// The process was not running.
     Idle,
     /// The process executed an instruction successfully and does not need to yield.
@@ -89,7 +89,7 @@ pub enum ProcessStep<'gc> {
     Yield,
     /// The process has successfully terminated with the given return value, or [`None`] if terminated by an (error-less) abort,
     /// such as a stop script command or the death of the process's associated entity.
-    Terminate { result: Option<Value<'gc>> },
+    Terminate { result: Option<Value<'gc, S>> },
     /// The process has requested to broadcast a message to all entities, which may trigger other code to execute.
     Broadcast { msg_type: Gc<'gc, String>, barrier: Option<Barrier> },
 }
@@ -125,18 +125,18 @@ impl Settings {
 }
 
 #[derive(Collect)]
-#[collect(no_drop)]
-pub struct CallStackEntry<'gc> {
+#[collect(no_drop, bound = "")]
+pub struct CallStackEntry<'gc, S: System> {
     pub called_from: usize,
-    pub locals: SymbolTable<'gc>,
+    pub return_to: usize,
+    pub locals: SymbolTable<'gc, S>,
 
-    return_to: usize,
     warp_counter: usize,
     value_stack_size: usize,
 }
 
 #[derive(Collect)]
-#[collect(require_static)]
+#[collect(require_static, bound = "")]
 enum Defer<S: System> {
     SyscallResult { key: S::SyscallKey, aft_pos: usize },
     RpcResult { key: S::RpcKey, aft_pos: usize },
@@ -151,31 +151,31 @@ enum Defer<S: System> {
 /// A [`Process`] is a self-contained thread of execution.
 /// It maintains its own state machine for executing instructions step by step.
 #[derive(Collect)]
-#[collect(no_drop)]
+#[collect(no_drop, bound = "")]
 pub struct Process<'gc, S: System> {
     bytecode: Rc<ByteCode>,
     start_pos: usize,
-    global_context: GcCell<'gc, GlobalContext<'gc>>,
-    entity: GcCell<'gc, Entity<'gc>>,
+    global_context: GcCell<'gc, GlobalContext<'gc, S>>,
+    entity: GcCell<'gc, Entity<'gc, S>>,
     settings: Settings,
     pos: usize,
     running: bool,
     barrier: Option<Barrier>,
     reply_key: Option<S::InternReplyKey>,
     warp_counter: usize,
-    call_stack: Vec<CallStackEntry<'gc>>,
-    value_stack: Vec<Value<'gc>>,
+    call_stack: Vec<CallStackEntry<'gc, S>>,
+    value_stack: Vec<Value<'gc, S>>,
     meta_stack: Vec<String>,
     defer: Option<Defer<S>>,
-    last_syscall_error: Option<Value<'gc>>,
-    last_rpc_error: Option<Value<'gc>>,
-    last_answer: Option<Value<'gc>>,
+    last_syscall_error: Option<Value<'gc, S>>,
+    last_rpc_error: Option<Value<'gc, S>>,
+    last_answer: Option<Value<'gc, S>>,
     timer_start: u64,
 }
 impl<'gc, S: System> Process<'gc, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity`.
     /// The created process is initialized to an idle (non-running) state; use [`Process::initialize`] to begin execution.
-    pub fn new(bytecode: Rc<ByteCode>, start_pos: usize, global_context: GcCell<'gc, GlobalContext<'gc>>, entity: GcCell<'gc, Entity<'gc>>, settings: Settings) -> Self {
+    pub fn new(bytecode: Rc<ByteCode>, start_pos: usize, global_context: GcCell<'gc, GlobalContext<'gc, S>>, entity: GcCell<'gc, Entity<'gc, S>>, settings: Settings) -> Self {
         Self {
             bytecode, start_pos, global_context, entity, settings,
             running: false,
@@ -199,25 +199,25 @@ impl<'gc, S: System> Process<'gc, S> {
         self.running
     }
     /// Gets the global context that this process is tied to (see [`Process::new`]).
-    pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc>> {
+    pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc, S>> {
         self.global_context
     }
     /// Gets the entity that this process is tied to (see [`Process::new`]).
-    pub fn get_entity(&self) -> GcCell<'gc, Entity<'gc>> {
+    pub fn get_entity(&self) -> GcCell<'gc, Entity<'gc, S>> {
         self.entity
     }
     /// Gets a reference to the current call stack.
     /// This gives access to stack trace information including all local scopes in the call chain.
     /// Note that the call stack is never empty, and that the always-present first element (denoting the initial execution request) is a special
     /// entry which has an invalid value for [`CallStackEntry::return_to`], namely [`usize::MAX`].
-    pub fn get_call_stack(&self) -> &[CallStackEntry<'gc>] {
+    pub fn get_call_stack(&self) -> &[CallStackEntry<'gc, S>] {
         &self.call_stack
     }
     /// Prepares the process to execute starting at the main entry point (see [`Process::new`]) with the provided input local variables.
     /// A [`Barrier`] may also be set, which will be destroyed upon termination, either due to completion or an error.
     /// 
     /// Any previous process state is wiped when performing this action.
-    pub fn initialize(&mut self, locals: SymbolTable<'gc>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, system: &S) {
+    pub fn initialize(&mut self, locals: SymbolTable<'gc, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, system: &S) {
         self.pos = self.start_pos;
         self.running = true;
         self.barrier = barrier;
@@ -244,7 +244,7 @@ impl<'gc, S: System> Process<'gc, S> {
     /// as well as to retrieve the return value or execution error in the event that the process terminates.
     /// 
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`ProcessStep::Terminate`].
-    pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> Result<ProcessStep<'gc>, ExecError> {
+    pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> Result<ProcessStep<'gc, S>, ExecError> {
         let res = self.step_impl(mc, system);
         if let Ok(ProcessStep::Terminate { .. }) | Err(_) = res {
             self.running = false;
@@ -253,8 +253,8 @@ impl<'gc, S: System> Process<'gc, S> {
         }
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
-    fn step_impl(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> Result<ProcessStep<'gc>, ErrorCause> {
-        fn process_result<'gc, T>(mc: MutationContext<'gc, '_>, result: Result<T, String>, error_scheme: ErrorScheme, value_stack: &mut Vec<Value<'gc>>, last_error: &mut Option<Value<'gc>>, f: fn(MutationContext<'gc, '_>, T) -> Result<Value<'gc>, ErrorCause>) -> Result<(), ErrorCause> {
+    fn step_impl(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> Result<ProcessStep<'gc, S>, ErrorCause> {
+        fn process_result<'gc, S: System, T>(mc: MutationContext<'gc, '_>, result: Result<T, String>, error_scheme: ErrorScheme, value_stack: &mut Vec<Value<'gc, S>>, last_error: &mut Option<Value<'gc, S>>, f: fn(MutationContext<'gc, '_>, T) -> Result<Value<'gc, S>, ErrorCause>) -> Result<(), ErrorCause> {
             Ok(value_stack.push(match result {
                 Ok(x) => {
                     *last_error = None;
@@ -957,13 +957,13 @@ impl<'gc, S: System> Process<'gc, S> {
 mod ops {
     use super::*;
 
-    fn as_list<'gc>(v: &Value<'gc>) -> Option<GcCell<'gc, VecDeque<Value<'gc>>>> {
+    fn as_list<'gc, S: System>(v: &Value<'gc, S>) -> Option<GcCell<'gc, VecDeque<Value<'gc, S>>>> {
         match v {
             Value::List(v) => Some(*v),
             _ => None
         }
     }
-    fn as_matrix<'gc>(v: &Value<'gc>) -> Option<GcCell<'gc, VecDeque<Value<'gc>>>> {
+    fn as_matrix<'gc, S: System>(v: &Value<'gc, S>) -> Option<GcCell<'gc, VecDeque<Value<'gc, S>>>> {
         let vals = as_list(v)?;
         let good = match vals.read().front() {
             None => false,
@@ -972,7 +972,7 @@ mod ops {
         if good { Some(vals) } else { None }
     }
 
-    pub(super) fn prep_list_index(index: &Value, list_len: usize) -> Result<usize, ErrorCause> {
+    pub(super) fn prep_list_index<'gc, S: System>(index: &Value<'gc, S>, list_len: usize) -> Result<usize, ErrorCause> {
         let raw_index = index.to_number()?;
         if raw_index < 1.0 || raw_index > list_len as f64 { return Err(ErrorCause::IndexOutOfBounds { index: raw_index, list_len }) }
         let index = raw_index as u64;
@@ -984,7 +984,7 @@ mod ops {
         Ok(system.rand(0..list_len)?)
     }
 
-    pub(super) fn json_to_value<'gc>(mc: MutationContext<'gc, '_>, json: Json, src: Option<Cow<str>>) -> Result<Value<'gc>, ErrorCause> {
+    pub(super) fn json_to_value<'gc, S: System>(mc: MutationContext<'gc, '_>, json: Json, src: Option<Cow<str>>) -> Result<Value<'gc, S>, ErrorCause> {
         let src = src.unwrap_or_else(|| Cow::Owned(json.to_string())); // we need this in case parsing fails to give a good error message
         match SimpleValue::from_json(json) {
             Ok(x) => Ok(Value::from_simple(mc, x)),
@@ -993,8 +993,8 @@ mod ops {
         }
     }
 
-    pub(super) fn flatten<'gc>(value: &Value<'gc>) -> Result<VecDeque<Value<'gc>>, ErrorCause> {
-        fn flatten_impl<'gc>(value: &Value<'gc>, dest: &mut VecDeque<Value<'gc>>, cache: &mut BTreeSet<Identity<'gc>>) -> Result<(), ErrorCause> {
+    pub(super) fn flatten<'gc, S: System>(value: &Value<'gc, S>) -> Result<VecDeque<Value<'gc, S>>, ErrorCause> {
+        fn flatten_impl<'gc, S: System>(value: &Value<'gc, S>, dest: &mut VecDeque<Value<'gc, S>>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<(), ErrorCause> {
             match value {
                 Value::List(values) => {
                     let key = value.identity();
@@ -1014,8 +1014,8 @@ mod ops {
         debug_assert_eq!(cache.len(), 0);
         Ok(res)
     }
-    pub(super) fn dimensions(value: &Value) -> Result<Vec<usize>, ErrorCause> {
-        fn dimensions_impl<'gc>(value: &Value<'gc>, depth: usize, res: &mut Vec<usize>, cache: &mut BTreeSet<Identity<'gc>>) -> Result<(), ErrorCause> {
+    pub(super) fn dimensions<'gc, S: System>(value: &Value<'gc, S>) -> Result<Vec<usize>, ErrorCause> {
+        fn dimensions_impl<'gc, S: System>(value: &Value<'gc, S>, depth: usize, res: &mut Vec<usize>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<(), ErrorCause> {
             debug_assert!(depth <= res.len());
 
             if let Value::List(values) = value {
@@ -1040,7 +1040,7 @@ mod ops {
         debug_assert_eq!(cache.len(), 0);
         Ok(res)
     }
-    pub(super) fn reshape<'gc>(mc: MutationContext<'gc, '_>, src: &Value<'gc>, dims: &[usize]) -> Result<Value<'gc>, ErrorCause> {
+    pub(super) fn reshape<'gc, S: System>(mc: MutationContext<'gc, '_>, src: &Value<'gc, S>, dims: &[usize]) -> Result<Value<'gc, S>, ErrorCause> {
         if dims.iter().any(|&x| x == 0) { return Ok(GcCell::allocate(mc, VecDeque::default()).into()) }
 
         let mut src = ops::flatten(src)?;
@@ -1048,7 +1048,7 @@ mod ops {
             src.push_back(Gc::allocate(mc, String::new()).into());
         }
 
-        fn reshape_impl<'gc>(mc: MutationContext<'gc, '_>, src: &mut Cycle<VecDequeIter<Value<'gc>>>, dims: &[usize]) -> Value<'gc> {
+        fn reshape_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, src: &mut Cycle<VecDequeIter<Value<'gc, S>>>, dims: &[usize]) -> Value<'gc, S> {
             match dims {
                 [] => *src.next().unwrap(),
                 [first, rest @ ..] => GcCell::allocate(mc, (0..*first).map(|_| reshape_impl(mc, src, rest)).collect::<VecDeque<_>>()).into(),
@@ -1056,10 +1056,10 @@ mod ops {
         }
         Ok(reshape_impl(mc, &mut src.iter().cycle(), dims))
     }
-    pub(super) fn cartesian_product<'gc>(mc: MutationContext<'gc, '_>, sources: &[GcCell<VecDeque<Value<'gc>>>]) -> VecDeque<Value<'gc>> {
+    pub(super) fn cartesian_product<'gc, S: System>(mc: MutationContext<'gc, '_>, sources: &[GcCell<VecDeque<Value<'gc, S>>>]) -> VecDeque<Value<'gc, S>> {
         if sources.is_empty() { return Default::default() }
 
-        fn cartesian_product_impl<'gc>(mc: MutationContext<'gc, '_>, res: &mut VecDeque<Value<'gc>>, partial: &mut VecDeque<Value<'gc>>, sources: &[GcCell<VecDeque<Value<'gc>>>]) {
+        fn cartesian_product_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, res: &mut VecDeque<Value<'gc, S>>, partial: &mut VecDeque<Value<'gc, S>>, sources: &[GcCell<VecDeque<Value<'gc, S>>>]) {
             match sources {
                 [] => res.push_back(GcCell::allocate(mc, partial.clone()).into()),
                 [first, rest @ ..] => for item in first.read().iter() {
@@ -1078,7 +1078,7 @@ mod ops {
     const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
     const RAD_TO_DEG: f64 = 180.0 / std::f64::consts::PI;
 
-    fn binary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc>, b: &Value<'gc>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc>, Identity<'gc>, bool), Value<'gc>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc>, &Value<'gc>) -> Result<Value<'gc>, ErrorCause>) -> Result<Value<'gc>, ErrorCause> {
+    fn binary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc, S>, b: &Value<'gc, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, S>, Identity<'gc, S>, bool), Value<'gc, S>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc, S>, &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause>) -> Result<Value<'gc, S>, ErrorCause> {
         let cache_key = (a.identity(), b.identity(), matrix_mode);
         Ok(match cache.get(&cache_key) {
             Some(x) => *x,
@@ -1123,7 +1123,7 @@ mod ops {
             }
         })
     }
-    pub(super) fn binary_op<'gc, 'a, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &'a Value<'gc>, b: &'a Value<'gc>, op: BinaryOp) -> Result<Value<'gc>, ErrorCause> {
+    pub(super) fn binary_op<'gc, 'a, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &'a Value<'gc, S>, b: &'a Value<'gc, S>, op: BinaryOp) -> Result<Value<'gc, S>, ErrorCause> {
         let mut cache = Default::default();
         match op {
             BinaryOp::Add       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? + b.to_number()?).into())),
@@ -1161,7 +1161,7 @@ mod ops {
         }
     }
 
-    fn unary_op_impl<'gc>(mc: MutationContext<'gc, '_>, x: &Value<'gc>, cache: &mut BTreeMap<Identity<'gc>, Value<'gc>>, scalar_op: &dyn Fn(MutationContext<'gc, '_>, &Value<'gc>) -> Result<Value<'gc>, ErrorCause>) -> Result<Value<'gc>, ErrorCause> {
+    fn unary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, x: &Value<'gc, S>, cache: &mut BTreeMap<Identity<'gc, S>, Value<'gc, S>>, scalar_op: &dyn Fn(MutationContext<'gc, '_>, &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause>) -> Result<Value<'gc, S>, ErrorCause> {
         let cache_key = x.identity();
         Ok(match cache.get(&cache_key) {
             Some(x) => *x,
@@ -1181,7 +1181,7 @@ mod ops {
             }
         })
     }
-    pub(super) fn unary_op<'gc>(mc: MutationContext<'gc, '_>, x: &Value<'gc>, op: UnaryOp) -> Result<Value<'gc>, ErrorCause> {
+    pub(super) fn unary_op<'gc, S: System>(mc: MutationContext<'gc, '_>, x: &Value<'gc, S>, op: UnaryOp) -> Result<Value<'gc, S>, ErrorCause> {
         let mut cache = Default::default();
         match op {
             UnaryOp::Not    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((!x.to_bool()?).into())),
@@ -1249,13 +1249,13 @@ mod ops {
             }),
         }
     }
-    pub(super) fn index_list<'gc>(mc: MutationContext<'gc, '_>, list: &Value<'gc>, index: &Value<'gc>) -> Result<Value<'gc>, ErrorCause> {
+    pub(super) fn index_list<'gc, S: System>(mc: MutationContext<'gc, '_>, list: &Value<'gc, S>, index: &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause> {
         let list = list.as_list()?;
         let list = list.read();
         unary_op_impl(mc, index, &mut Default::default(), &|_, x| Ok(list[prep_list_index(x, list.len())?]))
     }
 
-    fn check_eq_impl<'gc>(a: &Value<'gc>, b: &Value<'gc>, cache: &mut BTreeSet<(Identity<'gc>, Identity<'gc>)>) -> bool {
+    fn check_eq_impl<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>, cache: &mut BTreeSet<(Identity<'gc, S>, Identity<'gc, S>)>) -> bool {
         // if already cached, that cmp handles overall check, so no-op with true (if we ever get a false, the whole thing is false)
         if !cache.insert((a.identity(), b.identity())) { return true }
 
@@ -1287,7 +1287,7 @@ mod ops {
             (Value::Entity(_), _) | (_, Value::Entity(_)) => false,
         }
     }
-    pub(super) fn check_eq<'gc, 'a>(a: &'a Value<'gc>, b: &'a Value<'gc>) -> bool {
+    pub(super) fn check_eq<'gc, 'a, S: System>(a: &'a Value<'gc, S>, b: &'a Value<'gc, S>) -> bool {
         check_eq_impl(a, b, &mut Default::default())
     }
 }

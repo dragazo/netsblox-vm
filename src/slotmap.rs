@@ -10,7 +10,7 @@ use crate::gc::*;
 
 /// A key that can be used with a [`SlotMap`].
 /// 
-/// Instead of implementing this trait manually, it is recommended to use the [`new_key`] macro.
+/// Instead of implementing this trait manually, it is recommended to use the [`new_key`](crate::new_key) macro.
 pub trait Key: Copy + Eq + Ord + 'static {
     fn new(slot: usize, generation: usize) -> Self;
     fn get_slot(&self) -> usize;

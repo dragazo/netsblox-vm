@@ -72,13 +72,13 @@ enum Hat {
 }
 
 #[derive(Collect)]
-#[collect(no_drop)]
+#[collect(no_drop, bound = "")]
 struct Script<'gc, S: System> {
     hat: Hat,
     start_pos: usize,
-    entity: GcCell<'gc, Entity<'gc>>,
+    entity: GcCell<'gc, Entity<'gc, S>>,
     process: Option<ProcessKey>,
-    context_queue: VecDeque<(SymbolTable<'gc>, Option<Barrier>, Option<S::InternReplyKey>)>,
+    context_queue: VecDeque<(SymbolTable<'gc, S>, Option<Barrier>, Option<S::InternReplyKey>)>,
 }
 impl<'gc, S: System> Script<'gc, S> {
     fn consume_context(&mut self, state: &mut State<'gc, S>, system: &S) {
@@ -114,7 +114,7 @@ impl<'gc, S: System> Script<'gc, S> {
         }
         self.context_queue.clear();
     }
-    fn schedule(&mut self, state: &mut State<'gc, S>, system: &S, context: SymbolTable<'gc>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, max_queue: usize) {
+    fn schedule(&mut self, state: &mut State<'gc, S>, system: &S, context: SymbolTable<'gc, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, max_queue: usize) {
         self.context_queue.push_back((context, barrier, reply_key));
         self.consume_context(state, system);
         if self.context_queue.len() > max_queue {
@@ -124,16 +124,16 @@ impl<'gc, S: System> Script<'gc, S> {
 }
 
 #[derive(Collect)]
-#[collect(no_drop)]
+#[collect(no_drop, bound = "")]
 struct State<'gc, S: System> {
-    global_context: GcCell<'gc, GlobalContext<'gc>>,
+    global_context: GcCell<'gc, GlobalContext<'gc, S>>,
     code: Rc<ByteCode>,
     settings: Settings,
     processes: SlotMap<ProcessKey, Process<'gc, S>>,
     process_queue: VecDeque<ProcessKey>,
 }
 #[derive(Collect)]
-#[collect(no_drop)]
+#[collect(no_drop, bound = "")]
 pub struct Project<'gc, S: System> {
     state: State<'gc, S>,
     scripts: Vec<Script<'gc, S>>,
@@ -257,7 +257,7 @@ impl<'gc, S: System> Project<'gc, S> {
             },
         }
     }
-    pub fn global_context(&self) -> GcCell<'gc, GlobalContext<'gc>> {
+    pub fn global_context(&self) -> GcCell<'gc, GlobalContext<'gc, S>> {
         self.state.global_context
     }
 }

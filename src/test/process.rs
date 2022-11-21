@@ -15,7 +15,7 @@ use super::*;
 #[collect(no_drop)]
 struct Env<'gc> {
     proc: GcCell<'gc, Process<'gc, StdSystem>>,
-    glob: GcCell<'gc, GlobalContext<'gc>>,
+    glob: GcCell<'gc, GlobalContext<'gc, StdSystem>>,
 }
 make_arena!(EnvArena, Env);
 
@@ -38,7 +38,7 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: &StdSystem) ->
     }), locs.instructions.transform(ToOwned::to_owned))
 }
 
-fn run_till_term<F>(env: &mut EnvArena, system: &StdSystem, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc>>, usize), ExecError>) {
+fn run_till_term<F>(env: &mut EnvArena, system: &StdSystem, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc, StdSystem>>, usize), ExecError>) {
     env.mutate(|mc, env| {
         let mut proc = env.proc.write(mc);
         assert!(proc.is_running());
@@ -177,7 +177,7 @@ fn test_proc_recursively_self_containing_lists() {
             let res = res.read();
             assert_eq!(res.len(), 4);
 
-            fn check<'gc>(name: &str, mc: MutationContext<'gc, '_>, got: &Value<'gc>, expected_basic: &Value<'gc>) {
+            fn check<'gc>(name: &str, mc: MutationContext<'gc, '_>, got: &Value<'gc, StdSystem>, expected_basic: &Value<'gc, StdSystem>) {
                 let orig_got = got;
                 match got {
                     Value::List(got) => {
@@ -896,7 +896,7 @@ fn test_proc_rand_list_ops() {
 
     run_till_term(&mut env, &system, |_, _, res| {
         let (results, last) = {
-            fn extract_value(val: &Value) -> String {
+            fn extract_value(val: &Value<'_, StdSystem>) -> String {
                 match val {
                     Value::Number(x) => x.to_string(),
                     Value::String(x) if matches!(x.as_str(), "hello" | "goodbye") => x.as_str().to_owned(),

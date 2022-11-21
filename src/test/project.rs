@@ -40,7 +40,7 @@ fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdS
 #[test]
 fn test_proj_counting() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfigBuilder::default().build().unwrap());
-    let mut proj = get_running_project(include_str!("projects/counting.xml"), &system);
+    let proj = get_running_project(include_str!("projects/counting.xml"), &system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc), &system);
         let global_context = proj.proj.read().global_context();
@@ -57,7 +57,7 @@ fn test_proj_counting() {
 #[test]
 fn test_proj_broadcast() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut proj = get_running_project(include_str!("projects/broadcast.xml"), &system);
+    let proj = get_running_project(include_str!("projects/broadcast.xml"), &system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc), &system);
         let global_context = proj.proj.read().global_context();
@@ -80,7 +80,7 @@ fn test_proj_broadcast() {
 #[test]
 fn test_proj_parallel_rpcs() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
-    let mut proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), &system);
+    let proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), &system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc), &system);
         let global_context = proj.proj.read().global_context();
@@ -122,7 +122,7 @@ fn test_proj_parallel_rpcs() {
 #[test]
 fn test_proj_wait_until() {
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfigBuilder::default().build().unwrap());
-    let mut proj = get_running_project(include_str!("projects/wait-until.xml"), &system);
+    let proj = get_running_project(include_str!("projects/wait-until.xml"), &system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc), &system);
         let global_context = proj.proj.read().global_context();

@@ -773,7 +773,7 @@ impl BinaryWrite for Instruction<'_> {
 
 /// An interpreter-ready sequence of instructions.
 /// 
-/// [`Process`](crate::runtime::Process) is an execution primitive that can be used to execute generated [`ByteCode`].
+/// [`Process`](crate::process::Process) is an execution primitive that can be used to execute generated [`ByteCode`].
 #[derive(Debug, Collect)]
 #[collect(require_static)]
 pub struct ByteCode {
