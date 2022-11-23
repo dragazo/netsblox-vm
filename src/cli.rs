@@ -80,8 +80,8 @@ impl<F: FnOnce()> Drop for AtExit<F> {
 #[derive(Collect)]
 #[collect(no_drop)]
 struct Env<'gc> {
-    proj: GcCell<'gc, Project<'gc, StdSystem>>,
-    locs: InsLocations<String>,
+                               proj: GcCell<'gc, Project<'gc, StdSystem>>,
+    #[collect(require_static)] locs: InsLocations<String>,
 }
 make_arena!(EnvArena, Env);
 

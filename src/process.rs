@@ -127,12 +127,12 @@ impl Settings {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct CallStackEntry<'gc, S: System> {
-    pub called_from: usize,
-    pub return_to: usize,
-    pub locals: SymbolTable<'gc, S>,
+    #[collect(require_static)] pub called_from: usize,
+    #[collect(require_static)] pub return_to: usize,
+                               pub locals: SymbolTable<'gc, S>,
 
-    warp_counter: usize,
-    value_stack_size: usize,
+    #[collect(require_static)] warp_counter: usize,
+    #[collect(require_static)] value_stack_size: usize,
 }
 
 #[derive(Collect)]
@@ -153,24 +153,24 @@ enum Defer<S: System> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Process<'gc, S: System> {
-    bytecode: Rc<ByteCode>,
-    start_pos: usize,
-    global_context: GcCell<'gc, GlobalContext<'gc, S>>,
-    entity: GcCell<'gc, Entity<'gc, S>>,
-    settings: Settings,
-    pos: usize,
-    running: bool,
-    barrier: Option<Barrier>,
-    reply_key: Option<S::InternReplyKey>,
-    warp_counter: usize,
-    call_stack: Vec<CallStackEntry<'gc, S>>,
-    value_stack: Vec<Value<'gc, S>>,
-    meta_stack: Vec<String>,
-    defer: Option<Defer<S>>,
-    last_syscall_error: Option<Value<'gc, S>>,
-    last_rpc_error: Option<Value<'gc, S>>,
-    last_answer: Option<Value<'gc, S>>,
-    timer_start: u64,
+    #[collect(require_static)] bytecode: Rc<ByteCode>,
+    #[collect(require_static)] start_pos: usize,
+                               global_context: GcCell<'gc, GlobalContext<'gc, S>>,
+                               entity: GcCell<'gc, Entity<'gc, S>>,
+    #[collect(require_static)] settings: Settings,
+    #[collect(require_static)] pos: usize,
+    #[collect(require_static)] running: bool,
+    #[collect(require_static)] barrier: Option<Barrier>,
+    #[collect(require_static)] reply_key: Option<S::InternReplyKey>,
+    #[collect(require_static)] warp_counter: usize,
+                               call_stack: Vec<CallStackEntry<'gc, S>>,
+                               value_stack: Vec<Value<'gc, S>>,
+    #[collect(require_static)] meta_stack: Vec<String>,
+    #[collect(require_static)] defer: Option<Defer<S>>,
+                               last_syscall_error: Option<Value<'gc, S>>,
+                               last_rpc_error: Option<Value<'gc, S>>,
+                               last_answer: Option<Value<'gc, S>>,
+    #[collect(require_static)] timer_start: u64,
 }
 impl<'gc, S: System> Process<'gc, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity`.

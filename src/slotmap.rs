@@ -35,8 +35,8 @@ macro_rules! new_key {
 #[derive(Clone, Collect)]
 #[collect(no_drop)]
 struct Slot<T> {
-    value: Option<T>,
-    generation: usize,
+                               value: Option<T>,
+    #[collect(require_static)] generation: usize,
 }
 
 /// A dense, resizable array that supports generational indexing.
@@ -46,10 +46,10 @@ struct Slot<T> {
 #[derive(Clone, Collect)]
 #[collect(no_drop)]
 pub struct SlotMap<K: Key, T> {
-    slots: Vec<Slot<T>>,
-    empty_slots: Vec<usize>,
-    num_values: usize,
-    _key: PhantomData<K>
+                               slots: Vec<Slot<T>>,
+    #[collect(require_static)] empty_slots: Vec<usize>,
+    #[collect(require_static)] num_values: usize,
+    #[collect(require_static)] _key: PhantomData<K>
 }
 impl<K: Key, T> Default for SlotMap<K, T> {
     fn default() -> Self {

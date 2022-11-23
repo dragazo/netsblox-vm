@@ -73,19 +73,27 @@ enum Hat {
 
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
+struct ContextEntry<'gc, S: System> {
+                               locals: SymbolTable<'gc, S>,
+    #[collect(require_static)] barrier: Option<Barrier>,
+    #[collect(require_static)] reply_key: Option<S::InternReplyKey>,
+}
+
+#[derive(Collect)]
+#[collect(no_drop, bound = "")]
 struct Script<'gc, S: System> {
-    hat: Hat,
-    start_pos: usize,
-    entity: GcCell<'gc, Entity<'gc, S>>,
-    process: Option<ProcessKey>,
-    context_queue: VecDeque<(SymbolTable<'gc, S>, Option<Barrier>, Option<S::InternReplyKey>)>,
+    #[collect(require_static)] hat: Hat,
+    #[collect(require_static)] start_pos: usize,
+                               entity: GcCell<'gc, Entity<'gc, S>>,
+    #[collect(require_static)] process: Option<ProcessKey>,
+                               context_queue: VecDeque<ContextEntry<'gc, S>>,
 }
 impl<'gc, S: System> Script<'gc, S> {
     fn consume_context(&mut self, state: &mut State<'gc, S>, system: &S) {
         let process = self.process.and_then(|key| Some((key, state.processes.get_mut(key)?)));
         if process.as_ref().map(|x| x.1.is_running()).unwrap_or(false) { return }
 
-        let (context, barrier, reply_key) = match self.context_queue.pop_front() {
+        let ContextEntry { locals, barrier, reply_key } = match self.context_queue.pop_front() {
             Some(x) => x,
             None => return,
         };
@@ -95,12 +103,12 @@ impl<'gc, S: System> Script<'gc, S> {
                 debug_assert!(!state.process_queue.contains(&key));
                 debug_assert_eq!(self.process, Some(key));
 
-                process.initialize(context, barrier, reply_key, system);
+                process.initialize(locals, barrier, reply_key, system);
                 state.process_queue.push_back(key);
             }
             None => {
                 let mut process = Process::new(state.code.clone(), self.start_pos, state.global_context, self.entity, state.settings);
-                process.initialize(context, barrier, reply_key, system);
+                process.initialize(locals, barrier, reply_key, system);
                 let key = state.processes.insert(process);
                 state.process_queue.push_back(key);
                 self.process = Some(key);
@@ -114,8 +122,8 @@ impl<'gc, S: System> Script<'gc, S> {
         }
         self.context_queue.clear();
     }
-    fn schedule(&mut self, state: &mut State<'gc, S>, system: &S, context: SymbolTable<'gc, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, max_queue: usize) {
-        self.context_queue.push_back((context, barrier, reply_key));
+    fn schedule(&mut self, state: &mut State<'gc, S>, system: &S, locals: SymbolTable<'gc, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, max_queue: usize) {
+        self.context_queue.push_back(ContextEntry { locals, barrier, reply_key });
         self.consume_context(state, system);
         if self.context_queue.len() > max_queue {
             self.context_queue.pop_back();
@@ -126,11 +134,11 @@ impl<'gc, S: System> Script<'gc, S> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 struct State<'gc, S: System> {
-    global_context: GcCell<'gc, GlobalContext<'gc, S>>,
-    code: Rc<ByteCode>,
-    settings: Settings,
-    processes: SlotMap<ProcessKey, Process<'gc, S>>,
-    process_queue: VecDeque<ProcessKey>,
+                               global_context: GcCell<'gc, GlobalContext<'gc, S>>,
+    #[collect(require_static)] code: Rc<ByteCode>,
+    #[collect(require_static)] settings: Settings,
+                               processes: SlotMap<ProcessKey, Process<'gc, S>>,
+    #[collect(require_static)] process_queue: VecDeque<ProcessKey>,
 }
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]

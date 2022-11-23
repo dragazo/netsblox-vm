@@ -267,9 +267,9 @@ impl<'gc, S: System> PartialEq for Identity<'gc, S> { fn eq(&self, other: &Self)
 #[collect(no_drop, bound = "")]
 pub enum Value<'gc, S: System> {
     /// A primitive boolean value.
-    Bool(bool),
+    Bool(#[collect(require_static)] bool),
     /// A primitive numeric value. Snap! and NetsBlox use 64-bit floating point values for all numbers.
-    Number(f64),
+    Number(#[collect(require_static)] f64),
     /// A primitive string value, which is an immutable reference type.
     /// Although [`Rc`] would be sufficient for this purpose, using [`Gc`] instead makes the arena automatically
     /// include strings in its calculation of the total memory footprint (and allows [`Value`] to be [`Copy`]).
@@ -441,9 +441,9 @@ impl<'gc, S: System> Value<'gc, S> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Closure<'gc, S: System> {
-    pub pos: usize,
-    pub params: Vec<String>,
-    pub captures: SymbolTable<'gc, S>,
+    #[collect(require_static)] pub pos: usize,
+    #[collect(require_static)] pub params: Vec<String>,
+                               pub captures: SymbolTable<'gc, S>,
 }
 impl<S: System> fmt::Debug for Closure<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -455,9 +455,9 @@ impl<S: System> fmt::Debug for Closure<'_, S> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Entity<'gc, S: System> {
-    pub name: String,
-    pub fields: SymbolTable<'gc, S>,
-    pub alive: bool,
+    #[collect(require_static)] pub name: String,
+                               pub fields: SymbolTable<'gc, S>,
+    #[collect(require_static)] pub alive: bool,
 }
 impl<S: System> fmt::Debug for Entity<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -638,9 +638,9 @@ impl<'gc, 'a, 'b, S: System> LookupGroup<'gc, 'a, 'b, S> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct GlobalContext<'gc, S: System> {
-    pub proj_name: String,
-    pub globals: SymbolTable<'gc, S>,
-    pub entities: Vec<GcCell<'gc, Entity<'gc, S>>>,
+    #[collect(require_static)] pub proj_name: String,
+                               pub globals: SymbolTable<'gc, S>,
+                               pub entities: Vec<GcCell<'gc, Entity<'gc, S>>>,
 }
 impl<'gc, S: System> GlobalContext<'gc, S> {
     pub fn from_ast(mc: MutationContext<'gc, '_>, role: &ast::Role) -> Self {
