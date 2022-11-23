@@ -61,8 +61,6 @@ pub enum ProjectStep<'gc, S: System> {
     Error { error: ExecError, proc: Process<'gc, S> },
 }
 
-#[derive(Collect)]
-#[collect(require_static)]
 enum Hat {
     OnFlag,
     LocalMessage { msg_type: String },

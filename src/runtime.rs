@@ -657,8 +657,7 @@ impl<'gc, S: System> GlobalContext<'gc, S> {
 }
 
 /// A blocking handle for a [`BarrierCondition`].
-#[derive(Debug, Default, Clone, Collect)]
-#[collect(require_static)]
+#[derive(Debug, Default, Clone)]
 pub struct Barrier(Rc<()>);
 /// Waits for the destruction of all associated [`Barrier`] handles.
 #[derive(Debug, Clone)]
@@ -745,16 +744,16 @@ pub enum SystemError {
 /// This can be accomplished by returning the [`SystemError::NotSupported`] variant for the relevant [`SystemFeature`].
 pub trait System: 'static + Sized {
     /// Key type used to await the result of a syscall.
-    type SyscallKey: Collect + 'static;
+    type SyscallKey: 'static;
     /// Key type used to await the result of an RPC request.
-    type RpcKey: Collect + 'static;
+    type RpcKey: 'static;
     /// Key type used to await the result of an "ask" block (string input from the user).
-    type InputKey: Collect + 'static;
+    type InputKey: 'static;
     /// Key type used to await the result of a "send message and wait" block (response from target).
-    type ExternReplyKey: Collect + 'static;
+    type ExternReplyKey: 'static;
     /// Key type used to reply to a message that was sent to this client with the expectation of receiving a response.
     /// This type is required to be [`Clone`] because there can be multiple message handlers for the same message type.
-    type InternReplyKey: Collect + 'static + Clone;
+    type InternReplyKey: 'static + Clone;
 
     /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
     /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],
@@ -846,13 +845,11 @@ mod std_system {
         pub struct InputKey;
     }
 
-    #[derive(Debug, Collect, Clone, PartialOrd, Ord, PartialEq, Eq)]
-    #[collect(require_static)]
+    #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
     pub struct ExternReplyKey {
         request_id: String,
     }
-    #[derive(Debug, Collect, Clone)]
-    #[collect(require_static)]
+    #[derive(Debug, Clone)]
     pub struct InternReplyKey {
         src_id: String,
         request_id: String,

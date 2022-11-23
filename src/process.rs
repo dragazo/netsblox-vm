@@ -106,9 +106,8 @@ pub enum ErrorScheme {
 }
 
 /// Settings to use for a [`Process`].
-#[derive(Builder, Clone, Copy, Collect)]
+#[derive(Builder, Clone, Copy)]
 #[builder(no_std)]
-#[collect(require_static)]
 pub struct Settings {
     /// The maximum depth of the call stack (default `1024`).
     #[builder(default = "1024")]
@@ -135,8 +134,6 @@ pub struct CallStackEntry<'gc, S: System> {
     #[collect(require_static)] value_stack_size: usize,
 }
 
-#[derive(Collect)]
-#[collect(require_static, bound = "")]
 enum Defer<S: System> {
     SyscallResult { key: S::SyscallKey, aft_pos: usize },
     RpcResult { key: S::RpcKey, aft_pos: usize },

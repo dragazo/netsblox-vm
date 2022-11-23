@@ -9,7 +9,6 @@ use num_traits::FromPrimitive;
 use bin_pool::BinPool;
 
 use crate::*;
-use crate::gc::*;
 
 /// Number of bytes to display on each line of a hex dump
 const BYTES_PER_LINE: usize = 10;
@@ -774,16 +773,14 @@ impl BinaryWrite for Instruction<'_> {
 /// An interpreter-ready sequence of instructions.
 /// 
 /// [`Process`](crate::process::Process) is an execution primitive that can be used to execute generated [`ByteCode`].
-#[derive(Debug, Collect)]
-#[collect(require_static)]
+#[derive(Debug)]
 pub struct ByteCode {
     pub(crate) code: Box<[u8]>,
     pub(crate) data: Box<[u8]>,
 }
 
 /// Instruction location lookup table from bytecode address to original AST location.
-#[derive(Debug, Collect)]
-#[collect(require_static)]
+#[derive(Debug)]
 pub struct InsLocations<T> {
     locs: BTreeMap<usize, T>,
 }
