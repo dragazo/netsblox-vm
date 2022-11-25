@@ -58,7 +58,7 @@ pub enum ProjectStep<'gc, S: System> {
     /// The project had a running process, which did any non-yielding operation.
     Normal,
     /// The project had a running process, which which encountered a runtime error.
-    Error { error: ExecError, proc: Process<'gc, S> },
+    Error { error: ExecError<S>, proc: Process<'gc, S> },
 }
 
 enum Hat {
@@ -215,9 +215,7 @@ impl<'gc, S: System> Project<'gc, S> {
                     if msg_type == *script_msg_type {
                         let mut context = SymbolTable::default();
                         for field in fields.iter() {
-                            context.redefine_or_define(field, values.get(field).map(|x| {
-                                Value::from_simple(mc, SimpleValue::from_json(x.clone()).unwrap_or_else(|_| 0f64.into()))
-                            }).unwrap_or_else(|| 0f64.into()).into());
+                            context.redefine_or_define(field, values.get(field).map(|x| Value::from_json(mc, x.clone()).ok()).flatten().unwrap_or_else(|| 0f64.into()).into());
                         }
                         script.schedule(&mut self.state, system, context, None, reply_key.clone(), usize::MAX);
                     }

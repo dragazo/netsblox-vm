@@ -5,21 +5,48 @@ use std::fmt::Write;
 
 use crate::*;
 use crate::gc::*;
+use crate::json::*;
 use crate::bytecode::*;
 use crate::runtime::*;
 use crate::process::*;
 
 use super::*;
 
+#[derive(Debug)]
+enum NativeValue {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeType {}
+
+impl GetType for NativeValue {
+    type Output = NativeType;
+    fn get_type(&self) -> Self::Output {
+        unreachable!()
+    }
+}
+
+struct C;
+impl CustomTypes for C {
+    type NativeValue = NativeValue;
+    type Intermediate = Json;
+
+    fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
+        Ok(Value::from_json(mc, value)?)
+    }
+    fn to_intermediate<'gc>(value: Value<'gc, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>> {
+        Ok(value.to_json()?)
+    }
+}
+
 #[derive(Collect)]
 #[collect(no_drop)]
 struct Env<'gc> {
-    proc: GcCell<'gc, Process<'gc, StdSystem>>,
-    glob: GcCell<'gc, GlobalContext<'gc, StdSystem>>,
+    proc: GcCell<'gc, Process<'gc, StdSystem<C>>>,
+    glob: GcCell<'gc, GlobalContext<'gc, StdSystem<C>>>,
 }
 make_arena!(EnvArena, Env);
 
-fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: &StdSystem) -> (EnvArena, InsLocations<String>) {
+fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: &StdSystem<C>) -> (EnvArena, InsLocations<String>) {
     let parser = ast::ParserBuilder::default().build().unwrap();
     let ast = parser.parse(xml).unwrap();
     assert_eq!(ast.roles.len(), 1);
@@ -38,7 +65,7 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: &StdSystem) ->
     }), locs.instructions.transform(ToOwned::to_owned))
 }
 
-fn run_till_term<F>(env: &mut EnvArena, system: &StdSystem, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc, StdSystem>>, usize), ExecError>) {
+fn run_till_term<F>(env: &mut EnvArena, system: &StdSystem<C>, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc, StdSystem<C>>>, usize), ExecError<StdSystem<C>>>) {
     env.mutate(|mc, env| {
         let mut proc = env.proc.write(mc);
         assert!(proc.is_running());
@@ -62,7 +89,7 @@ fn run_till_term<F>(env: &mut EnvArena, system: &StdSystem, and_then: F) where F
 
 #[test]
 fn test_proc_ret() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -78,7 +105,7 @@ fn test_proc_ret() {
 
 #[test]
 fn test_proc_sum_123n() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -86,14 +113,14 @@ fn test_proc_sum_123n() {
         methods = "",
     ), Settings::builder().build().unwrap(), &system);
 
-    for (n, expect) in [(0, simple_value!("0")), (1, simple_value!(1)), (2, simple_value!(3)), (3, simple_value!(6)), (4, simple_value!(10)), (5, simple_value!(15)), (6, simple_value!(21))] {
+    for (n, expect) in [(0, json!("0")), (1, json!(1)), (2, json!(3)), (3, json!(6)), (4, json!(10)), (5, json!(15)), (6, json!(21))] {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("n", Shared::Unique((n as f64).into()));
             env.proc.write(mc).initialize(locals, None, None, &system);
         });
         run_till_term(&mut env, &system, |mc, _, res| {
-            let expect = Value::from_simple(mc, expect);
+            let expect = Value::from_json(mc, expect).unwrap();
             assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "sum 123n");
         });
     }
@@ -101,7 +128,7 @@ fn test_proc_sum_123n() {
 
 #[test]
 fn test_proc_recursive_factorial() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -109,14 +136,14 @@ fn test_proc_recursive_factorial() {
         methods = "",
     ), Settings::builder().build().unwrap(), &system);
 
-    for (n, expect) in [(0, simple_value!("1")), (1, simple_value!("1")), (2, simple_value!(2)), (3, simple_value!(6)), (4, simple_value!(24)), (5, simple_value!(120)), (6, simple_value!(720)), (7, simple_value!(5040))] {
+    for (n, expect) in [(0, json!("1")), (1, json!("1")), (2, json!(2)), (3, json!(6)), (4, json!(24)), (5, json!(120)), (6, json!(720)), (7, json!(5040))] {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("n", Shared::Unique((n as f64).into()));
             env.proc.write(mc).initialize(locals, None, None, &system);
         });
         run_till_term(&mut env, &system, |mc, _, res| {
-            let expect = Value::from_simple(mc, expect);
+            let expect = Value::from_json(mc, expect).unwrap();
             assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "recursive factorial");
         });
     }
@@ -124,7 +151,7 @@ fn test_proc_recursive_factorial() {
 
 #[test]
 fn test_proc_loops_lists_basic() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -133,7 +160,7 @@ fn test_proc_loops_lists_basic() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expected = Value::from_simple(mc, simple_value!([
+        let expected = Value::from_json(mc, json!([
             [1,2,3,4,5,6,7,8,9,10],
             [1,2,3,4,5,6,7,8,9,10],
             [1,2,3,4,5,6,7],
@@ -157,14 +184,14 @@ fn test_proc_loops_lists_basic() {
             [6.5,5.5,4.5,3.5,2.5],
             [6.5,5.5,4.5,3.5,2.5,1.5],
             ["56","44","176"],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expected, 1e-10, "loops lists");
     });
 }
 
 #[test]
 fn test_proc_recursively_self_containing_lists() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -177,7 +204,7 @@ fn test_proc_recursively_self_containing_lists() {
             let res = res.read();
             assert_eq!(res.len(), 4);
 
-            fn check<'gc>(name: &str, mc: MutationContext<'gc, '_>, got: &Value<'gc, StdSystem>, expected_basic: &Value<'gc, StdSystem>) {
+            fn check<'gc>(name: &str, mc: MutationContext<'gc, '_>, got: &Value<'gc, StdSystem<C>>, expected_basic: &Value<'gc, StdSystem<C>>) {
                 let orig_got = got;
                 match got {
                     Value::List(got) => {
@@ -198,10 +225,10 @@ fn test_proc_recursively_self_containing_lists() {
                 }
             }
 
-            check("left mode", mc, &res[0], &Value::from_simple(mc, simple_value!([1,4,9,16,25,36,49,64,81,100])));
-            check("right mode", mc, &res[1], &Value::from_simple(mc, simple_value!([2,4,8,16,32,64,128,256,512,1024])));
-            check("both mode", mc, &res[2], &Value::from_simple(mc, simple_value!([1,4,27,256,3125,46656,823543,16777216,387420489,10000000000])));
-            check("unary mode", mc, &res[3], &Value::from_simple(mc, simple_value!([-1,-2,-3,-4,-5,-6,-7,-8,-9,-10])));
+            check("left mode", mc, &res[0], &Value::from_json(mc, json!([1,4,9,16,25,36,49,64,81,100])).unwrap());
+            check("right mode", mc, &res[1], &Value::from_json(mc, json!([2,4,8,16,32,64,128,256,512,1024])).unwrap());
+            check("both mode", mc, &res[2], &Value::from_json(mc, json!([1,4,27,256,3125,46656,823543,16777216,387420489,10000000000.0])).unwrap());
+            check("unary mode", mc, &res[3], &Value::from_json(mc, json!([-1,-2,-3,-4,-5,-6,-7,-8,-9,-10])).unwrap());
         }
         x => panic!("{:?}", x),
     });
@@ -209,7 +236,7 @@ fn test_proc_recursively_self_containing_lists() {
 
 #[test]
 fn test_proc_sieve_of_eratosthenes() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -228,14 +255,14 @@ fn test_proc_sieve_of_eratosthenes() {
     });
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97]));
+        let expect = Value::from_json(mc, json!([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "primes");
     });
 }
 
 #[test]
 fn test_proc_early_return() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -244,14 +271,14 @@ fn test_proc_early_return() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([1,3]));
+        let expect = Value::from_json(mc, json!([1,3])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "res");
     });
 }
 
 #[test]
 fn test_proc_short_circuit() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -260,7 +287,7 @@ fn test_proc_short_circuit() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [true, "xed"],
             [false, "sergb"],
             [true, true],
@@ -272,14 +299,14 @@ fn test_proc_short_circuit() {
             [false, true],
             [false, false],
             ["xed", "sergb", true, false, false, false, true, true, true, false],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "short circuit test");
     });
 }
 
 #[test]
 fn test_proc_all_arithmetic() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -289,41 +316,41 @@ fn test_proc_all_arithmetic() {
 
     run_till_term(&mut env, &system, |mc, _, res| {
         let inf = std::f64::INFINITY;
-        let expect = Value::from_simple(mc, simple_value!([
-            [8.5, 2.9, -2.9, -8.5],
-            [2.9, 8.5, -8.5, -2.9],
-            [15.96, -15.96, -15.96, 15.96],
-            [2.035714285714286, -2.035714285714286, -2.035714285714286, 2.035714285714286],
-            [inf, -inf, -inf, inf],
-            [130.75237792066878, 0.007648044463151016],
-            [0.1, -2.7, 2.7, -0.1, 5.8, -1.3, 1.3, -5.8],
-            [7, 8, -7, -8],
-            [56.8, 6.3, inf, inf],
-            [-56.8, 6.3, -inf, inf],
-            [8, 8, -7, -7, inf, -inf],
-            [7, 7, -8, -8, inf, -inf],
-            [2.701851217221259, inf],
-            [0.12706460860135046, 0.7071067811865475],
-            [0.9918944425900297, 0.7071067811865476],
-            [0.12810295445305653, 1],
-            [0, 30, -30],
-            [90, 60, 120],
-            [0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779],
-            [-0.6931471805599453, 0, 2.186051276738094, inf],
-            [-0.3010299956639812, 0, 0.9493900066449128, inf],
-            [-1, 0, 3.1538053360790355, inf],
-            [1, 3.3201169227365472, 0.0001363889264820114, inf, 0],
-            [1, 15.848931924611133, 1.2589254117941663e-9, inf, 0],
-            [1, 2.2973967099940698, 0.002093307544016197, inf, 0],
-            ["0", "1.2", "-8.9", inf, -inf],
-        ]));
+        let expect = Value::List(GcCell::allocate(mc, [
+            Value::List(GcCell::allocate(mc, [8.5, 2.9, -2.9, -8.5].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [2.9, 8.5, -8.5, -2.9].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [15.96, -15.96, -15.96, 15.96].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [2.035714285714286, -2.035714285714286, -2.035714285714286, 2.035714285714286].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [inf, -inf, -inf, inf].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [130.75237792066878, 0.007648044463151016].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.1, -2.7, 2.7, -0.1, 5.8, -1.3, 1.3, -5.8].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [7.0, 8.0, -7.0, -8.0].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [56.8, 6.3, inf, inf].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [-56.8, 6.3, -inf, inf].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [8.0, 8.0, -7.0, -7.0, inf, -inf].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [7.0, 7.0, -8.0, -8.0, inf, -inf].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [2.701851217221259, inf].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.12706460860135046, 0.7071067811865475].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.9918944425900297, 0.7071067811865476].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.12810295445305653, 1.0].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.0, 30.0, -30.0].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [90.0, 60.0, 120.0].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [-0.6931471805599453, 0.0, 2.186051276738094, inf].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [-0.3010299956639812, 0.0, 0.9493900066449128, inf].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [-1.0, 0.0, 3.1538053360790355, inf].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [1.0, 3.3201169227365472, 0.0001363889264820114, inf, 0.0].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [1.0, 15.848931924611133, 1.2589254117941663e-9, inf, 0.0].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [1.0, 2.2973967099940698, 0.002093307544016197, inf, 0.0].into_iter().map(|x| x.into()).collect())),
+            Value::List(GcCell::allocate(mc, [Value::String(Gc::allocate(mc, "0".into())), Value::String(Gc::allocate(mc, "1.2".into())), Value::String(Gc::allocate(mc, "-8.9".into())), Value::Number(inf), Value::Number(-inf)].into_iter().collect())),
+        ].into_iter().collect()));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-7, "short circuit test");
     });
 }
 
 #[test]
 fn test_proc_lambda_local_shadow_capture() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -332,14 +359,14 @@ fn test_proc_lambda_local_shadow_capture() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!(["1", 0, "1"]));
+        let expect = Value::from_json(mc, json!(["1", 0, "1"])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "local shadow capture");
     });
 }
 
 #[test]
 fn test_proc_generators_nested() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -348,14 +375,14 @@ fn test_proc_generators_nested() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761]));
+        let expect = Value::from_json(mc, json!([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "nested generators");
     });
 }
 
 #[test]
 fn test_proc_call_in_closure() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -364,17 +391,17 @@ fn test_proc_call_in_closure() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [2, 4, 6, 8, 10],
             [1, 3, 5, 7, 9],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "call in closure");
     });
 }
 
 #[test]
 fn test_proc_warp_yields() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="counter"><l>0</l></variable>"#,
         fields = "",
@@ -391,7 +418,7 @@ fn test_proc_warp_yields() {
 
         run_till_term(&mut env, &system, |mc, env, res| {
             let (res, yields) = res.unwrap();
-            assert_values_eq(res.as_ref().unwrap(), &Value::from_simple(mc, simple_value!("x")), 1e-20, &format!("yield test (mode {mode}) res"));
+            assert_values_eq(res.as_ref().unwrap(), &Value::from_json(mc, json!("x")).unwrap(), 1e-20, &format!("yield test (mode {mode}) res"));
             let counter = env.glob.read().globals.lookup("counter").unwrap().get();
             assert_values_eq(&counter, &(expected_counter as f64).into(), 1e-20, &format!("yield test (mode {mode}) value"));
             if yields != expected_yields { panic!("yield test (mode {}) yields - got {} expected {}", mode, yields, expected_yields) }
@@ -401,7 +428,7 @@ fn test_proc_warp_yields() {
 
 #[test]
 fn test_proc_string_ops() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -410,7 +437,7 @@ fn test_proc_string_ops() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             "hello 5 world",
             [ "these", "are", "some", "words" ],
             [
@@ -428,7 +455,7 @@ fn test_proc_string_ops() {
                 [ "test", "", "23", "21", "a", "b", "", "" ],
                 [ "perp", "", "3", "", "44", "3", "2" ],
             ],
-            { "a" => [ 1, "a", [ 7, [] ], { "g" => "4", "h" => [] }], "b" => 3, "c" => "hello world" },
+            { "a": [ 1, "a", [ 7, [] ], { "g": "4", "h": [] }], "b": 3, "c": "hello world" },
             [
                 [ "a", "b" ],
                 [ "c", "d" ],
@@ -452,15 +479,15 @@ fn test_proc_string_ops() {
             5,
             [5, 2, 1],
             [ "hello", "world" ],
-            { "a" => 1, "b" => 2, "c" => 3, "d" => 4, "e" => 5, "f" => 6, "g" => 7, "h" => 8, "i" => 9, "j" => 10 },
-        ]));
+            { "a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10 },
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "string ops");
     });
 }
 
 #[test]
 fn test_proc_str_cmp_case_insensitive() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -469,20 +496,20 @@ fn test_proc_str_cmp_case_insensitive() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             false, true, true, true, false,
             [
                 false, true,
                 [false, true, true, false],
             ],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "str cmp case insensitive");
     });
 }
 
 #[test]
 fn test_proc_rpc_call_basic() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -506,7 +533,7 @@ fn test_proc_rpc_call_basic() {
 
 #[test]
 fn test_proc_list_index_blocks() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -515,7 +542,7 @@ fn test_proc_list_index_blocks() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
             [2, 3, 4, 5, 6, 7, 8, 9, 10],
             [2, 3, 4, 5, 6, 7, 8, 9],
@@ -532,14 +559,14 @@ fn test_proc_list_index_blocks() {
             ["50"],
             [],
             ["51"],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "index ops");
     });
 }
 
 #[test]
 fn test_proc_literal_types() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -548,7 +575,7 @@ fn test_proc_literal_types() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([ "50e4", "50e4s" ]));
+        let expect = Value::from_json(mc, json!([ "50e4", "50e4s" ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "literal types check");
     });
 }
@@ -557,9 +584,10 @@ fn test_proc_literal_types() {
 fn test_proc_say() {
     let output = Rc::new(RefCell::new(String::new()));
     let output_cpy = output.clone();
-    let config = StdSystemConfig::builder()
-        .print(Rc::new(move |v, _| Ok(if let Some(v) = v { writeln!(*output_cpy.borrow_mut(), "{:?}", v).unwrap() })))
-        .build().unwrap();
+    let config = StdSystemConfig {
+        print: Some(Rc::new(move |_, _, v, _| Ok(if let Some(v) = v { writeln!(*output_cpy.borrow_mut(), "{:?}", v).unwrap() }))),
+        ..Default::default()
+    };
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, config);
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
@@ -576,25 +604,26 @@ fn test_proc_say() {
 fn test_proc_syscall() {
     let buffer = Rc::new(RefCell::new(String::new()));
     let buffer_cpy = buffer.clone();
-    let config = StdSystemConfig::builder()
-        .syscall(Rc::new(move |system, key, name, args| Ok(match name.as_str() {
+    let config = StdSystemConfig {
+        syscall: Some(Rc::new(move |_, mc, key, name, args| Ok(match name.as_str() {
             "bar" => match args.is_empty() {
                 false => {
                     let mut buffer = buffer_cpy.borrow_mut();
                     for value in args {
-                        buffer.push_str(&value.into_string().unwrap());
+                        buffer.push_str(value.to_string(mc).unwrap().as_str());
                     }
-                    system.finish_syscall(key, Ok(simple_value!(buffer.len() as f64)));
+                    key.complete(Ok(json!(buffer.len() as f64)));
                 }
-                true => system.finish_syscall(key, Err("beep beep - called with empty args".to_owned())),
+                true => key.complete(Err("beep beep - called with empty args".to_owned())),
             }
             "foo" => {
                 let content = buffer_cpy.borrow().clone();
-                system.finish_syscall(key, Ok(simple_value!(content)));
+                key.complete(Ok(json!(content)));
             }
-            _ => return Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }),
-        })))
-        .build().unwrap();
+            _ => return Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }.into()),
+        }))),
+        ..Default::default()
+    };
     let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, config);
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
@@ -604,20 +633,20 @@ fn test_proc_syscall() {
     ), Settings::builder().syscall_error_scheme(ErrorScheme::Soft).build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             ["", ""],
             "",
             ["5test9", ""],
             "beep beep - called with empty args",
             ["5test9", ""],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "syscall checks");
     });
 }
 
 #[test]
 fn test_proc_timer_wait() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -627,7 +656,7 @@ fn test_proc_timer_wait() {
 
     let start = std::time::Instant::now();
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([0.0, 0.05, 0.15, 0.3, 0.5, 0.75, 1.05, 1.4, 1.8, 2.25, 2.75]));
+        let expect = Value::from_json(mc, json!([0.0, 0.05, 0.15, 0.3, 0.5, 0.75, 1.05, 1.4, 1.8, 2.25, 2.75])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 0.01, "timer checks");
     });
     let duration = start.elapsed().as_millis();
@@ -636,7 +665,7 @@ fn test_proc_timer_wait() {
 
 #[test]
 fn test_proc_cons_cdr() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -645,7 +674,7 @@ fn test_proc_cons_cdr() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [1],
             [2,1],
             [3,2,1],
@@ -656,14 +685,14 @@ fn test_proc_cons_cdr() {
             [2,1],
             [1],
             []
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "cons cdr checks");
     });
 }
 
 #[test]
 fn test_proc_list_find_contains() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -672,7 +701,7 @@ fn test_proc_list_find_contains() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             ["1", 0, false],
             ["2", 2, true],
             ["3", 0, false],
@@ -684,14 +713,14 @@ fn test_proc_list_find_contains() {
             [["1","2","3","4"], 0, false],
             [["1","2"], 0, false],
             [[], 5, true],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "cons cdr checks");
     });
 }
 
 #[test]
 fn test_proc_append() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -700,21 +729,21 @@ fn test_proc_append() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [1,2,3,4,"test"],
             [],
             [1,2,3,4],
             [1,2,3,4,1,2,3,4],
             [1,2,3,4,2,3,"4"],
             [1,2,3,4,2,3,"4"],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "append result");
     });
 }
 
 #[test]
 fn test_proc_foreach_mutate() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -723,18 +752,18 @@ fn test_proc_foreach_mutate() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [1,2,3,4,5,6,7,8,9,10,2,3,4,5,6,7,8,9,10,11],
             [2,4,6,8,10,12,14,16,18,20],
             [2, 1.5, 1.3333333, 3, 2, 1.6666666, 4, 2.5, 2, 3, 2.5, 2.33333, 4, 3, 2.666666, 5, 3.5, 3, 4, 3.5, 3.333333, 5, 4, 3.666666, 6, 4.5, 4],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "map result");
     });
 }
 
 #[test]
 fn test_proc_map() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
@@ -743,18 +772,18 @@ fn test_proc_map() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [1,2,3,4,5,6,7,8,9,10,2,4,6,8,10,12,14,16,18,20],
             [1,4,9,16,25,36,49,64,81,100],
             [1.0, 1.4142135623730951, 1.7320508075688772, 2.0, 2.23606797749979, 2.449489742783178, 2.6457513110645907, 2.8284271247461903, 3.0, 3.1622776601683795, 1.4142135623730951, 2.0, 2.449489742783178, 2.8284271247461903, 3.1622776601683795, 3.4641016151377544, 3.7416573867739413, 4.0, 4.242640687119285, 4.47213595499958],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "map result");
     });
 }
 
 #[test]
 fn test_proc_keep_find() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
@@ -763,20 +792,20 @@ fn test_proc_keep_find() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [1,2,3,4,5,6,7,8,9,10,4,5,6,7,8,9,10,11,12,13],
             [3,6,9],
             [10,11,12,13,14,15,16,17,18,19,20,17,18,19,20,21],
             14,
             "",
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "keep/find results");
     });
 }
 
 #[test]
 fn test_proc_combine() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
@@ -785,7 +814,7 @@ fn test_proc_combine() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [1,2,3,4,5,6,7,8,9,10,[1,2],[2,3],[6,4],[24,5],[120,6],[720,7],[5040,8],[40320,9],[362880,10]],
             3628800,
             ["7"],
@@ -796,14 +825,14 @@ fn test_proc_combine() {
             "1, 2, 3, 4, 5, 6, 7, 8, 9, 10",
             0,
             0,
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "keep/find results");
     });
 }
 
 #[test]
 fn test_proc_autofill_closure_params() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
@@ -812,20 +841,20 @@ fn test_proc_autofill_closure_params() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [3,6,9,12,15,18,21,24,27,30],
             [3,4,5,6,7,8,9,10,11,12],
             [1,3,5,7,9],
             55,
             3628800,
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "autofill closure params");
     });
 }
 
 #[test]
 fn test_proc_pick_random() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -886,7 +915,7 @@ fn test_proc_pick_random() {
 
 #[test]
 fn test_proc_rand_list_ops() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -896,7 +925,7 @@ fn test_proc_rand_list_ops() {
 
     run_till_term(&mut env, &system, |_, _, res| {
         let (results, last) = {
-            fn extract_value(val: &Value<'_, StdSystem>) -> String {
+            fn extract_value(val: &Value<'_, StdSystem<C>>) -> String {
                 match val {
                     Value::Number(x) => x.to_string(),
                     Value::String(x) if matches!(x.as_str(), "hello" | "goodbye") => x.as_str().to_owned(),
@@ -940,7 +969,7 @@ fn test_proc_rand_list_ops() {
 
 #[test]
 fn test_proc_variadic_sum_product() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -949,7 +978,7 @@ fn test_proc_variadic_sum_product() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             15,
             21,
             [17, 16, 18],
@@ -960,14 +989,14 @@ fn test_proc_variadic_sum_product() {
             [150, 180, 180],
             [240, 320, 20],
             1,
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic sum product");
     });
 }
 
 #[test]
 fn test_proc_variadic_min_max() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -976,14 +1005,14 @@ fn test_proc_variadic_min_max() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([ 1, 2, 9, 17 ]));
+        let expect = Value::from_json(mc, json!([ 1, 2, 9, 17 ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic min/max");
     });
 }
 
 #[test]
 fn test_proc_atan2_new_cmp() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -992,7 +1021,7 @@ fn test_proc_atan2_new_cmp() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [18.43494882, 116.5650511, -32.0053832, -158.198590],
             [14.03624346, 53.13010235, -18.4349488],
             [false, true, true],
@@ -1001,14 +1030,14 @@ fn test_proc_atan2_new_cmp() {
             [true, false, true],
             [false, true, true],
             [false, true],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "atan2 and new cmp");
     });
 }
 
 #[test]
 fn test_proc_flatten() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1017,19 +1046,19 @@ fn test_proc_flatten() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             ["3", "6", "7", "10", "12", "16", "20"],
             ["6", "1", "3", "6", "1", "3", "6", "1", "3"],
             ["hello world"],
             [""],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "flatten");
     });
 }
 
 #[test]
 fn test_proc_list_len_rank_dims() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1038,7 +1067,7 @@ fn test_proc_list_len_rank_dims() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [0, 1, [0]],
             [3, 1, [3]],
             [3, 2, [3, 0]],
@@ -1048,14 +1077,14 @@ fn test_proc_list_len_rank_dims() {
             [2, 2, [2, 10]],
             [2, 2, [2, 10]],
             [0, []],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list len, rank, dims");
     });
 }
 
 #[test]
 fn test_proc_list_rev() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1064,18 +1093,18 @@ fn test_proc_list_rev() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             ["2", "4", "1"],
             ["2", ["6", "4", "3"], "8", "1"],
             [["6", ["6", "4", "3"], "3"], ["6", "4", "3"], "8", "1"],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list rev");
     });
 }
 
 #[test]
 fn test_proc_list_reshape() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1084,7 +1113,7 @@ fn test_proc_list_reshape() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             ["3", "1", "h", "e", "l", "l", "1", "h", "e", "l"],
             [["3", "1", "h", "e", "l"], ["l", "1", "h", "e", "l"]],
             [
@@ -1103,14 +1132,14 @@ fn test_proc_list_reshape() {
             "3",
             [[6, 6, 6], [6, 6, 6]],
             [["", ""], ["", ""]],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list reshape");
     });
 }
 
 #[test]
 fn test_proc_list_json() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1119,21 +1148,21 @@ fn test_proc_list_json() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             r#"[]"#,
             r#"["test"]"#,
             r#"["test",25.0,"12"]"#,
             r#"[["1",["2"],[],[["2"]]],"\"another\"",["1",["2"],[],[["2"]]],"[{}]"]"#,
             r#"14.0"#,
             r#""hello world \"again\"""#,
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list json");
     });
 }
 
 #[test]
 fn test_proc_list_combinations() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1142,7 +1171,7 @@ fn test_proc_list_combinations() {
     ), Settings::builder().build().unwrap(), &system);
 
     run_till_term(&mut env, &system, |mc, _, res| {
-        let expect = Value::from_simple(mc, simple_value!([
+        let expect = Value::from_json(mc, json!([
             [],
             [[1], [2], [3], [4], [5], [6], [7], [8], [9], [10]],
             [
@@ -1169,14 +1198,14 @@ fn test_proc_list_combinations() {
                 ["goodbye", "old", "friend", "!"], ["goodbye", "old", "friend", "."],
             ],
             [],
-        ]));
+        ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list combinations");
     });
 }
 
 #[test]
 fn test_proc_index_over_bounds() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::builder().build().unwrap());
+    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
     let (mut env, ins_locs) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",

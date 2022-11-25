@@ -30,10 +30,11 @@
 extern crate no_std_compat as std;
 
 #[macro_use] extern crate num_derive;
+pub(crate) use educe::Educe;
 
 /// Re-exports of relevant items from `gc_arena`.
 pub mod gc {
-    pub use gc_arena::{Collect, Gc, GcCell, MutationContext, make_arena};
+    pub use gc_arena::{Collect, Gc, GcCell, StaticCollect, MutationContext, make_arena};
 }
 
 /// Re-exports of relevant items from `serde_json`.

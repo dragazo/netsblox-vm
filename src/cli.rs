@@ -39,10 +39,10 @@ struct IdleSleeper {
     yield_count: usize,
 }
 impl IdleSleeper {
-    pub fn new() -> Self {
+    fn new() -> Self {
         IdleSleeper { yield_count: 0 }
     }
-    pub fn consume<S: System>(&mut self, res: &ProjectStep<'_, S>) {
+    fn consume<S: System>(&mut self, res: &ProjectStep<'_, S>) {
         match res {
             ProjectStep::Idle | ProjectStep::Yield => {
                 self.yield_count += 1;
@@ -53,7 +53,7 @@ impl IdleSleeper {
             ProjectStep::Normal | ProjectStep::Error { .. } => self.yield_count = 0,
         }
     }
-    pub fn sleep_now(&mut self) {
+    fn sleep_now(&mut self) {
         self.yield_count = 0;
         thread::sleep(IDLE_SLEEP_TIME);
     }
@@ -78,12 +78,20 @@ impl<F: FnOnce()> Drop for AtExit<F> {
 }
 
 #[derive(Collect)]
-#[collect(no_drop)]
-struct Env<'gc> {
-                               proj: GcCell<'gc, Project<'gc, StdSystem>>,
+#[collect(no_drop, bound = "")]
+struct Env<'gc, S: System> {
+                               proj: GcCell<'gc, Project<'gc, S>>,
     #[collect(require_static)] locs: InsLocations<String>,
 }
-make_arena!(EnvArena, Env);
+make_arena!(EnvArena<S>, Env<S>);
+
+fn get_env<S: System>(role: &ast::Role) -> EnvArena<S> {
+    EnvArena::new(Default::default(), |mc| {
+        let settings = Settings::builder().build().unwrap();
+        let (proj, locs) = Project::from_ast(mc, role, settings);
+        Env { proj: GcCell::allocate(mc, proj), locs: locs.instructions.transform(ToOwned::to_owned) }
+    })
+}
 
 /// Standard NetsBlox VM project actions that can be performed
 #[derive(Parser, Debug)]
@@ -193,15 +201,8 @@ fn open_project<'a>(content: &str, role: Option<&'a str>) -> Result<(String, ast
     };
     Ok((parsed.name, role))
 }
-fn get_env(role: &ast::Role) -> EnvArena {
-    EnvArena::new(Default::default(), |mc| {
-        let settings = Settings::builder().build().unwrap();
-        let (proj, locs) = Project::from_ast(mc, role, settings);
-        Env { proj: GcCell::allocate(mc, proj), locs: locs.instructions.transform(ToOwned::to_owned) }
-    })
-}
 
-fn run_proj_tty(project_name: &str, server: String, env: EnvArena, overrides: StdSystemConfig) {
+fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, env: EnvArena<StdSystem<C>>, overrides: StdSystemConfig<C>) {
     terminal::enable_raw_mode().unwrap();
     execute!(stdout(), cursor::Hide).unwrap();
     let _tty_mode_guard = AtExit::new(|| {
@@ -220,27 +221,28 @@ fn run_proj_tty(project_name: &str, server: String, env: EnvArena, overrides: St
     let mut term_size = terminal::size().unwrap();
     let mut input_value = String::new();
 
-    let config = overrides.or(StdSystemConfig::builder()
-        .print({
+    let config = overrides.or(StdSystemConfig {
+        print: {
             let update_flag = update_flag.clone();
-            Rc::new(move |value, entity| {
+            Some(Rc::new(move |_, _, value, entity| {
                 if let Some(value) = value {
                     print!("{entity:?} > {value:?}\r\n");
                     update_flag.set(true);
                 }
                 Ok(())
-            })
-        })
-        .input({
+            }))
+        },
+        input: {
             let update_flag = update_flag.clone();
             let input_queries = input_queries.clone();
-            Rc::new(move |_, key, prompt, entity| {
+            Some(Rc::new(move |_, _, key, prompt, entity| {
                 input_queries.borrow_mut().push_back((format!("{entity:?} {prompt:?} > "), key));
                 update_flag.set(true);
                 Ok(())
-            })
-        })
-        .build().unwrap());
+            }))
+        },
+        ..Default::default()
+    });
     let system = StdSystem::new(server, Some(project_name), config);
     let mut idle_sleeper = IdleSleeper::new();
     print!("public id: {}\r\n", system.get_public_id());
@@ -262,7 +264,7 @@ fn run_proj_tty(project_name: &str, server: String, env: EnvArena, overrides: St
                     }
                     RawKeyCode::Backspace => if in_input_mode() && input_value.pop().is_some() { update_flag.set(true) }
                     RawKeyCode::Enter => if let Some((_, res_key)) = input_queries.borrow_mut().pop_front() {
-                        system.finish_input(res_key, mem::take(&mut input_value));
+                        res_key.complete(mem::take(&mut input_value));
                         update_flag.set(true);
                     }
                     RawKeyCode::Up => if !in_input_mode() { input_sequence.push(Input::KeyDown(KeyCode::Up)) }
@@ -310,10 +312,11 @@ fn run_proj_tty(project_name: &str, server: String, env: EnvArena, overrides: St
 
     execute!(stdout(), terminal::Clear(ClearType::CurrentLine)).unwrap();
 }
-fn run_proj_non_tty(project_name: &str, server: String, env: EnvArena, overrides: StdSystemConfig) {
-    let config = overrides.or(StdSystemConfig::builder()
-        .print(Rc::new(move |value, entity| Ok(if let Some(value) = value { println!("{entity:?} > {value:?}") })))
-        .build().unwrap());
+fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, env: EnvArena<StdSystem<C>>, overrides: StdSystemConfig<C>) {
+    let config = overrides.or(StdSystemConfig {
+        print: Some(Rc::new(move |_, _, value, entity| Ok(if let Some(value) = value { println!("{entity:?} > {value:?}") }))),
+        ..Default::default()
+    });
     let system = StdSystem::new(server, Some(project_name), config);
     let mut idle_sleeper = IdleSleeper::new();
     println!("public id: {}", system.get_public_id());
@@ -330,7 +333,7 @@ fn run_proj_non_tty(project_name: &str, server: String, env: EnvArena, overrides
         });
     }
 }
-fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemConfig, syscalls: &[SyscallMenu<'_>]) {
+fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overrides: StdSystemConfig<C>, syscalls: &[SyscallMenu<'_>]) {
     println!(r#"connect from {nb_server}/?extensions=["http://{addr}:{port}/extension.js"]"#);
 
     let extension_template = liquid::ParserBuilder::with_stdlib().build().unwrap().parse(include_str!("assets/extension.js")).unwrap();
@@ -393,9 +396,10 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
     }
 
     let weak_state = Arc::downgrade(&state);
-    let config = overrides.or(StdSystemConfig::builder()
-        .print(Rc::new(move |value, entity| Ok(if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") })))
-        .build().unwrap());
+    let config = overrides.or(StdSystemConfig {
+        print: Some(Rc::new(move |_, _, value, entity| Ok(if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") }))),
+        ..Default::default()
+    });
     let system = StdSystem::new(nb_server, Some("native-server"), config);
     let mut idle_sleeper = IdleSleeper::new();
     println!("public id: {}", system.get_public_id());
@@ -514,7 +518,7 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
                         let cause = format!("{:?}", error.cause);
                         tee_println!(Some(&state) => "\n>>> runtime error in entity {entity:?}: {cause:?}\n>>> see red error comments...\n");
 
-                        fn summarize_symbols<'gc>(symbols: &SymbolTable<'gc, StdSystem>) -> Vec<VarEntry> {
+                        fn summarize_symbols<'gc, C: CustomTypes>(symbols: &SymbolTable<'gc, StdSystem<C>>) -> Vec<VarEntry> {
                             let mut res = Vec::with_capacity(symbols.len());
                             for (k, v) in symbols {
                                 res.push(VarEntry { name: k.clone(), value: format!("{:?}", v.get()) });
@@ -543,7 +547,7 @@ fn run_server(nb_server: String, addr: String, port: u16, overrides: StdSystemCo
 }
 
 /// Runs a CLI client using the given [`Mode`] configuration.
-pub fn run(mode: Mode, config: StdSystemConfig, syscalls: &[SyscallMenu]) {
+pub fn run<C: CustomTypes>(mode: Mode, config: StdSystemConfig<C>, syscalls: &[SyscallMenu]) {
     match mode {
         Mode::Run { src, role, server } => {
             let content = read_file(&src).unwrap_or_else(|_| crash!(1: "failed to read file '{src}'"));

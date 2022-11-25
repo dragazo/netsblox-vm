@@ -2,8 +2,6 @@ use std::prelude::v1::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
-use std::cmp::Ordering;
-use std::borrow::Cow;
 use std::fmt;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
@@ -14,253 +12,97 @@ use crate::json::*;
 
 #[derive(Debug)]
 pub enum FromJsonError {
-    HadNull, HadBadNumber,
+    HadNull,
+    HadBadNumber,
 }
-#[derive(Debug)]
-pub enum ToJsonError {
+#[derive(Educe)]
+#[educe(Debug)]
+pub enum ToJsonError<S: System> {
     HadBadNumber(f64),
-}
-
-#[derive(Debug, PartialEq)]
-pub enum SimpleValue {
-    Bool(bool),
-    Number(f64),
-    String(String),
-    List(Vec<SimpleValue>),
-}
-impl SimpleValue {
-    /// Gets the type contained in this [`SimpleValue`].
-    /// Note that this does not cover the full range of types supported by [`Value`].
-    pub fn get_type(&self) -> Type {
-        match self {
-            SimpleValue::Bool(_) => Type::Bool,
-            SimpleValue::Number(_) => Type::Number,
-            SimpleValue::String(_) => Type::String,
-            SimpleValue::List(_) => Type::List,
-        }
-    }
-    /// Attempts to interpret this value as a bool.
-    pub fn to_bool(&self) -> Result<bool, ConversionError> {
-        Ok(match self {
-            SimpleValue::Bool(x) => *x,
-            SimpleValue::String(x) => !x.is_empty(),
-            x => return Err(ConversionError { got: x.get_type(), expected: Type::Bool }),
-        })
-    }
-    /// Attempts to interpret this value as a number.
-    pub fn to_number(&self) -> Result<f64, ConversionError> {
-        Ok(match self {
-            SimpleValue::Number(x) => *x,
-            SimpleValue::String(x) => x.parse().map_err(|_| ConversionError { got: Type::String, expected: Type::Number })?,
-            x => return Err(ConversionError { got: x.get_type(), expected: Type::Number }),
-        })
-    }
-    /// Attempts to interpret this value as a string.
-    pub fn to_string(&self) -> Result<Cow<str>, ConversionError> {
-        Ok(match self {
-            SimpleValue::String(x) => Cow::Borrowed(x.as_str()),
-            SimpleValue::Number(x) => Cow::Owned(x.to_string()),
-            x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
-        })
-    }
-    /// Attempts to interpret this value as a string.
-    pub fn into_string(self) -> Result<String, ConversionError> {
-        Ok(match self {
-            SimpleValue::String(x) => x,
-            SimpleValue::Number(x) => x.to_string(),
-            x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
-        })
-    }
-    /// Attempts to interpret this value as a list.
-    pub fn as_list(&self) -> Result<&[SimpleValue], ConversionError> {
-        Ok(match self {
-            SimpleValue::List(x) => x.as_slice(),
-            x => return Err(ConversionError { got: x.get_type(), expected: Type::List }),
-        })
-    }
-    /// Attempts to interpret this value as a list.
-    pub fn into_list(self) -> Result<Vec<SimpleValue>, ConversionError> {
-        Ok(match self {
-            SimpleValue::List(x) => x,
-            x => return Err(ConversionError { got: x.get_type(), expected: Type::List }),
-        })
-    }
-
-    /// Create a new [`SimpleValue`] from a [`Json`] value.
-    /// 
-    /// NetsBlox does not allow a concept of null, so [`Json`] values containing [`Json::Null`] will result in [`FromJsonError::HadNull`].
-    /// Additionally, `serde_json`'s interface states that [`Json::Number`] values might not be able to be encoded as [`f64`], in which case [`FromJsonError::HadBadNumber`] is returned;
-    /// however, based on their source code, this should only be possible with special feature flags passed in to allow arbitrary precision floating point.
-    pub fn from_json(value: Json) -> Result<Self, FromJsonError> {
-        Ok(match value {
-            Json::Null => return Err(FromJsonError::HadNull),
-            Json::Bool(x) => x.into(),
-            Json::Number(x) => x.as_f64().ok_or(FromJsonError::HadBadNumber)?.into(),
-            Json::String(x) => x.into(),
-            Json::Array(x) => x.into_iter().map(SimpleValue::from_json).collect::<Result<Vec<_>,_>>()?.into(),
-            Json::Object(x) => x.into_iter().map(|(k, v)| Ok(vec![ k.into(), SimpleValue::from_json(v)? ].into())).collect::<Result<Vec<_>,_>>()?.into(),
-        })
-    }
-    /// Convert a [`SimpleValue`] into [`Json`].
-    /// 
-    /// [`Json`] does not allow numbers to be infinite or nan, which is the only failure case for this conversion.
-    pub fn into_json(self) -> Result<Json, ToJsonError> {
-        Ok(match self {
-            SimpleValue::Bool(x) => Json::Bool(x),
-            SimpleValue::Number(x) => match serde_json::Number::from_f64(x) {
-                Some(x) => Json::Number(x),
-                None => return Err(ToJsonError::HadBadNumber(x)),
-            }
-            SimpleValue::String(x) => Json::String(x),
-            SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_json).collect::<Result<_,_>>()?),
-        })
-    }
-}
-impl From<bool> for SimpleValue { fn from(v: bool) -> Self { Self::Bool(v) } }
-impl From<f64> for SimpleValue { fn from(v: f64) -> Self { Self::Number(v) } }
-impl From<i64> for SimpleValue { fn from(v: i64) -> Self { Self::Number(v as f64) } }
-impl From<String> for SimpleValue { fn from(v: String) -> Self { Self::String(v) } }
-impl From<Vec<SimpleValue>> for SimpleValue { fn from(v: Vec<SimpleValue>) -> Self { Self::List(v) } }
-
-/// Creates a new [`SimpleValue`] using Python-like syntax.
-/// 
-/// Python-style dictionary notation creates NetsBlox structured data, which is simply a list of key/value pairs.
-/// Compound expressions in the extended syntax must be wrapped in parenthesis to match with a `tt` token.
-/// 
-/// ```
-/// # use netsblox_vm::simple_value;
-/// let friends = simple_value!([
-///     { "name" => "Sarah", "age" => 22, "isMale" => false, "pets" => [] },
-///     { "name" => "John", "age" => 31.5 + 2.25, "isMale" => true, "pets" => ["Mr. Fluffy"] },
-/// ]);
-/// ```
-#[macro_export]
-macro_rules! simple_value {
-    (@list [$($elems:expr),*$(,)?]) => { $crate::runtime::SimpleValue::List(vec![$($elems),*]) };
-
-    (@list [$($elems:expr,)*] [$($lst:tt)*] $($rest:tt)*) => { simple_value!(@list [$($elems,)* simple_value!([$($lst)*])] $($rest)*) };
-    (@list [$($elems:expr,)*] {$($map:tt)*} $($rest:tt)*) => { simple_value!(@list [$($elems,)* simple_value!({$($map)*})] $($rest)*) };
-    (@list [$($elems:expr,)*]    $val:expr, $($rest:tt)*) => { simple_value!(@list [$($elems,)* simple_value!(   $val  ),] $($rest)*) };
-    (@list [$($elems:expr,)*]    $val:expr              ) => { simple_value!(@list [$($elems,)* simple_value!(   $val   )]          ) };
-    (@list [$($elems:expr),*]        ,      $($rest:tt)*) => { simple_value!(@list [$($elems,)*]                           $($rest)*) };
-
-    (@object [$($fields:expr),*$(,)?] () ()) => { $crate::runtime::SimpleValue::List(vec![$($fields),*]) };
-
-    (@object [$($fields:expr,)*] ($key:expr) ([$($lst:tt)*]    $($rest:tt)*  )) => { simple_value!(@object [$($fields,)* $crate::runtime::SimpleValue::List(vec![ $key, simple_value!([$($lst)*]) ])] () (   $($rest)*)  ) };
-    (@object [$($fields:expr,)*] ($key:expr) ({$($map:tt)*}    $($rest:tt)*  )) => { simple_value!(@object [$($fields,)* $crate::runtime::SimpleValue::List(vec![ $key, simple_value!({$($map)*}) ])] () (   $($rest)*)  ) };
-    (@object [$($fields:expr,)*] ($key:expr) (   $val:expr  $(,$($rest:tt)*)?)) => { simple_value!(@object [$($fields,)* $crate::runtime::SimpleValue::List(vec![ $key, simple_value!(   $val)    ])] () ($(,$($rest)*)?)) };
-
-    (@object [$($fields:expr,)*] () ([$($lst:tt)*] => $($rest:tt)*)) => { simple_value!(@object [$($fields,)*] (simple_value!([$($lst)*])) ($($rest)*)) };
-    (@object [$($fields:expr,)*] () ({$($map:tt)*} => $($rest:tt)*)) => { simple_value!(@object [$($fields,)*] (simple_value!({$($map)*})) ($($rest)*)) };
-    (@object [$($fields:expr,)*] () (   $key:expr  => $($rest:tt)*)) => { simple_value!(@object [$($fields,)*] (simple_value!($key))       ($($rest)*)) };
-    (@object [$($fields:expr),*] () (       ,         $($rest:tt)*)) => { simple_value!(@object [$($fields,)*] ()                          ($($rest)*)) };
-
-    ([ $($tt:tt)* ]) => { simple_value!(@list   []     $($tt)*)  };
-    ({ $($tt:tt)* }) => { simple_value!(@object [] () ($($tt)*)) };
-    ($val:expr) => { $crate::runtime::SimpleValue::from($val.to_owned()) };
-}
-
-#[test]
-fn test_simple_value_macro() {
-    let hello = String::from("hello world");
-    match simple_value!(true) { SimpleValue::Bool(x) => assert!(x), _ => panic!() }
-    match simple_value!(false) { SimpleValue::Bool(x) => assert!(!x), _ => panic!() }
-    match simple_value!(-12.5) { SimpleValue::Number(x) => assert_eq!(x, -12.5), _ => panic!() }
-    match simple_value!(-12.5 + 1.0) { SimpleValue::Number(x) => assert_eq!(x, -11.5), _ => panic!() }
-    match simple_value!(String::from("hello world")) { SimpleValue::String(x) => assert_eq!(x, "hello world"), _ => panic!() }
-    match simple_value!(hello.clone()) { SimpleValue::String(x) => assert_eq!(x, "hello world"), _ => panic!() }
-    match simple_value!("hello world") { SimpleValue::String(x) => assert_eq!(x, "hello world"), _ => panic!() }
-    match simple_value!([true, -6 + 2, "test", hello.clone()]) {
-        SimpleValue::List(x) => {
-            assert_eq!(x.len(), 4);
-            match &x[0] { SimpleValue::Bool(x) => assert!(x), _ => panic!() }
-            match &x[1] { SimpleValue::Number(x) => assert_eq!(*x, -4.0), _ => panic!() }
-            match &x[2] { SimpleValue::String(x) => assert_eq!(x, "test"), _ => panic!() }
-            match &x[3] { SimpleValue::String(x) => assert_eq!(x, "hello world"), _ => panic!() }
-        }
-        _ => panic!()
-    }
-    match simple_value!([4.5, 3.25, 1.125, -6.75]) {
-        SimpleValue::List(x) => {
-            assert_eq!(x.len(), 4);
-            match &x[0] { SimpleValue::Number(x) => assert_eq!(*x, 4.5), _ => panic!() }
-            match &x[1] { SimpleValue::Number(x) => assert_eq!(*x, 3.25), _ => panic!() }
-            match &x[2] { SimpleValue::Number(x) => assert_eq!(*x, 1.125), _ => panic!() }
-            match &x[3] { SimpleValue::Number(x) => assert_eq!(*x, -6.75), _ => panic!() }
-        }
-        _ => panic!()
-    }
-    match simple_value!({ "name" => "john", "age" => 8.0, String::from("isMale") => true, ["friends"] => [{ "name" => "sarah", "id" => 43783745.0, "test" => {} }] }) {
-        SimpleValue::List(x) => {
-            assert_eq!(x.len(), 4);
-            assert_eq!(x[0], simple_value!(["name", "john"]));
-            assert_eq!(x[1], simple_value!(["age", 8.0]));
-            assert_eq!(x[2], simple_value!(["isMale", true]));
-            match &x[3] {
-                SimpleValue::List(x) => {
-                    assert_eq!(x.len(), 2);
-                    assert_eq!(x[0], simple_value!(["friends"]));
-                    match &x[1] {
-                        SimpleValue::List(x) => {
-                            assert_eq!(x.len(), 1);
-                            match &x[0] {
-                                SimpleValue::List(x) => {
-                                    assert_eq!(x.len(), 3);
-                                    assert_eq!(x[0], simple_value!(["name", "sarah"]));
-                                    assert_eq!(x[1], simple_value!(["id", 43783745.0]));
-                                    assert_eq!(x[2], simple_value!(["test", []]));
-                                }
-                                _ => panic!(),
-                            }
-                            assert_eq!(x[0], simple_value!({ "name" => "sarah", "id" => 43783745.0, "test" => {} }));
-                            assert_eq!(x[0], simple_value!([ ["name", "sarah"], ["id", 43783745.0], ["test", []] ]));
-                        }
-                        _ => panic!(),
-                    }
-                    assert_eq!(x[1], simple_value!([{ "name" => "sarah", "id" => 43783745.0, "test" => [] }]));
-                }
-                _ => panic!(),
-            }
-        }
-        _ => panic!()
-    }
-}
-
-/// The type of a [`Value`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Type {
-    Bool, Number, String, List, Closure, Entity,
-}
-
-/// A type conversion error on a [`Value`].
-#[derive(Debug)]
-pub struct ConversionError {
-    pub got: Type,
-    pub expected: Type,
-}
-
-/// An error from converting a [`Value`] to a [`SimpleValue`].
-#[derive(Debug)]
-pub enum SimplifyError {
     /// The value was or contained a type that cannot be exported as a [`SimpleValue`].
-    HadComplexType(Type),
+    HadComplexType(Type<S>),
     /// The value contained a cycle, which [`SimpleValue`] forbids.
     HadCycle,
 }
 
+/// The type of a [`Value`].
+#[derive(Educe)]
+#[educe(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Type<S: System> {
+    Bool, Number, String, List, Closure, Entity, Native(<S::NativeValue as GetType>::Output),
+}
+
+/// A type conversion error on a [`Value`].
+#[derive(Educe)]
+#[educe(Debug)]
+pub struct ConversionError<S: System> {
+    pub got: Type<S>,
+    pub expected: Type<S>,
+}
+
+/// An execution error from a [`Process`] (see [`Process::step`]).
+/// 
+/// This consists of an [`ErrorCause`] value describing the cause, as well as the bytecode location of the error.
+/// By using the [`Locations`] information from [`ByteCode::compile`], it is possible to determine which script/function generated the error.
+#[derive(Educe)]
+#[educe(Debug)]
+pub struct ExecError<S: System> {
+    pub cause: ErrorCause<S>,
+    pub pos: usize,
+}
+/// The cause/explanation of an [`ExecError`].
+#[derive(Educe)]
+#[educe(Debug)]
+pub enum ErrorCause<S: System> {
+    /// A variable lookup operation failed. `name` holds the name of the variable that was expected.
+    UndefinedVariable { name: String },
+    /// The result of a failed type conversion.
+    ConversionError { got: Type<S>, expected: Type<S> },
+    /// The result of a failed variadic type conversion (expected type `T` or a list of type `T`).
+    VariadicConversionError { got: Type<S>, expected: Type<S> },
+    /// Attempt to index a list with a non-integer numeric value, `index`.
+    IndexNotInteger { index: f64 },
+    /// An indexing operation on a list had an out of bounds index, `index`, on a list of size `list_len`. Note that Snap!/NetsBlox use 1-based indexing.
+    IndexOutOfBounds { index: f64, list_len: usize },
+    /// Attempt to use a number which was not a valid size (must be convertible to [`usize`]).
+    InvalidSize { value: f64 },
+    /// Exceeded the maximum call depth. This can be configured by [`Process::new`].
+    CallDepthLimit { limit: usize },
+    /// Attempt to call a closure which required `expected` arguments, but `got` arguments were supplied.
+    ClosureArgCount { expected: usize, got: usize },
+    /// An operation resulted in an error generated by the [`System`].
+    SystemError { error: SystemError },
+    /// An acyclic operation received a cyclic input value.
+    /// Note that this is similar (but different) to [`ErrorCause::SimplifyError`] with sub-error [`SimplifyError::HadCycle`]
+    /// because [`ErrorCause::CyclicValue`] was not generated due to trying to create a [`SimpleValue`].
+    CyclicValue,
+    /// A failed attempt to convert a native vm [`Value`] to [`Json`] for use outside the vm.
+    ToJsonError { error: ToJsonError<S> },
+    /// A failed attempt to convert a [`Json`] value into a [`Value`] for use in the vm.
+    FromJsonError { error: FromJsonError },
+    /// Attempt to parse an invalid JSON-encoded string.
+    NotJson { value: String },
+    /// Attempt to interpret an invalid unicode code point (number) as a character.
+    InvalidUnicode { value: f64 },
+    /// A soft error (e.g., RPC or syscall failure) was promoted to a hard error.
+    Promoted { error: String },
+}
+impl<S: System> From<ConversionError<S>> for ErrorCause<S> { fn from(e: ConversionError<S>) -> Self { Self::ConversionError { got: e.got, expected: e.expected } } }
+impl<S: System> From<SystemError> for ErrorCause<S> { fn from(error: SystemError) -> Self { Self::SystemError { error } } }
+impl<S: System> From<ToJsonError<S>> for ErrorCause<S> { fn from(error: ToJsonError<S>) -> Self { Self::ToJsonError { error } } }
+impl<S: System> From<FromJsonError> for ErrorCause<S> { fn from(error: FromJsonError) -> Self { Self::FromJsonError { error } } }
+
 /// A value representing the identity of a [`Value`].
+#[derive(Educe)]
+#[educe(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 pub struct Identity<'gc, S: System>(*const (), PhantomData<&'gc Value<'gc, S>>);
 
-impl<'gc, S: System> fmt::Debug for Identity<'gc, S> { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{:?}", self.0) } }
-
-impl<'gc, S: System> Copy for Identity<'gc, S> {}
-impl<'gc, S: System> Clone for Identity<'gc, S> { fn clone(&self) -> Self { *self } }
-
-impl<'gc, S: System> Ord for Identity<'gc, S> { fn cmp(&self, other: &Self) -> Ordering { self.0.cmp(&other.0) } }
-impl<'gc, S: System> PartialOrd for Identity<'gc, S> { fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) } }
-
-impl<'gc, S: System> Eq for Identity<'gc, S> {}
-impl<'gc, S: System> PartialEq for Identity<'gc, S> { fn eq(&self, other: &Self) -> bool { self.0 == other.0 } }
+/// Gets the type of value that is stored.
+pub trait GetType {
+    type Output: Clone + Copy + PartialEq + Eq + fmt::Debug;
+    /// Gets the type of value that is stored.
+    fn get_type(&self) -> Self::Output;
+}
 
 /// Any primitive value.
 #[derive(Collect)]
@@ -280,9 +122,26 @@ pub enum Value<'gc, S: System> {
     Closure(GcCell<'gc, Closure<'gc, S>>),
     /// A reference to an [`Entity`] in the environment.
     Entity(GcCell<'gc, Entity<'gc, S>>),
+    /// A reference to a native object handle produced by [`System`].
+    Native(GcCell<'gc, StaticCollect<S::NativeValue>>),
 }
 impl<'gc, S: System> Copy for Value<'gc, S> {}
 impl<'gc, S: System> Clone for Value<'gc, S> { fn clone(&self) -> Self { *self } }
+
+impl<'gc, S: System> GetType for Value<'gc, S> {
+    type Output = Type<S>;
+    fn get_type(&self) -> Self::Output {
+        match self {
+            Value::Bool(_) => Type::Bool,
+            Value::Number(_) => Type::Number,
+            Value::String(_) => Type::String,
+            Value::List(_) => Type::List,
+            Value::Closure(_) => Type::Closure,
+            Value::Entity(_) => Type::Entity,
+            Value::Native(x) => Type::Native(x.read().0.get_type()),
+        }
+    }
+}
 
 impl<S: System> fmt::Debug for Value<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -293,6 +152,7 @@ impl<S: System> fmt::Debug for Value<'_, S> {
                 Value::String(x) => write!(f, "{:?}", x.as_str()),
                 Value::Closure(x) => write!(f, "{:?}", &*x.read()),
                 Value::Entity(x) => write!(f, "{:?}", &*x.read()),
+                Value::Native(x) => write!(f, "{:?}", &*x.read()),
                 Value::List(x) => {
                     let identity = value.identity();
                     if !cache.insert(identity) { return write!(f, "[...]") }
@@ -335,26 +195,33 @@ impl<'gc, S: System> Value<'gc, S> {
             ast::Value::List(x) => GcCell::allocate(mc, x.iter().map(|x| Value::from_ast(mc, x)).collect::<VecDeque<_>>()).into(),
         }
     }
-    /// Create a new [`Value`] from a [`SimpleValue`].
-    pub fn from_simple(mc: MutationContext<'gc, '_>, value: SimpleValue) -> Self {
-        match value {
-            SimpleValue::Bool(x) => Value::Bool(x),
-            SimpleValue::Number(x) => Value::Number(x),
-            SimpleValue::String(x) => Value::String(Gc::allocate(mc, x)),
-            SimpleValue::List(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|x| Value::from_simple(mc, x)).collect())),
-        }
+    /// Create a new [`Value`] from a [`Json`] value.
+    pub fn from_json(mc: MutationContext<'gc, '_>, value: Json) -> Result<Self, FromJsonError> {
+        Ok(match value {
+            Json::Null => return Err(FromJsonError::HadNull),
+            Json::Bool(x) => Value::Bool(x),
+            Json::Number(x) => Value::Number(x.as_f64().ok_or(FromJsonError::HadBadNumber)?),
+            Json::String(x) => Value::String(Gc::allocate(mc, x)),
+            Json::Array(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|x| Value::from_json(mc, x)).collect::<Result<_,_>>()?)),
+            Json::Object(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|(k, v)| {
+                let mut entry = VecDeque::with_capacity(2);
+                entry.push_back(Value::String(Gc::allocate(mc, k)));
+                entry.push_back(Value::from_json(mc, v)?);
+                Ok(Value::List(GcCell::allocate(mc, entry)))
+            }).collect::<Result<_,_>>()?)),
+        })
     }
-    pub fn to_simple(&self) -> Result<SimpleValue, SimplifyError> {
-        fn simplify<'gc, S: System>(value: &Value<'gc, S>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<SimpleValue, SimplifyError> {
+    pub fn to_json(&self) -> Result<Json, ToJsonError<S>> {
+        fn simplify<'gc, S: System>(value: &Value<'gc, S>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<Json, ToJsonError<S>> {
             Ok(match value {
-                Value::Bool(x) => SimpleValue::Bool(*x),
-                Value::Number(x) => SimpleValue::Number(*x),
-                Value::String(x) => SimpleValue::String(x.as_str().to_owned()),
-                Value::Closure(_) | Value::Entity(_) => return Err(SimplifyError::HadComplexType(value.get_type())),
+                Value::Bool(x) => Json::Bool(*x),
+                Value::Number(x) => Json::Number(serde_json::Number::from_f64(*x).ok_or(ToJsonError::HadBadNumber(*x))?),
+                Value::String(x) => Json::String(x.as_str().to_owned()),
+                Value::Closure(_) | Value::Entity(_) | Value::Native(_) => return Err(ToJsonError::HadComplexType(value.get_type())),
                 Value::List(x) => {
                     let identity = value.identity();
-                    if !cache.insert(identity) { return Err(SimplifyError::HadCycle) }
-                    let res = SimpleValue::List(x.read().iter().map(|x| simplify(x, cache)).collect::<Result<_,_>>()?);
+                    if !cache.insert(identity) { return Err(ToJsonError::HadCycle) }
+                    let res = Json::Array(x.read().iter().map(|x| simplify(x, cache)).collect::<Result<_,_>>()?);
                     debug_assert!(cache.contains(&identity));
                     cache.remove(&identity);
                     res
@@ -377,21 +244,11 @@ impl<'gc, S: System> Value<'gc, S> {
             Value::List(x) => Identity(x.as_ptr() as *const Vec<Value<'gc, S>> as *const (), PhantomData),
             Value::Closure(x) => Identity(x.as_ptr() as *const Closure<'gc, S> as *const (), PhantomData),
             Value::Entity(x) => Identity(x.as_ptr() as *const Entity<'gc, S> as *const (), PhantomData),
-        }
-    }
-    /// Gets the type of value that is stored.
-    pub fn get_type(&self) -> Type {
-        match self {
-            Value::Bool(_) => Type::Bool,
-            Value::Number(_) => Type::Number,
-            Value::String(_) => Type::String,
-            Value::List(_) => Type::List,
-            Value::Closure(_) => Type::Closure,
-            Value::Entity(_) => Type::Entity,
+            Value::Native(x) => Identity(x.as_ptr() as *const StaticCollect<S::NativeValue> as *const (), PhantomData),
         }
     }
     /// Attempts to interpret this value as a bool.
-    pub fn to_bool(&self) -> Result<bool, ConversionError> {
+    pub fn to_bool(&self) -> Result<bool, ConversionError<S>> {
         Ok(match self {
             Value::Bool(x) => *x,
             Value::String(x) => !x.is_empty(),
@@ -399,7 +256,7 @@ impl<'gc, S: System> Value<'gc, S> {
         })
     }
     /// Attempts to interpret this value as a number.
-    pub fn to_number(&self) -> Result<f64, ConversionError> {
+    pub fn to_number(&self) -> Result<f64, ConversionError<S>> {
         Ok(match self {
             Value::Number(x) => *x,
             Value::String(x) => x.parse().map_err(|_| ConversionError { got: Type::String, expected: Type::Number })?,
@@ -407,7 +264,7 @@ impl<'gc, S: System> Value<'gc, S> {
         })
     }
     /// Attempts to interpret this value as a string.
-    pub fn to_string(&self, mc: MutationContext<'gc, '_>) -> Result<Gc<'gc, String>, ConversionError> {
+    pub fn to_string(&self, mc: MutationContext<'gc, '_>) -> Result<Gc<'gc, String>, ConversionError<S>> {
         Ok(match self {
             Value::String(x) => *x,
             Value::Number(x) => Gc::allocate(mc, x.to_string()),
@@ -415,21 +272,21 @@ impl<'gc, S: System> Value<'gc, S> {
         })
     }
     /// Attempts to interpret this value as a list.
-    pub fn as_list(&self) -> Result<GcCell<'gc, VecDeque<Value<'gc, S>>>, ConversionError> {
+    pub fn as_list(&self) -> Result<GcCell<'gc, VecDeque<Value<'gc, S>>>, ConversionError<S>> {
         match self {
             Value::List(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::List }),
         }
     }
     /// Attempts to interpret this value as a closure.
-    pub fn as_closure(&self) -> Result<GcCell<'gc, Closure<'gc, S>>, ConversionError> {
+    pub fn as_closure(&self) -> Result<GcCell<'gc, Closure<'gc, S>>, ConversionError<S>> {
         match self {
             Value::Closure(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Closure }),
         }
     }
     /// Attempts to interpret this value as an entity.
-    pub fn as_entity(&self) -> Result<GcCell<'gc, Entity<'gc, S>>, ConversionError> {
+    pub fn as_entity(&self) -> Result<GcCell<'gc, Entity<'gc, S>>, ConversionError<S>> {
         match self {
             Value::Entity(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Entity }),
@@ -754,21 +611,26 @@ pub trait System: 'static + Sized {
     /// Key type used to reply to a message that was sent to this client with the expectation of receiving a response.
     /// This type is required to be [`Clone`] because there can be multiple message handlers for the same message type.
     type InternReplyKey: 'static + Clone;
+    /// A type representing native values that the system can operate on or return through syscalls.
+    /// This could, for example, be used to allow a process to hold on to a file handle stored in a variable.
+    /// If multiple native types are required, an enum can be used.
+    /// Native types have reference semantics in the vm, just like for entities.
+    type NativeValue: 'static + GetType + fmt::Debug;
 
     /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
     /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],
     /// which makes it possible to implement this function with any random provider under the [`rand`] crate standard.
-    fn rand<T, R>(&self, range: R) -> Result<T, SystemError> where T: SampleUniform, R: SampleRange<T>;
+    fn rand<T, R>(&self, range: R) -> Result<T, ErrorCause<Self>> where T: SampleUniform, R: SampleRange<T>;
 
     /// Gets the current time in milliseconds.
     /// This is not required to represent the actual real-world time; e.g., this could simply measure uptime.
     /// Subsequent values are required to be non-decreasing.
-    fn time_ms(&self) -> Result<u64, SystemError>;
+    fn time_ms(&self) -> Result<u64, ErrorCause<Self>>;
 
     /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
     /// The [`Entity`] making the request is provided for context.
     /// This operation should be infallible, but a no-op solution is sufficient.
-    fn print<'gc>(&self, value: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<(), SystemError>;
+    fn print<'gc>(&self, mc: MutationContext<'gc, '_>, value: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<(), ErrorCause<Self>>;
 
     /// Performs a system call on the local hardware to access device resources.
     /// Returns a key that can be passed to [`System::poll_syscall`] to poll for the result.
@@ -776,10 +638,10 @@ pub trait System: 'static + Sized {
     ///
     /// This function returns [`MaybeAsync`] to facilitate synchronous behavior if the native resources can be accessed in a blocking fashion.
     /// If this function always returns [`MaybeAsync::Sync`], then [`System::poll_syscall`] is never used and can be marked as [`unreachable`].
-    fn syscall(&self, name: String, args: Vec<SimpleValue>) -> Result<MaybeAsync<Result<SimpleValue, String>, Self::SyscallKey>, SystemError>;
+    fn syscall<'gc>(&self, mc: MutationContext<'gc, '_>, name: String, args: Vec<Value<'gc, Self>>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::SyscallKey>, ErrorCause<Self>>;
     /// Polls for the completion of an asynchronous call to [`System::syscall`].
     /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
-    fn poll_syscall(&self, key: &Self::SyscallKey) -> AsyncPoll<Result<SimpleValue, String>>;
+    fn poll_syscall<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::SyscallKey) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>>;
 
     /// Request input from the user.
     /// The `prompt` argument is either [`Some`] prompt to display, or [`None`] for no prompt.
@@ -787,10 +649,10 @@ pub trait System: 'static + Sized {
     ///
     /// This function returns [`MaybeAsync`] to facilitate synchronous behavior, such as if the input sequence is known ahead of time.
     /// If this function always returns [`MaybeAsync::Sync`], then [`System::poll_input`] is never used and can be marked as [`unreachable`].
-    fn input<'gc>(&self, prompt: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<String, Self::InputKey>, SystemError>;
+    fn input<'gc>(&self, mc: MutationContext<'gc, '_>, prompt: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<String, Self::InputKey>, ErrorCause<Self>>;
     /// Polls for the completion of an asynchronous call to [`System::input`].
     /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
-    fn poll_input(&self, key: &Self::InputKey) -> AsyncPoll<String>;
+    fn poll_input<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::InputKey) -> Result<AsyncPoll<String>, ErrorCause<Self>>;
 
     /// Requests the system to execute the given RPC.
     /// Returns a key that can be passed to [`System::poll_rpc`] to poll for the result.
@@ -798,15 +660,15 @@ pub trait System: 'static + Sized {
     ///
     /// This function returns [`MaybeAsync`] to facilitate synchronous behavior, such as if overriding RPCs with local implementations.
     /// If this function always returns [`MaybeAsync::Sync`], then [`System::poll_rpc`] is never used and can be marked as [`unreachable`].
-    fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<MaybeAsync<Result<Json, String>, Self::RpcKey>, SystemError>;
+    fn call_rpc<'gc>(&self, mc: MutationContext<'gc, '_>, service: String, rpc: String, args: Vec<(String, Value<'gc, Self>)>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RpcKey>, ErrorCause<Self>>;
     /// Polls for the completion of an asynchronous call to [`System::call_rpc`].
     /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
-    fn poll_rpc(&self, key: &Self::RpcKey) -> AsyncPoll<Result<Json, String>>;
+    fn poll_rpc<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RpcKey) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>>;
 
     /// Sends a message containing a set of named `values` to each of the specified `targets`.
     /// The `expect_reply` value controls whether or not to use a reply mechanism to asynchronously receive a response from the target(s).
     /// In the case that there are multiple targets, only the first reply (if any) should be used.
-    fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<Self::ExternReplyKey>, SystemError>;
+    fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<Self::ExternReplyKey>, ErrorCause<Self>>;
     /// Polls for a response from a client initiated by [`System::send_message`].
     /// If the client responds, a value of [`Some(x)`] is returned.
     /// The system may elect to impose a timeout for reply results, in which case [`None`] is returned instead.
@@ -816,7 +678,7 @@ pub trait System: 'static + Sized {
     /// If a message is received, a tuple of form `(msg_type, values, reply_key)` is returned.
     fn receive_message(&self) -> Option<(String, Vec<(String, Json)>, Option<Self::InternReplyKey>)>;
     /// Sends a reply to the sender of a blocking message this client received.
-    fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), SystemError>;
+    fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<Self>>;
 }
 
 #[cfg(any(test, feature = "std"))]
@@ -827,7 +689,6 @@ mod std_system {
     use real_std::sync::mpsc::{Sender, Receiver, channel};
     use real_std::thread;
 
-    use derive_builder::Builder;
     use rand_chacha::ChaChaRng;
     use rand::{Rng, SeedableRng};
     use tokio_tungstenite::tungstenite::Message;
@@ -835,15 +696,8 @@ mod std_system {
     use uuid::Uuid;
 
     use super::*;
-    use crate::slotmap::SlotMap;
 
     const MESSAGE_REPLY_TIMEOUT_MS: u32 = 1500;
-
-    new_key! {
-        pub struct SyscallKey;
-        pub struct RpcKey;
-        pub struct InputKey;
-    }
 
     #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
     pub struct ExternReplyKey {
@@ -868,7 +722,7 @@ mod std_system {
         service: String,
         rpc: String,
         args: Vec<(String, Json)>,
-        result_key: RpcKey,
+        key: RpcKey,
     }
     enum OutgoingMessage {
         Normal {
@@ -897,49 +751,113 @@ mod std_system {
         value: Option<Json>,
     }
 
-    type SyscallResults = SlotMap<SyscallKey, Option<Result<SimpleValue, String>>>;
-    type RpcResults = SlotMap<RpcKey, Option<Result<Json, String>>>;
-    type InputResults = SlotMap<InputKey, Option<String>>;
+    pub enum RpcIntercept<'gc, C: CustomTypes> {
+        Intercepted,
+        UseDefault { key: RpcKey, service: String, rpc: String, args: Vec<(String, Value<'gc, StdSystem<C>>)> },
+    }
+
+    enum AsyncResult<T> {
+        Pending,
+        Completed(T),
+        Used,
+    }
+    #[derive(Educe)]
+    #[educe(Clone)]
+    struct AsyncResultHandle<T>(Arc<Mutex<AsyncResult<T>>>);
+    impl<T> AsyncResultHandle<T> {
+        fn pending() -> Self {
+            Self(Arc::new(Mutex::new(AsyncResult::Pending)))
+        }
+        fn complete(&self, result: T) {
+            let mut handle = self.0.lock().unwrap();
+            match &mut *handle {
+                AsyncResult::Pending => *handle = AsyncResult::Completed(result),
+                _ => panic!("AsyncResultHandle can only be completed once"),
+            }
+        }
+        fn poll(&self) -> AsyncPoll<T> {
+            let mut handle = self.0.lock().unwrap();
+            match &mut *handle {
+                AsyncResult::Pending => AsyncPoll::Pending,
+                AsyncResult::Completed(_) => match std::mem::replace(&mut *handle, AsyncResult::Used) {
+                    AsyncResult::Completed(x) => AsyncPoll::Completed(x),
+                    _ => unreachable!(),
+                }
+                AsyncResult::Used => panic!("AsyncResultHandle can only be successfully polled once"),
+            }
+        }
+    }
+
+    pub struct SyscallKey<C: CustomTypes>(AsyncResultHandle<Result<C::Intermediate, String>>);
+    impl<C: CustomTypes> SyscallKey<C> {
+        pub fn complete(self, result: Result<C::Intermediate, String>) { self.0.complete(result) }
+        pub fn poll(&self) -> AsyncPoll<Result<C::Intermediate, String>> { self.0.poll() }
+    }
+
+    pub struct RpcKey(AsyncResultHandle<Result<Json, String>>);
+    impl RpcKey {
+        pub fn complete(self, result: Result<Json, String>) { self.0.complete(result) }
+        pub fn poll(&self) -> AsyncPoll<Result<Json, String>> { self.0.poll() }
+    }
+
+    pub struct InputKey(AsyncResultHandle<String>);
+    impl InputKey {
+        pub fn complete(self, result: String) { self.0.complete(result) }
+        pub fn poll(&self) -> AsyncPoll<String> { self.0.poll() }
+    }
+
     type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
 
-    #[derive(Builder, Clone)]
-    pub struct StdSystemConfig {
+    pub trait CustomTypes: 'static + Sized {
+        type NativeValue: 'static + GetType + fmt::Debug;
+        type Intermediate: 'static;
+
+        fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>>;
+        fn to_intermediate<'gc>(value: Value<'gc, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>>;
+    }
+
+    #[derive(Educe)]
+    #[educe(Default, Clone)]
+    pub struct StdSystemConfig<C: CustomTypes> {
         /// A function used to process all "say" and "think" blocks.
         /// The first argument is the actual message value, or [`None`] to clear the output (Snap!-style).
         /// The second argument is a reference to the entity making the request.
         /// The default printer is no-op, effectively ignoring all output requests.
-        #[builder(default = "None", setter(strip_option))]
-        print: Option<Rc<dyn for<'gc> Fn(Option<Value<'gc, StdSystem>>, &Entity<'gc, StdSystem>) -> Result<(), SystemError>>>,
+        pub print: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, Option<Value<'gc, StdSystem<C>>>, &Entity<'gc, StdSystem<C>>) -> Result<(), ErrorCause<StdSystem<C>>>>>,
 
         /// A function used to request input from the user.
         /// This should be non-blocking, and the provided [`InputKey`]
         /// should be given to [`StdSystem::finish_input`] when the value is entered by the user.
         /// If not specified (default), the system gives an error when processes attempt to request user input.
-        #[builder(default = "None", setter(strip_option))]
-        input: Option<Rc<dyn for<'gc> Fn(&StdSystem, InputKey, Option<Value<'gc, StdSystem>>, &Entity<'gc, StdSystem>) -> Result<(), SystemError>>>,
+        pub input: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, InputKey, Option<Value<'gc, StdSystem<C>>>, &Entity<'gc, StdSystem<C>>) -> Result<(), ErrorCause<StdSystem<C>>>>>,
 
         /// A function used to perform system calls on the local hardware.
         /// The provided [`SyscallKey`] should be given to [`StdSystem::finish_syscall`] when the result becomes available.
         /// If not specified (default), the system gives an error when processes attempt to perform a syscall.
         ///
-        /// This function is permitted to return a [`SystemError`] during its synchronous initialization;
+        /// This function is permitted to return an error during its synchronous initialization;
         /// however, this is intended for hard errors such as trying to invoke non-existent system calls.
         /// Normal syscall failures should instead yield an [`Err`] value to [`StdSystem::finish_syscall`],
         /// which lets the runtime treat it like an RPC error that user code can handle properly.
-        #[builder(default = "None", setter(strip_option))]
-        syscall: Option<Rc<dyn Fn(&StdSystem, SyscallKey, String, Vec<SimpleValue>) -> Result<(), SystemError>>>,
-    }
-    impl StdSystemConfig {
-        /// Constructs a new default instance of [`StdSystemConfigBuilder`].
-        pub fn builder() -> StdSystemConfigBuilder { Default::default() }
+        pub syscall: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, SyscallKey<C>, String, Vec<Value<'gc, StdSystem<C>>>) -> Result<(), ErrorCause<StdSystem<C>>>>>,
 
-        /// Constructs a new instance of [`StdSystemConfig`] using this object's settings,
-        /// or if not specified, from another configuration object.
-        pub fn or(self, other: StdSystemConfig) -> Self {
+        /// A function used to intercept NetsBlox RPCs and redirect them for other purposes.
+        /// For instance, the RoboScape service could be intercepted and the commands used to drive pysical hardware directly.
+        /// A result of type [`RpcIntercept::Intercepted`] denotes that it was properly intercepted (and you are responsible for producing the result).
+        /// A result of type [`RpcIntercept::UseDefault`] denotes that the RPC was not intercepted.
+        /// Note that even in the default case, the values returned can be modified, e.g., to facilitate passing platform specific types
+        /// that would otherwise not be able to serialize under normal [`Value`] semantics.
+        pub call_rpc: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, RpcKey, String, String, Vec<(String, Value<'gc, StdSystem<C>>)>) -> Result<RpcIntercept<'gc, C>, ErrorCause<StdSystem<C>>>>>,
+    }
+    impl<C: CustomTypes> StdSystemConfig<C> {
+        /// Combines this config object with another.
+        /// Equivalent to calling [`Option::or`] on every field.
+        pub fn or(self, other: Self) -> Self {
             Self {
                 print: self.print.or(other.print),
                 input: self.input.or(other.input),
                 syscall: self.syscall.or(other.syscall),
+                call_rpc: self.call_rpc.or(other.call_rpc),
             }
         }
     }
@@ -967,27 +885,22 @@ mod std_system {
 
     /// A type implementing the [`System`] trait which supports all features.
     /// This requires the [`std`](crate) feature flag.
-    pub struct StdSystem {
-        config: StdSystemConfig,
+    pub struct StdSystem<C: CustomTypes> {
+        config: StdSystemConfig<C>,
         context: Arc<Context>,
         client: Arc<reqwest::Client>,
         start_time: Instant,
         rng: Mutex<ChaChaRng>,
 
-        syscall_results: Arc<Mutex<SyscallResults>>,
-
-        input_results: Arc<Mutex<InputResults>>,
-
-        rpc_results: Arc<Mutex<RpcResults>>,
         rpc_request_pipe: Sender<RpcRequest>,
 
         message_replies: Arc<Mutex<MessageReplies>>,
         message_sender: Sender<OutgoingMessage>,
         message_receiver: Receiver<IncomingMessage>,
     }
-    impl StdSystem {
+    impl<C: CustomTypes> StdSystem<C> {
         #[tokio::main(flavor = "current_thread")]
-        pub async fn new(base_url: String, project_name: Option<&str>, config: StdSystemConfig) -> Self {
+        pub async fn new(base_url: String, project_name: Option<&str>, config: StdSystemConfig<C>) -> Self {
             let mut context = Context {
                 base_url,
                 client_id: format!("vm-{}", names::Generator::default().next().unwrap()),
@@ -1116,22 +1029,21 @@ mod std_system {
             context.project_name = meta["name"].as_str().unwrap().to_owned();
 
             let context = Arc::new(context);
-            let rpc_results = Arc::new(Mutex::new(Default::default()));
             let rpc_request_pipe = {
-                let (client, context, rpc_results) = (client.clone(), context.clone(), rpc_results.clone());
+                let (client, context) = (client.clone(), context.clone());
                 let (sender, receiver) = channel();
 
                 #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
-                async fn handler(client: Arc<reqwest::Client>, context: Arc<Context>, rpc_results: Arc<Mutex<RpcResults>>, receiver: Receiver<RpcRequest>) {
+                async fn handler(client: Arc<reqwest::Client>, context: Arc<Context>, receiver: Receiver<RpcRequest>) {
                     while let Ok(request) = receiver.recv() {
-                        let (client, context, rpc_results) = (client.clone(), context.clone(), rpc_results.clone());
+                        let (client, context) = (client.clone(), context.clone());
                         tokio::spawn(async move {
                             let res = call_rpc_async(&context, &client, &request.service, &request.rpc, &request.args.iter().map(|x| (x.0.as_str(), &x.1)).collect::<Vec<_>>()).await;
-                            assert!(rpc_results.lock().unwrap().get_mut(request.result_key).unwrap().replace(res).is_none());
+                            request.key.complete(res);
                         });
                     }
                 }
-                thread::spawn(move || handler(client, context, rpc_results, receiver));
+                thread::spawn(move || handler(client, context, receiver));
 
                 sender
             };
@@ -1143,9 +1055,7 @@ mod std_system {
                 config, context, client,
                 start_time: Instant::now(),
                 rng: Mutex::new(ChaChaRng::from_seed(seed)),
-                syscall_results: Default::default(),
-                input_results: Default::default(),
-                rpc_results, rpc_request_pipe,
+                rpc_request_pipe,
                 message_replies, message_sender, message_receiver,
             }
         }
@@ -1156,94 +1066,94 @@ mod std_system {
             call_rpc_async(&self.context, &self.client, service, rpc, args).await
         }
 
-        /// Finishes an asynchronous request to get input from the user.
-        /// The key provided must only be used once - future usage of the same key will result in a panic.
-        pub fn finish_input(&self, key: InputKey, content: String) {
-            assert!(self.input_results.lock().unwrap().get_mut(key).unwrap().replace(content).is_none());
-        }
-        /// Finishes an asynchronous request to perform a syscall.
-        /// The key provided must only be used once - future usage of the same key will result in a panic.
-        pub fn finish_syscall(&self, key: SyscallKey, result: Result<SimpleValue, String>) {
-            assert!(self.syscall_results.lock().unwrap().get_mut(key).unwrap().replace(result).is_none());
-        }
-
         /// Gets the public id of the running system that can be used to send messages to this client.
         pub fn get_public_id(&self) -> String {
             format!("{}@{}", self.context.project_name, self.context.client_id)
         }
     }
-    impl System for StdSystem {
-        type SyscallKey = SyscallKey;
+    impl<C: CustomTypes> System for StdSystem<C> {
+        type SyscallKey = SyscallKey<C>;
         type RpcKey = RpcKey;
         type InputKey = InputKey;
         type ExternReplyKey = ExternReplyKey;
         type InternReplyKey = InternReplyKey;
+        type NativeValue = C::NativeValue;
 
-        fn rand<T, R>(&self, range: R) -> Result<T, SystemError> where T: SampleUniform, R: SampleRange<T> {
+        fn rand<T, R>(&self, range: R) -> Result<T, ErrorCause<StdSystem<C>>> where T: SampleUniform, R: SampleRange<T> {
             Ok(self.rng.lock().unwrap().gen_range(range))
         }
 
-        fn time_ms(&self) -> Result<u64, SystemError> {
+        fn time_ms(&self) -> Result<u64, ErrorCause<StdSystem<C>>> {
             Ok(self.start_time.elapsed().as_millis() as u64)
         }
 
-        fn print<'gc>(&self, value: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<(), SystemError> {
+        fn print<'gc>(&self, mc: MutationContext<'gc, '_>, value: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<(), ErrorCause<Self>> {
             match self.config.print.as_ref() {
-                Some(print) => print(value, entity),
-                None => Err(SystemError::NotSupported { feature: SystemFeature::Print }),
+                Some(print) => print(self, mc, value, entity),
+                None => Err(SystemError::NotSupported { feature: SystemFeature::Print }.into()),
             }
         }
 
-        fn syscall(&self, name: String, args: Vec<SimpleValue>) -> Result<MaybeAsync<Result<SimpleValue, String>, Self::SyscallKey>, SystemError> {
+        fn syscall<'gc>(&self, mc: MutationContext<'gc, '_>, name: String, args: Vec<Value<'gc, Self>>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::SyscallKey>, ErrorCause<StdSystem<C>>> {
             match self.config.syscall.as_ref() {
                 Some(syscall) => {
-                    let key = self.syscall_results.lock().unwrap().insert(None);
-                    syscall(self, key, name, args)?;
+                    let key = SyscallKey(AsyncResultHandle::pending());
+                    syscall(self, mc, SyscallKey(key.0.clone()), name, args)?;
                     Ok(MaybeAsync::Async(key))
                 }
-                None => Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }),
+                None => Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }.into()),
             }
         }
-        fn poll_syscall(&self, key: &Self::SyscallKey) -> AsyncPoll<Result<SimpleValue, String>> {
-            let mut syscall_results = self.syscall_results.lock().unwrap();
-            match syscall_results.get(*key).unwrap().is_some() {
-                true => AsyncPoll::Completed(syscall_results.remove(*key).unwrap().unwrap()),
-                false => AsyncPoll::Pending,
-            }
+        fn poll_syscall<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::SyscallKey) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<StdSystem<C>>> {
+            Ok(match key.poll() {
+                AsyncPoll::Completed(x) => match x {
+                    Ok(x) => AsyncPoll::Completed(Ok(C::from_intermediate(mc, x)?)),
+                    Err(x) => AsyncPoll::Completed(Err(x)),
+                }
+                AsyncPoll::Pending => AsyncPoll::Pending,
+            })
         }
 
-        fn input<'gc>(&self, prompt: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<String, Self::InputKey>, SystemError> {
+        fn call_rpc<'gc>(&self, mc: MutationContext<'gc, '_>, service: String, rpc: String, args: Vec<(String, Value<'gc, Self>)>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RpcKey>, ErrorCause<StdSystem<C>>> {
+            let key = RpcKey(AsyncResultHandle::pending());
+            let res = match self.config.call_rpc.as_ref() {
+                Some(call_rpc) => call_rpc(self, mc, RpcKey(key.0.clone()), service, rpc, args)?,
+                None => RpcIntercept::UseDefault { key: RpcKey(key.0.clone()), service, rpc, args },
+            };
+            match res {
+                RpcIntercept::Intercepted => (),
+                RpcIntercept::UseDefault { key, service, rpc, args } => {
+                    let args = args.into_iter().map(|(k, v)| Ok::<(String, Json), ToJsonError<StdSystem<C>>>((k, v.to_json()?))).collect::<Result<_,_>>()?;
+                    self.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap();
+                }
+            }
+            Ok(MaybeAsync::Async(key))
+        }
+        fn poll_rpc<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RpcKey) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>> {
+            Ok(match key.poll() {
+                AsyncPoll::Completed(x) => match x {
+                    Ok(x) => AsyncPoll::Completed(Ok(Value::from_json(mc, x)?)),
+                    Err(x) => AsyncPoll::Completed(Err(x)),
+                }
+                AsyncPoll::Pending => AsyncPoll::Pending,
+            })
+        }
+
+        fn input<'gc>(&self, mc: MutationContext<'gc, '_>, prompt: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<String, Self::InputKey>, ErrorCause<StdSystem<C>>> {
             match self.config.input.as_ref() {
                 Some(input) => {
-                    let key = self.input_results.lock().unwrap().insert(None);
-                    input(self, key, prompt, entity)?;
+                    let key = InputKey(AsyncResultHandle::pending());
+                    input(self, mc, InputKey(key.0.clone()), prompt, entity)?;
                     Ok(MaybeAsync::Async(key))
                 }
-                None => Err(SystemError::NotSupported { feature: SystemFeature::Input }),
+                None => Err(SystemError::NotSupported { feature: SystemFeature::Input }.into()),
             }
         }
-        fn poll_input(&self, key: &Self::InputKey) -> AsyncPoll<String> {
-            let mut input_results = self.input_results.lock().unwrap();
-            match input_results.get(*key).unwrap().is_some() {
-                true => AsyncPoll::Completed(input_results.remove(*key).unwrap().unwrap()),
-                false => AsyncPoll::Pending,
-            }
+        fn poll_input<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::InputKey) -> Result<AsyncPoll<String>, ErrorCause<Self>> {
+            Ok(key.poll())
         }
 
-        fn call_rpc(&self, service: String, rpc: String, args: Vec<(String, Json)>) -> Result<MaybeAsync<Result<Json, String>, Self::RpcKey>, SystemError> {
-            let result_key = self.rpc_results.lock().unwrap().insert(None);
-            self.rpc_request_pipe.send(RpcRequest { service, rpc, args, result_key }).unwrap();
-            Ok(MaybeAsync::Async(result_key))
-        }
-        fn poll_rpc(&self, key: &Self::RpcKey) -> AsyncPoll<Result<Json, String>> {
-            let mut rpc_results = self.rpc_results.lock().unwrap();
-            match rpc_results.get(*key).unwrap().is_some() {
-                true => AsyncPoll::Completed(rpc_results.remove(*key).unwrap().unwrap()),
-                false => AsyncPoll::Pending,
-            }
-        }
-
-        fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<Self::ExternReplyKey>, SystemError> {
+        fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<Self::ExternReplyKey>, ErrorCause<StdSystem<C>>> {
             let (msg, reply_key) = match expect_reply {
                 false => (OutgoingMessage::Normal { msg_type, values, targets }, None),
                 true => {
@@ -1267,7 +1177,7 @@ mod std_system {
             }
             AsyncPoll::Pending
         }
-        fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), SystemError> {
+        fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<Self>> {
             self.message_sender.send(OutgoingMessage::Reply { value, reply_key: key }).unwrap();
             Ok(())
         }
