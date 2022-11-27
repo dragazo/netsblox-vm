@@ -1,10 +1,12 @@
 use std::prelude::v1::*;
+use std::rc::Rc;
 
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
 use crate::runtime::*;
 use crate::project::*;
+use crate::std_system::*;
 
 use super::*;
 
@@ -41,22 +43,21 @@ struct Env<'gc> {
 }
 make_arena!(EnvArena, Env);
 
-fn get_running_project(xml: &str, system: &StdSystem<C>) -> EnvArena {
+fn get_running_project(xml: &str, system: Rc<StdSystem<C>>) -> EnvArena {
     EnvArena::new(Default::default(), |mc| {
         let parser = ast::ParserBuilder::default().build().unwrap();
         let ast = parser.parse(xml).unwrap();
         assert_eq!(ast.roles.len(), 1);
 
-        let settings = Settings::builder().build().unwrap();
-        let (mut proj, _) = Project::from_ast(mc, &ast.roles[0], settings);
-        proj.input(Input::Start, system);
+        let (mut proj, _) = Project::from_ast(mc, &ast.roles[0], Settings::default(), system);
+        proj.input(Input::Start);
         Env { proj: GcCell::allocate(mc, proj) }
     })
 }
 
-fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdSystem<C>>, system: &StdSystem<C>) {
+fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdSystem<C>>) {
     loop {
-        match proj.step(mc, &system) {
+        match proj.step(mc) {
             ProjectStep::Idle | ProjectStep::Error { .. } => return,
             ProjectStep::Normal | ProjectStep::Yield => (),
         }
@@ -65,10 +66,10 @@ fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdS
 
 #[test]
 fn test_proj_counting() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
-    let proj = get_running_project(include_str!("projects/counting.xml"), &system);
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/counting.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc), &system);
+        run_till_term(mc, &mut *proj.proj.write(mc));
         let global_context = proj.proj.read().global_context();
         let global_context = global_context.read();
 
@@ -82,10 +83,10 @@ fn test_proj_counting() {
 
 #[test]
 fn test_proj_broadcast() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
-    let proj = get_running_project(include_str!("projects/broadcast.xml"), &system);
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/broadcast.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc), &system);
+        run_till_term(mc, &mut *proj.proj.write(mc));
         let global_context = proj.proj.read().global_context();
         let global_context = global_context.read();
 
@@ -105,10 +106,10 @@ fn test_proj_broadcast() {
 
 #[test]
 fn test_proj_parallel_rpcs() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
-    let proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), &system);
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc), &system);
+        run_till_term(mc, &mut *proj.proj.write(mc));
         let global_context = proj.proj.read().global_context();
         let global_context = global_context.read();
 
@@ -147,10 +148,10 @@ fn test_proj_parallel_rpcs() {
 
 #[test]
 fn test_proj_wait_until() {
-    let system = StdSystem::new("https://editor.netsblox.org".to_owned(), None, StdSystemConfig::default());
-    let proj = get_running_project(include_str!("projects/wait-until.xml"), &system);
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/wait-until.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc), &system);
+        run_till_term(mc, &mut *proj.proj.write(mc));
         let global_context = proj.proj.read().global_context();
         let global_context = global_context.read();
 

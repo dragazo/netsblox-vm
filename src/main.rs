@@ -1,5 +1,6 @@
 use netsblox_vm::cli::{run, Mode};
-use netsblox_vm::runtime::{StdSystemConfig, CustomTypes, GetType, Value, StdSystem, ErrorCause};
+use netsblox_vm::runtime::{GetType, Value, ErrorCause};
+use netsblox_vm::std_system::{Config, CustomTypes, StdSystem};
 use netsblox_vm::gc::MutationContext;
 use netsblox_vm::json::Json;
 use clap::Parser;
@@ -31,5 +32,5 @@ impl CustomTypes for C {
 }
 
 fn main() {
-    run::<C>(Mode::parse(), StdSystemConfig::default(), &[]);
+    run::<C>(Mode::parse(), Config::default(), &[]);
 }

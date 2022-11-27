@@ -11,13 +11,23 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDeque
 use std::rc::Rc;
 use std::iter::{self, Cycle};
 
-use derive_builder::Builder;
-
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
 use crate::runtime::*;
 use crate::bytecode::*;
+
+/// An execution error from a [`Process`] (see [`Process::step`]).
+///
+/// This consists of an [`ErrorCause`] value describing the cause, as well as the bytecode location of the error.
+/// By using the [`InsLocations`] information from [`ByteCode::compile`], it is possible to determine
+/// a human-readable error location in the original program.
+#[derive(Educe)]
+#[educe(Debug)]
+pub struct ExecError<S: System> {
+    pub cause: ErrorCause<S>,
+    pub pos: usize,
+}
 
 /// Result of stepping through a [`Process`].
 pub enum ProcessStep<'gc, S: System> {
@@ -50,28 +60,33 @@ pub enum ErrorScheme {
 }
 
 /// Settings to use for a [`Process`].
-#[derive(Builder, Clone, Copy)]
-#[builder(no_std)]
+#[derive(Clone, Copy)]
 pub struct Settings {
     /// The maximum depth of the call stack (default `1024`).
-    #[builder(default = "1024")]
-    max_call_depth: usize,
-
-    #[builder(default = "ErrorScheme::Hard")]
-    rpc_error_scheme: ErrorScheme,
-    #[builder(default = "ErrorScheme::Hard")]
-    syscall_error_scheme: ErrorScheme,
+    pub max_call_depth: usize,
+    /// The error pattern to use for rpc errors (default [`ErrorScheme::Hard`]).
+    pub rpc_error_scheme: ErrorScheme,
+    /// The error pattern to use for syscall errors (default [`ErrorScheme::Hard`]).
+    pub syscall_error_scheme: ErrorScheme,
 }
-impl Settings {
-    /// Constructs a new default instance of [`SettingsBuilder`].
-    pub fn builder() -> SettingsBuilder { Default::default() }
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            max_call_depth: 1024,
+            rpc_error_scheme: ErrorScheme::Hard,
+            syscall_error_scheme: ErrorScheme::Hard,
+        }
+    }
 }
 
+/// An entry in the call stack of a [`Process`].
+/// 
+/// This contains information about the call origin and local variables defined in the called context.
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct CallStackEntry<'gc, S: System> {
     #[collect(require_static)] pub called_from: usize,
-    #[collect(require_static)] pub return_to: usize,
+    #[collect(require_static)]     return_to: usize,
                                pub locals: SymbolTable<'gc, S>,
 
     #[collect(require_static)] warp_counter: usize,
@@ -112,11 +127,12 @@ pub struct Process<'gc, S: System> {
                                last_rpc_error: Option<Value<'gc, S>>,
                                last_answer: Option<Value<'gc, S>>,
     #[collect(require_static)] timer_start: u64,
+    #[collect(require_static)] system: Rc<S>,
 }
 impl<'gc, S: System> Process<'gc, S> {
-    /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity`.
+    /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity` and `system`.
     /// The created process is initialized to an idle (non-running) state; use [`Process::initialize`] to begin execution.
-    pub fn new(bytecode: Rc<ByteCode>, start_pos: usize, global_context: GcCell<'gc, GlobalContext<'gc, S>>, entity: GcCell<'gc, Entity<'gc, S>>, settings: Settings) -> Self {
+    pub fn new(bytecode: Rc<ByteCode>, start_pos: usize, global_context: GcCell<'gc, GlobalContext<'gc, S>>, entity: GcCell<'gc, Entity<'gc, S>>, settings: Settings, system: Rc<S>) -> Self {
         Self {
             bytecode, start_pos, global_context, entity, settings,
             running: false,
@@ -132,6 +148,7 @@ impl<'gc, S: System> Process<'gc, S> {
             last_rpc_error: None,
             last_answer: None,
             timer_start: 0,
+            system,
         }
     }
     /// Checks if the process is currently running.
@@ -150,7 +167,7 @@ impl<'gc, S: System> Process<'gc, S> {
     /// Gets a reference to the current call stack.
     /// This gives access to stack trace information including all local scopes in the call chain.
     /// Note that the call stack is never empty, and that the always-present first element (denoting the initial execution request) is a special
-    /// entry which has an invalid value for [`CallStackEntry::return_to`], namely [`usize::MAX`].
+    /// entry which has an invalid value for [`CallStackEntry::called_from`], namely [`usize::MAX`].
     pub fn get_call_stack(&self) -> &[CallStackEntry<'gc, S>] {
         &self.call_stack
     }
@@ -158,7 +175,7 @@ impl<'gc, S: System> Process<'gc, S> {
     /// A [`Barrier`] may also be set, which will be destroyed upon termination, either due to completion or an error.
     /// 
     /// Any previous process state is wiped when performing this action.
-    pub fn initialize(&mut self, locals: SymbolTable<'gc, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, system: &S) {
+    pub fn initialize(&mut self, locals: SymbolTable<'gc, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>) {
         self.pos = self.start_pos;
         self.running = true;
         self.barrier = barrier;
@@ -178,15 +195,15 @@ impl<'gc, S: System> Process<'gc, S> {
         self.last_syscall_error = None;
         self.last_rpc_error = None;
         self.last_answer = None;
-        self.timer_start = system.time_ms().unwrap_or(0);
+        self.timer_start = self.system.time_ms().unwrap_or(0);
     }
     /// Executes a single bytecode instruction.
     /// The return value can be used to determine what additional effects the script has requested,
     /// as well as to retrieve the return value or execution error in the event that the process terminates.
     /// 
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`ProcessStep::Terminate`].
-    pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> Result<ProcessStep<'gc, S>, ExecError<S>> {
-        let res = self.step_impl(mc, system);
+    pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, S>, ExecError<S>> {
+        let res = self.step_impl(mc);
         if let Ok(ProcessStep::Terminate { .. }) | Err(_) = res {
             self.running = false;
             self.barrier = None;
@@ -194,7 +211,7 @@ impl<'gc, S: System> Process<'gc, S> {
         }
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
-    fn step_impl(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> Result<ProcessStep<'gc, S>, ErrorCause<S>> {
+    fn step_impl(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, S>, ErrorCause<S>> {
         fn process_result<'gc, S: System>(mc: MutationContext<'gc, '_>, result: Result<Value<'gc, S>, String>, error_scheme: ErrorScheme, value_stack: &mut Vec<Value<'gc, S>>, last_error: &mut Option<Value<'gc, S>>) -> Result<(), ErrorCause<S>> {
             Ok(value_stack.push(match result {
                 Ok(x) => {
@@ -233,28 +250,28 @@ impl<'gc, S: System> Process<'gc, S> {
 
         match &self.defer {
             None => (),
-            Some(Defer::SyscallResult { key, aft_pos }) => match system.poll_syscall(mc, key)? {
+            Some(Defer::SyscallResult { key, aft_pos }) => match self.system.poll_syscall(mc, key)? {
                 AsyncPoll::Completed(x) => {
                     syscall_result!(x => *aft_pos);
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
             }
-            Some(Defer::RpcResult { key, aft_pos }) => match system.poll_rpc(mc, key)? {
+            Some(Defer::RpcResult { key, aft_pos }) => match self.system.poll_rpc(mc, key)? {
                 AsyncPoll::Completed(x) => {
                     rpc_result!(x => *aft_pos);
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
             }
-            Some(Defer::InputResult { key, aft_pos }) => match system.poll_input(mc, key)? {
+            Some(Defer::InputResult { key, aft_pos }) => match self.system.poll_input(mc, key)? {
                 AsyncPoll::Completed(x) => {
                     input_result!(x => *aft_pos);
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
             }
-            Some(Defer::MessageReply { key, aft_pos }) => match system.poll_reply(key) {
+            Some(Defer::MessageReply { key, aft_pos }) => match self.system.poll_reply(key) {
                 AsyncPoll::Completed(x) => {
                     let value = match x {
                         Some(x) => Value::from_json(mc, x)?,
@@ -273,7 +290,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 }
                 false => return Ok(ProcessStep::Yield),
             }
-            Some(Defer::Sleep { until, aft_pos }) => match system.time_ms()? >= *until {
+            Some(Defer::Sleep { until, aft_pos }) => match self.system.time_ms()? >= *until {
                 true => {
                     self.pos = *aft_pos;
                     self.defer = None;
@@ -524,7 +541,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let val = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
 
-                let index = ops::prep_rand_index(system, list.len() + 1)?;
+                let index = ops::prep_rand_index(&*self.system, list.len() + 1)?;
                 list.insert(index, val);
                 self.pos = aft_pos;
             }
@@ -546,7 +563,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::ListGetRandom => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let list = list.read();
-                let index = ops::prep_rand_index(system, list.len())?;
+                let index = ops::prep_rand_index(&*self.system, list.len())?;
                 self.value_stack.push(list[index]);
                 self.pos = aft_pos;
             }
@@ -574,7 +591,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let mut list = list.write(mc);
 
-                let index = ops::prep_rand_index(system, list.len())?;
+                let index = ops::prep_rand_index(&*self.system, list.len())?;
                 list[index] = value;
                 self.pos = aft_pos;
             }
@@ -623,7 +640,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::BinaryOp { op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::binary_op(mc, system, &a, &b, op)?);
+                self.value_stack.push(ops::binary_op(mc, &*self.system, &a, &b, op)?);
                 self.pos = aft_pos;
             }
             Instruction::VariadicOp { op, len } => {
@@ -637,13 +654,13 @@ impl<'gc, S: System> Process<'gc, S> {
                     VariadicLen::Fixed(len) => {
                         let stack_size = self.value_stack.len();
                         for item in self.value_stack.drain(stack_size - len..) {
-                            value = ops::binary_op(mc, system, &value, &item, bin_op)?;
+                            value = ops::binary_op(mc, &*self.system, &value, &item, bin_op)?;
                         }
                     }
                     VariadicLen::Dynamic => {
                         let src = self.value_stack.pop().unwrap().as_list()?;
                         for item in src.read().iter() {
-                            value = ops::binary_op(mc, system, &value, item, bin_op)?;
+                            value = ops::binary_op(mc, &*self.system, &value, item, bin_op)?;
                         }
                     }
                 }
@@ -680,7 +697,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = lookup_var!(var).get();
-                context.set_or_define(mc, var, ops::binary_op(mc, system, &a, &b, op)?);
+                context.set_or_define(mc, var, ops::binary_op(mc, &*self.system, &a, &b, op)?);
                 self.pos = aft_pos;
             }
 
@@ -760,7 +777,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     args_vec.push((arg_name, value));
                 }
                 args_vec.reverse();
-                match system.call_rpc(mc, service.to_owned(), rpc.to_owned(), args_vec)? {
+                match self.system.call_rpc(mc, service.to_owned(), rpc.to_owned(), args_vec)? {
                     MaybeAsync::Async(key) => self.defer = Some(Defer::RpcResult { key, aft_pos }),
                     MaybeAsync::Sync(res) => rpc_result!(res => aft_pos),
                 }
@@ -793,7 +810,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().copied().collect(),
                 };
                 let name = self.value_stack.pop().unwrap().to_string(mc)?.as_str().to_owned();
-                match system.syscall(mc, name, args)? {
+                match self.system.syscall(mc, name, args)? {
                     MaybeAsync::Async(key) => self.defer = Some(Defer::SyscallResult { key, aft_pos }),
                     MaybeAsync::Sync(res) => syscall_result!(res => aft_pos),
                 }
@@ -821,13 +838,13 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::Print => {
                 let value = self.value_stack.pop().unwrap();
                 let is_empty = match value { Value::String(x) => x.is_empty(), _ => false };
-                system.print(mc, if is_empty { None } else { Some(value) }, &*entity)?;
+                self.system.print(mc, if is_empty { None } else { Some(value) }, &*entity)?;
                 self.pos = aft_pos;
             }
             Instruction::Ask => {
                 let prompt = self.value_stack.pop().unwrap();
                 let is_empty = match prompt { Value::String(x) => x.is_empty(), _ => false };
-                match system.input(mc, if is_empty { None } else { Some(prompt) }, &*entity)? {
+                match self.system.input(mc, if is_empty { None } else { Some(prompt) }, &*entity)? {
                     MaybeAsync::Async(key) => self.defer = Some(Defer::InputResult { key, aft_pos }),
                     MaybeAsync::Sync(res) => input_result!(res => aft_pos),
                 }
@@ -837,11 +854,11 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::ResetTimer => {
-                self.timer_start = system.time_ms()?;
+                self.timer_start = self.system.time_ms()?;
                 self.pos = aft_pos;
             }
             Instruction::PushTimer => {
-                self.value_stack.push((system.time_ms()?.saturating_sub(self.timer_start) as f64 / 1000.0).into());
+                self.value_stack.push((self.system.time_ms()?.saturating_sub(self.timer_start) as f64 / 1000.0).into());
                 self.pos = aft_pos;
             }
             Instruction::Sleep => {
@@ -850,7 +867,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     self.pos = aft_pos;
                     return Ok(ProcessStep::Yield);
                 }
-                self.defer = Some(Defer::Sleep { until: system.time_ms()? + ms as u64, aft_pos });
+                self.defer = Some(Defer::Sleep { until: self.system.time_ms()? + ms as u64, aft_pos });
             }
             Instruction::SendNetworkMessage { msg_type, values, expect_reply } => {
                 let targets = match self.value_stack.pop().unwrap() {
@@ -877,7 +894,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     }
                     res
                 };
-                match system.send_message(msg_type.into(), values, targets, expect_reply)? {
+                match self.system.send_message(msg_type.into(), values, targets, expect_reply)? {
                     Some(key) => self.defer = Some(Defer::MessageReply { key, aft_pos }),
                     None => self.pos = aft_pos,
                 }
@@ -885,7 +902,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::SendNetworkReply => {
                 let value = self.value_stack.pop().unwrap().to_json()?;
                 if let Some(key) = self.reply_key.take() {
-                    system.send_reply(key, value)?;
+                    self.system.send_reply(key, value)?;
                 }
                 self.pos = aft_pos;
             }

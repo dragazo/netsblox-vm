@@ -87,7 +87,7 @@ struct Script<'gc, S: System> {
                                context_queue: VecDeque<ContextEntry<'gc, S>>,
 }
 impl<'gc, S: System> Script<'gc, S> {
-    fn consume_context(&mut self, state: &mut State<'gc, S>, system: &S) {
+    fn consume_context(&mut self, state: &mut State<'gc, S>) {
         let process = self.process.and_then(|key| Some((key, state.processes.get_mut(key)?)));
         if process.as_ref().map(|x| x.1.is_running()).unwrap_or(false) { return }
 
@@ -101,12 +101,12 @@ impl<'gc, S: System> Script<'gc, S> {
                 debug_assert!(!state.process_queue.contains(&key));
                 debug_assert_eq!(self.process, Some(key));
 
-                process.initialize(locals, barrier, reply_key, system);
+                process.initialize(locals, barrier, reply_key);
                 state.process_queue.push_back(key);
             }
             None => {
-                let mut process = Process::new(state.code.clone(), self.start_pos, state.global_context, self.entity, state.settings);
-                process.initialize(locals, barrier, reply_key, system);
+                let mut process = Process::new(state.code.clone(), self.start_pos, state.global_context, self.entity, state.settings, state.system.clone());
+                process.initialize(locals, barrier, reply_key);
                 let key = state.processes.insert(process);
                 state.process_queue.push_back(key);
                 self.process = Some(key);
@@ -120,9 +120,9 @@ impl<'gc, S: System> Script<'gc, S> {
         }
         self.context_queue.clear();
     }
-    fn schedule(&mut self, state: &mut State<'gc, S>, system: &S, locals: SymbolTable<'gc, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, max_queue: usize) {
+    fn schedule(&mut self, state: &mut State<'gc, S>, locals: SymbolTable<'gc, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, max_queue: usize) {
         self.context_queue.push_back(ContextEntry { locals, barrier, reply_key });
-        self.consume_context(state, system);
+        self.consume_context(state);
         if self.context_queue.len() > max_queue {
             self.context_queue.pop_back();
         }
@@ -137,6 +137,7 @@ struct State<'gc, S: System> {
     #[collect(require_static)] settings: Settings,
                                processes: SlotMap<ProcessKey, Process<'gc, S>>,
     #[collect(require_static)] process_queue: VecDeque<ProcessKey>,
+    #[collect(require_static)] system: Rc<S>,
 }
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
@@ -145,7 +146,7 @@ pub struct Project<'gc, S: System> {
     scripts: Vec<Script<'gc, S>>,
 }
 impl<'gc, S: System> Project<'gc, S> {
-    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, role: &'a ast::Role, settings: Settings) -> (Self, Locations<'a>) {
+    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, role: &'a ast::Role, settings: Settings, system: Rc<S>) -> (Self, Locations<'a>) {
         let global_context = GlobalContext::from_ast(mc, role);
         let (code, locations) = ByteCode::compile(role);
 
@@ -178,16 +179,17 @@ impl<'gc, S: System> Project<'gc, S> {
                 settings,
                 processes: Default::default(),
                 process_queue: Default::default(),
+                system,
             }
         }, locations)
     }
-    pub fn input(&mut self, input: Input, system: &S) {
+    pub fn input(&mut self, input: Input) {
         match input {
             Input::Start => {
                 for script in self.scripts.iter_mut() {
                     if let Hat::OnFlag = &script.hat {
                         script.stop_all(&mut self.state);
-                        script.schedule(&mut self.state, system, Default::default(), None, None, 0);
+                        script.schedule(&mut self.state, Default::default(), None, None, 0);
                     }
                 }
             }
@@ -199,7 +201,7 @@ impl<'gc, S: System> Project<'gc, S> {
                 for script in self.scripts.iter_mut() {
                     if let Hat::OnKey { key } = &script.hat {
                         if key.map(|x| x == input_key).unwrap_or(true) {
-                            script.schedule(&mut self.state, system, Default::default(), None, None, 0);
+                            script.schedule(&mut self.state, Default::default(), None, None, 0);
                         }
                     }
                 }
@@ -207,8 +209,8 @@ impl<'gc, S: System> Project<'gc, S> {
             Input::KeyUp(_) => unimplemented!(),
         }
     }
-    pub fn step(&mut self, mc: MutationContext<'gc, '_>, system: &S) -> ProjectStep<'gc, S> {
-        if let Some((msg_type, values, reply_key)) = system.receive_message() {
+    pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> ProjectStep<'gc, S> {
+        if let Some((msg_type, values, reply_key)) = self.state.system.receive_message() {
             let values: BTreeMap<_,_> = values.into_iter().collect();
             for script in self.scripts.iter_mut() {
                 if let Hat::NetworkMessage { msg_type: script_msg_type, fields } = &script.hat {
@@ -217,7 +219,7 @@ impl<'gc, S: System> Project<'gc, S> {
                         for field in fields.iter() {
                             context.redefine_or_define(field, values.get(field).map(|x| Value::from_json(mc, x.clone()).ok()).flatten().unwrap_or_else(|| 0f64.into()).into());
                         }
-                        script.schedule(&mut self.state, system, context, None, reply_key.clone(), usize::MAX);
+                        script.schedule(&mut self.state, context, None, reply_key.clone(), usize::MAX);
                     }
                 }
             }
@@ -230,7 +232,7 @@ impl<'gc, S: System> Project<'gc, S> {
             }
         };
 
-        match proc.step(mc, system) {
+        match proc.step(mc) {
             Ok(x) => match x {
                 ProcessStep::Normal => {
                     self.state.process_queue.push_front(proc_key);
@@ -247,7 +249,7 @@ impl<'gc, S: System> Project<'gc, S> {
                         if let Hat::LocalMessage { msg_type: recv_type } = &script.hat {
                             if *recv_type == *msg_type {
                                 script.stop_all(&mut self.state);
-                                script.schedule(&mut self.state, system, Default::default(), barrier.clone(), None, 0);
+                                script.schedule(&mut self.state, Default::default(), barrier.clone(), None, 0);
                             }
                         }
                     }

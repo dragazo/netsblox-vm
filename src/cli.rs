@@ -1,3 +1,13 @@
+//! Access to the standard `netsblox-vm` CLI.
+//!
+//! Access to this submodule requires the `cli` feature flag, which is enabled by default.
+//!
+//! This submodule acts as a full-fledged implementation of a usable `netsblox-vm` CLI front-end.
+//! This includes being able to compile and run individual project files locally,
+//! as well as a server mode where a user can connect to the server from the browser
+//! and use the block-based interface to write, upload, and run code on the server.
+//! Note that server mode does not yet support multiple simultaneous.
+
 use std::prelude::v1::*;
 use std::fs::File;
 use std::rc::Rc;
@@ -25,6 +35,7 @@ use crossterm::style::{ResetColor, SetForegroundColor, Color, Print};
 use crate::*;
 use crate::gc::{GcCell, Collect, make_arena};
 use crate::json::*;
+use crate::std_system::*;
 use crate::bytecode::*;
 use crate::runtime::*;
 use crate::process::*;
@@ -85,16 +96,15 @@ struct Env<'gc, S: System> {
 }
 make_arena!(EnvArena<S>, Env<S>);
 
-fn get_env<S: System>(role: &ast::Role) -> EnvArena<S> {
+fn get_env<S: System>(role: &ast::Role, system: Rc<S>) -> EnvArena<S> {
     EnvArena::new(Default::default(), |mc| {
-        let settings = Settings::builder().build().unwrap();
-        let (proj, locs) = Project::from_ast(mc, role, settings);
+        let (proj, locs) = Project::from_ast(mc, role, Settings::default(), system);
         Env { proj: GcCell::allocate(mc, proj), locs: locs.instructions.transform(ToOwned::to_owned) }
     })
 }
 
 /// Standard NetsBlox VM project actions that can be performed
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 pub enum Mode {
     /// Compiles and runs a single project file
     Run {
@@ -104,7 +114,7 @@ pub enum Mode {
         #[clap(long)]
         role: Option<String>,
 
-        /// Address of the NetsBlox server (default: https://editor.netsblox.org)
+        /// Address of the NetsBlox server (default: `https://editor.netsblox.org`)
         #[clap(long, default_value_t = String::from("https://editor.netsblox.org"))]
         server: String,
     },
@@ -118,7 +128,7 @@ pub enum Mode {
     },
     /// Starts an execution server which you can connect to from the browser
     Start {
-        /// Address of the NetsBlox server (default: https://editor.netsblox.org)
+        /// Address of the NetsBlox server (default: `https://editor.netsblox.org`)
         #[clap(long, default_value_t = String::from("https://editor.netsblox.org"))]
         server: String,
 
@@ -131,8 +141,15 @@ pub enum Mode {
     },
 }
 
+/// An entry to display in the syscall dropdown when running in server mode.
+///
+/// A single syscall can be listed multiple times, e.g., under different submenu categorizations.
+/// These are not checked against the syscalls actually supported by your runtime.
+/// You are responsible for implementing syscalls and ensuring they are accurately shown in the menu if desired.
 pub enum SyscallMenu<'a> {
+    /// A syscall name.
     Entry { label: &'a str },
+    /// A labeled submenu of syscalls.
     Submenu { label: &'a str, content: &'a [SyscallMenu<'a>] },
 }
 impl SyscallMenu<'_> {
@@ -202,7 +219,7 @@ fn open_project<'a>(content: &str, role: Option<&'a str>) -> Result<(String, ast
     Ok((parsed.name, role))
 }
 
-fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, env: EnvArena<StdSystem<C>>, overrides: StdSystemConfig<C>) {
+fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C>) {
     terminal::enable_raw_mode().unwrap();
     execute!(stdout(), cursor::Hide).unwrap();
     let _tty_mode_guard = AtExit::new(|| {
@@ -221,7 +238,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, env: EnvAren
     let mut term_size = terminal::size().unwrap();
     let mut input_value = String::new();
 
-    let config = overrides.or(StdSystemConfig {
+    let config = overrides.or(Config {
         print: {
             let update_flag = update_flag.clone();
             Some(Rc::new(move |_, _, value, entity| {
@@ -243,11 +260,12 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, env: EnvAren
         },
         ..Default::default()
     });
-    let system = StdSystem::new(server, Some(project_name), config);
+    let system = Rc::new(StdSystem::new(server, Some(project_name), config));
     let mut idle_sleeper = IdleSleeper::new();
     print!("public id: {}\r\n", system.get_public_id());
 
-    env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
+    let env = get_env(role, system);
+    env.mutate(|mc, env| env.proj.write(mc).input(Input::Start));
 
     let mut input_sequence = Vec::with_capacity(16);
     let in_input_mode = || !input_queries.borrow().is_empty();
@@ -283,9 +301,9 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, env: EnvAren
 
         env.mutate(|mc, env| {
             let mut proj = env.proj.write(mc);
-            for input in input_sequence.drain(..) { proj.input(input, &system); }
+            for input in input_sequence.drain(..) { proj.input(input); }
             for _ in 0..STEPS_PER_IO_ITER {
-                let res = proj.step(mc, &system);
+                let res = proj.step(mc);
                 idle_sleeper.consume(&res);
             }
         });
@@ -312,28 +330,29 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, env: EnvAren
 
     execute!(stdout(), terminal::Clear(ClearType::CurrentLine)).unwrap();
 }
-fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, env: EnvArena<StdSystem<C>>, overrides: StdSystemConfig<C>) {
-    let config = overrides.or(StdSystemConfig {
+fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C>) {
+    let config = overrides.or(Config {
         print: Some(Rc::new(move |_, _, value, entity| Ok(if let Some(value) = value { println!("{entity:?} > {value:?}") }))),
         ..Default::default()
     });
-    let system = StdSystem::new(server, Some(project_name), config);
+    let system = Rc::new(StdSystem::new(server, Some(project_name), config));
     let mut idle_sleeper = IdleSleeper::new();
     println!("public id: {}", system.get_public_id());
 
-    env.mutate(|mc, env| env.proj.write(mc).input(Input::Start, &system));
+    let env = get_env(role, system);
+    env.mutate(|mc, env| env.proj.write(mc).input(Input::Start));
 
     loop {
         env.mutate(|mc, env| {
             let mut proj = env.proj.write(mc);
             for _ in 0..STEPS_PER_IO_ITER {
-                let res = proj.step(mc, &system);
+                let res = proj.step(mc);
                 idle_sleeper.consume(&res);
             }
         });
     }
 }
-fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overrides: StdSystemConfig<C>, syscalls: &[SyscallMenu<'_>]) {
+fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overrides: Config<C>, syscalls: &[SyscallMenu<'_>]) {
     println!(r#"connect from {nb_server}/?extensions=["http://{addr}:{port}/extension.js"]"#);
 
     let extension_template = liquid::ParserBuilder::with_stdlib().build().unwrap().parse(include_str!("assets/extension.js")).unwrap();
@@ -396,11 +415,11 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
     }
 
     let weak_state = Arc::downgrade(&state);
-    let config = overrides.or(StdSystemConfig {
+    let config = overrides.or(Config {
         print: Some(Rc::new(move |_, _, value, entity| Ok(if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") }))),
         ..Default::default()
     });
-    let system = StdSystem::new(nb_server, Some("native-server"), config);
+    let system = Rc::new(StdSystem::new(nb_server, Some("native-server"), config));
     let mut idle_sleeper = IdleSleeper::new();
     println!("public id: {}", system.get_public_id());
 
@@ -476,7 +495,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
     thread::spawn(move || run_http(state, port));
 
     let (_, empty_role) = open_project(include_str!("assets/empty-proj.xml"), None).unwrap_or_else(|_| crash!(666: "default project failed to load"));
-    let mut env = get_env(&empty_role);
+    let mut env = get_env(&empty_role, system.clone());
 
     'program: loop {
         'input: loop {
@@ -485,7 +504,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
                     Command::SetProject(content) => match open_project(&content, None) {
                         Ok((proj_name, role)) => {
                             tee_println!(weak_state.upgrade() => "\n>>> loaded project '{proj_name}'\n");
-                            env = get_env(&role);
+                            env = get_env(&role, system.clone());
                         }
                         Err(e) => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> keeping previous project...\n"),
                     }
@@ -495,7 +514,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
                                 state.running.store(true, MemoryOrder::Relaxed);
                             }
                         }
-                        env.mutate(|mc, env| env.proj.write(mc).input(input, &system));
+                        env.mutate(|mc, env| env.proj.write(mc).input(input));
                     }
                 }
                 Err(TryRecvError::Disconnected) => break 'program,
@@ -510,7 +529,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
         env.mutate(|mc, env| {
             let mut proj = env.proj.write(mc);
             for _ in 0..STEPS_PER_IO_ITER {
-                let res = proj.step(mc, &system);
+                let res = proj.step(mc);
                 if let ProjectStep::Error { error, proc } = &res {
                     if let Some(state) = weak_state.upgrade() {
                         let raw_entity = proc.get_entity();
@@ -547,18 +566,16 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
 }
 
 /// Runs a CLI client using the given [`Mode`] configuration.
-pub fn run<C: CustomTypes>(mode: Mode, config: StdSystemConfig<C>, syscalls: &[SyscallMenu]) {
+pub fn run<C: CustomTypes>(mode: Mode, config: Config<C>, syscalls: &[SyscallMenu]) {
     match mode {
         Mode::Run { src, role, server } => {
             let content = read_file(&src).unwrap_or_else(|_| crash!(1: "failed to read file '{src}'"));
             let (project_name, role) = open_project(&content, role.as_deref()).unwrap_or_else(|e| crash!(2: "{e}"));
 
-            let env = get_env(&role);
-
             if stdout().is_tty() {
-                run_proj_tty(&project_name, server, env, config);
+                run_proj_tty(&project_name, server, &role, config);
             } else {
-                run_proj_non_tty(&project_name, server, env, config);
+                run_proj_non_tty(&project_name, server, &role, config);
             }
         }
         Mode::Dump { src, role } => {

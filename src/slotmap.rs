@@ -17,6 +17,7 @@ pub trait Key: Copy + Eq + Ord + 'static {
     fn get_generation(&self) -> usize;
 }
 
+/// Defines a new key type for use in [`SlotMap`].
 #[macro_export]
 macro_rules! new_key {
     ($($(#[doc = $doc:expr])? $vis:vis struct $name:ident;)*) => {$(
