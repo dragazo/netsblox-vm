@@ -96,11 +96,11 @@ struct Env<'gc, S: System> {
 }
 make_arena!(EnvArena<S>, Env<S>);
 
-fn get_env<S: System>(role: &ast::Role, system: Rc<S>) -> EnvArena<S> {
-    EnvArena::new(Default::default(), |mc| {
-        let (proj, locs) = Project::from_ast(mc, role, Settings::default(), system);
-        Env { proj: GcCell::allocate(mc, proj), locs: locs.instructions.transform(ToOwned::to_owned) }
-    })
+fn get_env<S: System>(role: &ast::Role, system: Rc<S>) -> Result<EnvArena<S>, FromAstError> {
+    Ok(EnvArena::new(Default::default(), |mc| {
+        let (proj, locs) = Project::from_ast(mc, role, Settings::default(), system)?;
+        Ok(Env { proj: GcCell::allocate(mc, proj), locs: locs.instructions.transform(ToOwned::to_owned) })
+    }))
 }
 
 /// Standard NetsBlox VM project actions that can be performed

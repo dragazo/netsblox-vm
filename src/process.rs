@@ -338,11 +338,11 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::PushInt { value } => {
-                self.value_stack.push((value as f64).into());
+                self.value_stack.push(Number::new(value as f64)?.into());
                 self.pos = aft_pos;
             }
             Instruction::PushNumber { value } => {
-                self.value_stack.push(value.into());
+                self.value_stack.push(Number::new(value)?.into());
                 self.pos = aft_pos;
             }
             Instruction::PushString { value } => {
@@ -399,19 +399,19 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::MakeListRange => {
-                let b = self.value_stack.pop().unwrap().to_number()?;
-                let mut a = self.value_stack.pop().unwrap().to_number()?;
+                let b = self.value_stack.pop().unwrap().to_number()?.get();
+                let mut a = self.value_stack.pop().unwrap().to_number()?.get();
 
                 let mut res = VecDeque::new();
                 if a.is_finite() && b.is_finite() {
                     if a <= b {
                         while a <= b {
-                            res.push_back(a.into());
+                            res.push_back(Number::new(a)?.into());
                             a += 1.0;
                         }
                     } else {
                         while a >= b {
-                            res.push_back(a.into());
+                            res.push_back(Number::new(a)?.into());
                             a -= 1.0;
                         }
                     }
@@ -439,7 +439,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let value = self.value_stack.pop().unwrap();
                 let res = list.read().iter().enumerate().find(|(_, x)| ops::check_eq(x, &value)).map(|(i, _)| i + 1).unwrap_or(0);
-                self.value_stack.push((res as f64).into());
+                self.value_stack.push(Number::new(res as f64)?.into());
                 self.pos = aft_pos;
             }
             Instruction::ListContains => {
@@ -456,17 +456,17 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::ListLength => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                self.value_stack.push((list.read().len() as f64).into());
+                self.value_stack.push(Number::new(list.read().len() as f64)?.into());
                 self.pos = aft_pos;
             }
             Instruction::ListDims => {
                 let list = self.value_stack.pop().unwrap();
-                self.value_stack.push(GcCell::allocate(mc, ops::dimensions(&list)?.into_iter().map(|x| (x as f64).into()).collect::<VecDeque<_>>()).into());
+                self.value_stack.push(GcCell::allocate(mc, ops::dimensions(&list)?.into_iter().map(|x| Ok(Number::new(x as f64)?.into())).collect::<Result<VecDeque<_>, NumberError>>()?).into());
                 self.pos = aft_pos;
             }
             Instruction::ListRank => {
                 let list = self.value_stack.pop().unwrap();
-                self.value_stack.push((ops::dimensions(&list)?.len() as f64).into());
+                self.value_stack.push(Number::new(ops::dimensions(&list)?.len() as f64)?.into());
                 self.pos = aft_pos;
             }
 
@@ -492,7 +492,7 @@ impl<'gc, S: System> Process<'gc, S> {
 
                 let mut dims = Vec::with_capacity(raw_dims.len());
                 for dim in raw_dims {
-                    let dim = dim.to_number()?;
+                    let dim = dim.to_number()?.get();
                     if dim < 0.0 || dim > usize::MAX as f64 { return Err(ErrorCause::InvalidSize { value: dim }) }
                     let int_dim = dim as usize;
                     if int_dim as f64 != dim { return Err(ErrorCause::InvalidSize { value: dim }) }
@@ -645,10 +645,10 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::VariadicOp { op, len } => {
                 let (mut value, bin_op) = match op {
-                    VariadicOp::Add => (Value::Number(0.0), BinaryOp::Add),
-                    VariadicOp::Mul => (Value::Number(1.0), BinaryOp::Mul),
-                    VariadicOp::Min => (Value::Number(std::f64::INFINITY), BinaryOp::Min),
-                    VariadicOp::Max => (Value::Number(std::f64::NEG_INFINITY), BinaryOp::Max),
+                    VariadicOp::Add => (Value::Number(Number::new(0.0)?), BinaryOp::Add),
+                    VariadicOp::Mul => (Value::Number(Number::new(1.0)?), BinaryOp::Mul),
+                    VariadicOp::Min => (Value::Number(Number::infinity()?), BinaryOp::Min),
+                    VariadicOp::Max => (Value::Number(Number::neg_infinity()?), BinaryOp::Max),
                 };
                 match len {
                     VariadicLen::Fixed(len) => {
@@ -686,7 +686,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
 
             Instruction::DeclareLocal { var } => {
-                context.locals_mut().redefine_or_define(var, Shared::Unique(0.0.into()));
+                context.locals_mut().redefine_or_define(var, Shared::Unique(Number::new(0.0)?.into()));
                 self.pos = aft_pos;
             }
             Instruction::Assign { var } => {
@@ -858,11 +858,11 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::PushTimer => {
-                self.value_stack.push((self.system.time_ms()?.saturating_sub(self.timer_start) as f64 / 1000.0).into());
+                self.value_stack.push(Number::new(self.system.time_ms()?.saturating_sub(self.timer_start) as f64 / 1000.0)?.into());
                 self.pos = aft_pos;
             }
             Instruction::Sleep => {
-                let ms = self.value_stack.pop().unwrap().to_number()? * 1000.0;
+                let ms = self.value_stack.pop().unwrap().to_number()?.get() * 1000.0;
                 if ms <= 0.0 {
                     self.pos = aft_pos;
                     return Ok(ProcessStep::Yield);
@@ -931,7 +931,7 @@ mod ops {
     }
 
     pub(super) fn prep_list_index<'gc, S: System>(index: &Value<'gc, S>, list_len: usize) -> Result<usize, ErrorCause<S>> {
-        let raw_index = index.to_number()?;
+        let raw_index = index.to_number()?.get();
         if raw_index < 1.0 || raw_index > list_len as f64 { return Err(ErrorCause::IndexOutOfBounds { index: raw_index, list_len }) }
         let index = raw_index as u64;
         if index as f64 != raw_index { return Err(ErrorCause::IndexNotInteger { index: raw_index }) }
@@ -1075,37 +1075,38 @@ mod ops {
     pub(super) fn binary_op<'gc, 'a, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &'a Value<'gc, S>, b: &'a Value<'gc, S>, op: BinaryOp) -> Result<Value<'gc, S>, ErrorCause<S>> {
         let mut cache = Default::default();
         match op {
-            BinaryOp::Add       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? + b.to_number()?).into())),
-            BinaryOp::Sub       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? - b.to_number()?).into())),
-            BinaryOp::Mul       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? * b.to_number()?).into())),
-            BinaryOp::Div       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? / b.to_number()?).into())),
-            BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(libm::pow(a.to_number()?, b.to_number()?).into())),
-            BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((libm::log2(b.to_number()?) / libm::log2(a.to_number()?)).into())),
-            BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((libm::atan2(a.to_number()?, b.to_number()?) * RAD_TO_DEG).into())),
+            BinaryOp::Add       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.add(b.to_number()?)?.into())),
+            BinaryOp::Sub       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.sub(b.to_number()?)?.into())),
+            BinaryOp::Mul       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.mul(b.to_number()?)?.into())),
+            BinaryOp::Div       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.div(b.to_number()?)?.into())),
+            BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.powf(b.to_number()?)?.into())),
+            BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(b.to_number()?.log(a.to_number()?)?.into())),
+            BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.atan2(b.to_number()?)?.into())),
             BinaryOp::Greater   => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? > b.to_number()?).into())),
             BinaryOp::GreaterEq => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? >= b.to_number()?).into())),
             BinaryOp::Less      => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? < b.to_number()?).into())),
             BinaryOp::LessEq    => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? <= b.to_number()?).into())),
-            BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()?.min(b.to_number()?)).into())),
-            BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()?.max(b.to_number()?)).into())),
+            BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.min(b.to_number()?)?.into())),
+            BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.max(b.to_number()?)?.into())),
 
             BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
-                let (a, b) = (a.to_number()?, b.to_number()?);
-                Ok(if a.is_sign_positive() == b.is_sign_positive() { a % b } else { b + (a % -b) }.into())
+                let (a, b) = (a.to_number()?.get(), b.to_number()?.get());
+                Ok(Number::new(if a.is_sign_positive() == b.is_sign_positive() { a % b } else { b + (a % -b) })?.into())
             }),
             BinaryOp::SplitCustom => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
                 let (text, pattern) = (a.to_string(mc)?, b.to_string(mc)?);
                 Ok(GcCell::allocate(mc, text.split(pattern.as_str()).map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             BinaryOp::Random => binary_op_impl(mc, system, a, b, true, &mut cache, |_, system, a, b| {
-                let (mut a, mut b) = (a.to_number()?, b.to_number()?);
+                let (mut a, mut b) = (a.to_number()?.get(), b.to_number()?.get());
                 if a > b { (a, b) = (b, a); }
-                if a == libm::round(a) && b == libm::round(b) {
+                let res = if a == libm::round(a) && b == libm::round(b) {
                     let (a, b) = (a as i64, b as i64);
-                    Ok((system.rand(a..=b)? as f64).into())
+                    system.rand(a..=b)? as f64
                 } else {
-                    Ok(system.rand(a..=b)?.into())
-                }
+                    system.rand(a..=b)?
+                };
+                Ok(Number::new(res)?.into())
             })
         }
     }
@@ -1134,19 +1135,19 @@ mod ops {
         let mut cache = Default::default();
         match op {
             UnaryOp::Not    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((!x.to_bool()?).into())),
-            UnaryOp::Abs    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::fabs(x.to_number()?).into())),
-            UnaryOp::Neg    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((-x.to_number()?).into())),
-            UnaryOp::Sqrt   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::sqrt(x.to_number()?).into())),
-            UnaryOp::Round  => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::round(x.to_number()?).into())),
-            UnaryOp::Floor  => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::floor(x.to_number()?).into())),
-            UnaryOp::Ceil   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::ceil(x.to_number()?).into())),
-            UnaryOp::Sin    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::sin(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Cos    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::cos(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Tan    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(libm::tan(x.to_number()? * DEG_TO_RAD).into())),
-            UnaryOp::Asin   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::asin(x.to_number()?) * RAD_TO_DEG).into())),
-            UnaryOp::Acos   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::acos(x.to_number()?) * RAD_TO_DEG).into())),
-            UnaryOp::Atan   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((libm::atan(x.to_number()?) * RAD_TO_DEG).into())),
-            UnaryOp::Strlen => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((x.to_string(mc)?.chars().count() as f64).into())),
+            UnaryOp::Abs    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.abs()?.into())),
+            UnaryOp::Neg    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.neg()?.into())),
+            UnaryOp::Sqrt   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.sqrt()?.into())),
+            UnaryOp::Round  => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.round()?.into())),
+            UnaryOp::Floor  => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.floor()?.into())),
+            UnaryOp::Ceil   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.ceil()?.into())),
+            UnaryOp::Sin    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::sin(x.to_number()?.get()) * DEG_TO_RAD)?.into())),
+            UnaryOp::Cos    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::cos(x.to_number()?.get()) * DEG_TO_RAD)?.into())),
+            UnaryOp::Tan    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::tan(x.to_number()?.get()) * DEG_TO_RAD)?.into())),
+            UnaryOp::Asin   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::asin(x.to_number()?.get()) * RAD_TO_DEG)?.into())),
+            UnaryOp::Acos   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::acos(x.to_number()?.get()) * RAD_TO_DEG)?.into())),
+            UnaryOp::Atan   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::atan(x.to_number()?.get()) * RAD_TO_DEG)?.into())),
+            UnaryOp::Strlen => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(x.to_string(mc)?.chars().count() as f64)?.into())),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, x, &mut cache, &|mc, x| {
                 Ok(GcCell::allocate(mc, x.to_string(mc)?.chars().map(|x| Gc::allocate(mc, x.to_string()).into()).collect::<VecDeque<_>>()).into())
@@ -1179,7 +1180,7 @@ mod ops {
             }),
 
             UnaryOp::UnicodeToChar => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                let fnum = x.to_number()?;
+                let fnum = x.to_number()?.get();
                 if fnum < 0.0 || fnum > u32::MAX as f64 { return Err(ErrorCause::InvalidUnicode { value: fnum }) }
                 let num = fnum as u32;
                 if num as f64 != fnum { return Err(ErrorCause::InvalidUnicode { value: fnum }) }
@@ -1190,7 +1191,7 @@ mod ops {
             }),
             UnaryOp::CharToUnicode => unary_op_impl(mc, x, &mut cache, &|mc, x| {
                 let src = x.to_string(mc)?;
-                let values: VecDeque<_> = src.chars().map(|ch| (ch as u32 as f64).into()).collect();
+                let values: VecDeque<_> = src.chars().map(|ch| Ok(Number::new(ch as u32 as f64)?.into())).collect::<Result<_, NumberError>>()?;
                 Ok(match values.len() {
                     1 => values.into_iter().next().unwrap(),
                     _ => GcCell::allocate(mc, values).into(),
@@ -1214,9 +1215,9 @@ mod ops {
 
             (Value::Number(a), Value::Number(b)) => *a == *b,
             (Value::String(a), Value::String(b)) => a.to_lowercase() == b.to_lowercase(),
-            (Value::Number(n), Value::String(s)) | (Value::String(s), Value::Number(n)) => match s.parse::<f64>() {
-                Ok(s) => s == *n,
-                Err(_) => **s == n.to_string(),
+            (Value::Number(n), Value::String(s)) | (Value::String(s), Value::Number(n)) => match s.parse::<f64>().ok().and_then(|x| Number::new(x).ok()) {
+                Some(s) => s == *n,
+                None => **s == n.to_string(),
             }
 
             (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),

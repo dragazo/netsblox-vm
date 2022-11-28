@@ -30,6 +30,7 @@
         "Condvar",
         "getrandom",
         "Listcat",
+        "powf",
         "Seedable",
         "syscall",
         "syscalls",

@@ -5,10 +5,32 @@ use std::rc::{Rc, Weak};
 use std::fmt;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
+use checked_float::{CheckedFloat, FloatChecker};
 
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
+
+#[derive(Debug)]
+pub enum NumberError {
+    Nan,
+}
+
+pub struct NumberChecker;
+impl FloatChecker<f64> for NumberChecker {
+    type Error = NumberError;
+    fn check(value: f64) -> Result<(), Self::Error> {
+        if value.is_nan() { Err(NumberError::Nan) } else { Ok(()) }
+    }
+}
+
+pub type Number = CheckedFloat<f64, NumberChecker>;
+
+#[derive(Debug)]
+pub enum FromAstError {
+    NumberError { error: NumberError },
+}
+impl From<NumberError> for FromAstError { fn from(error: NumberError) -> Self { Self::NumberError { error } } }
 
 #[derive(Debug)]
 pub enum FromJsonError {
@@ -74,11 +96,14 @@ pub enum ErrorCause<S: System> {
     InvalidUnicode { value: f64 },
     /// A soft error (e.g., RPC or syscall failure) was promoted to a hard error.
     Promoted { error: String },
+    /// A numeric value took on an invalid value such as NaN.
+    NumberError { error: NumberError },
 }
 impl<S: System> From<ConversionError<S>> for ErrorCause<S> { fn from(e: ConversionError<S>) -> Self { Self::ConversionError { got: e.got, expected: e.expected } } }
 impl<S: System> From<SystemError> for ErrorCause<S> { fn from(error: SystemError) -> Self { Self::SystemError { error } } }
 impl<S: System> From<ToJsonError<S>> for ErrorCause<S> { fn from(error: ToJsonError<S>) -> Self { Self::ToJsonError { error } } }
 impl<S: System> From<FromJsonError> for ErrorCause<S> { fn from(error: FromJsonError) -> Self { Self::FromJsonError { error } } }
+impl<S: System> From<NumberError> for ErrorCause<S> { fn from(error: NumberError) -> Self { Self::NumberError { error } } }
 
 /// A value representing the identity of a [`Value`].
 #[derive(Educe)]
@@ -99,7 +124,7 @@ pub enum Value<'gc, S: System> {
     /// A primitive boolean value.
     Bool(#[collect(require_static)] bool),
     /// A primitive numeric value. Snap! and NetsBlox use 64-bit floating point values for all numbers.
-    Number(#[collect(require_static)] f64),
+    Number(#[collect(require_static)] Number),
     /// A primitive string value, which is an immutable reference type.
     /// Although [`Rc`] would be sufficient for this purpose, using [`Gc`] instead makes the arena automatically
     /// include strings in its calculation of the total memory footprint (and allows [`Value`] to be [`Copy`]).
@@ -166,29 +191,29 @@ impl<S: System> fmt::Debug for Value<'_, S> {
     }
 }
 impl<'gc, S: System> From<bool> for Value<'gc, S> { fn from(v: bool) -> Self { Value::Bool(v) } }
-impl<'gc, S: System> From<f64> for Value<'gc, S> { fn from(v: f64) -> Self { Value::Number(v) } }
+impl<'gc, S: System> From<Number> for Value<'gc, S> { fn from(v: Number) -> Self { Value::Number(v) } }
 impl<'gc, S: System> From<Gc<'gc, String>> for Value<'gc, S> { fn from(v: Gc<'gc, String>) -> Self { Value::String(v) } }
 impl<'gc, S: System> From<GcCell<'gc, VecDeque<Value<'gc, S>>>> for Value<'gc, S> { fn from(v: GcCell<'gc, VecDeque<Value<'gc, S>>>) -> Self { Value::List(v) } }
 impl<'gc, S: System> From<GcCell<'gc, Closure<'gc, S>>> for Value<'gc, S> { fn from(v: GcCell<'gc, Closure<'gc, S>>) -> Self { Value::Closure(v) } }
 impl<'gc, S: System> From<GcCell<'gc, Entity<'gc, S>>> for Value<'gc, S> { fn from(v: GcCell<'gc, Entity<'gc, S>>) -> Self { Value::Entity(v) } }
 impl<'gc, S: System> Value<'gc, S> {
     /// Creates a new value from an abstract syntax tree.
-    pub fn from_ast(mc: MutationContext<'gc, '_>, value: &ast::Value) -> Self {
-        match value {
+    pub fn from_ast(mc: MutationContext<'gc, '_>, value: &ast::Value) -> Result<Self, FromAstError> {
+        Ok(match value {
             ast::Value::Bool(x) => (*x).into(),
-            ast::Value::Number(x) => (*x).into(),
-            ast::Value::Constant(ast::Constant::E) => std::f64::consts::E.into(),
-            ast::Value::Constant(ast::Constant::Pi) => std::f64::consts::PI.into(),
+            ast::Value::Number(x) => Number::new(*x)?.into(),
+            ast::Value::Constant(ast::Constant::E) => Number::new(std::f64::consts::E).unwrap().into(),
+            ast::Value::Constant(ast::Constant::Pi) => Number::new(std::f64::consts::PI).unwrap().into(),
             ast::Value::String(x) => Gc::allocate(mc, x.clone()).into(),
-            ast::Value::List(x) => GcCell::allocate(mc, x.iter().map(|x| Value::from_ast(mc, x)).collect::<VecDeque<_>>()).into(),
-        }
+            ast::Value::List(x) => GcCell::allocate(mc, x.iter().map(|x| Value::from_ast(mc, x)).collect::<Result<VecDeque<_>,_>>()?).into(),
+        })
     }
     /// Create a new [`Value`] from a [`Json`] value.
     pub fn from_json(mc: MutationContext<'gc, '_>, value: Json) -> Result<Self, FromJsonError> {
         Ok(match value {
             Json::Null => return Err(FromJsonError::HadNull),
             Json::Bool(x) => Value::Bool(x),
-            Json::Number(x) => Value::Number(x.as_f64().ok_or(FromJsonError::HadBadNumber)?),
+            Json::Number(x) => Value::Number(x.as_f64().map(|x| Number::new(x).ok()).flatten().ok_or(FromJsonError::HadBadNumber)?),
             Json::String(x) => Value::String(Gc::allocate(mc, x)),
             Json::Array(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|x| Value::from_json(mc, x)).collect::<Result<_,_>>()?)),
             Json::Object(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|(k, v)| {
@@ -203,7 +228,7 @@ impl<'gc, S: System> Value<'gc, S> {
         fn simplify<'gc, S: System>(value: &Value<'gc, S>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<Json, ToJsonError<S>> {
             Ok(match value {
                 Value::Bool(x) => Json::Bool(*x),
-                Value::Number(x) => Json::Number(serde_json::Number::from_f64(*x).ok_or(ToJsonError::HadBadNumber(*x))?),
+                Value::Number(x) => Json::Number(serde_json::Number::from_f64(x.get()).ok_or(ToJsonError::HadBadNumber(x.get()))?),
                 Value::String(x) => Json::String(x.as_str().to_owned()),
                 Value::Closure(_) | Value::Entity(_) | Value::Native(_) => return Err(ToJsonError::HadComplexType(value.get_type())),
                 Value::List(x) => {
@@ -227,7 +252,7 @@ impl<'gc, S: System> Value<'gc, S> {
     pub fn identity(&self) -> Identity<'gc, S> {
         match self {
             Value::Bool(x) => Identity(x as *const bool as *const (), PhantomData),
-            Value::Number(x) => Identity(x as *const f64 as *const (), PhantomData),
+            Value::Number(x) => Identity(x as *const Number as *const (), PhantomData),
             Value::String(x) => Identity(x.as_ptr() as *const String as *const (), PhantomData),
             Value::List(x) => Identity(x.as_ptr() as *const Vec<Value<'gc, S>> as *const (), PhantomData),
             Value::Closure(x) => Identity(x.as_ptr() as *const Closure<'gc, S> as *const (), PhantomData),
@@ -239,15 +264,14 @@ impl<'gc, S: System> Value<'gc, S> {
     pub fn to_bool(&self) -> Result<bool, ConversionError<S>> {
         Ok(match self {
             Value::Bool(x) => *x,
-            Value::String(x) => !x.is_empty(),
             x => return Err(ConversionError { got: x.get_type(), expected: Type::Bool }),
         })
     }
     /// Attempts to interpret this value as a number.
-    pub fn to_number(&self) -> Result<f64, ConversionError<S>> {
+    pub fn to_number(&self) -> Result<Number, ConversionError<S>> {
         Ok(match self {
             Value::Number(x) => *x,
-            Value::String(x) => x.parse().map_err(|_| ConversionError { got: Type::String, expected: Type::Number })?,
+            Value::String(x) => x.parse().ok().map(|x| Number::new(x).ok()).flatten().ok_or_else(|| ConversionError { got: Type::String, expected: Type::Number })?,
             x => return Err(ConversionError { got: x.get_type(), expected: Type::Number }),
         })
     }
@@ -364,8 +388,8 @@ pub struct SymbolTable<'gc, S: System>(BTreeMap<String, Shared<'gc, Value<'gc, S
 impl<'gc, S: System> Default for SymbolTable<'gc, S> { fn default() -> Self { Self(Default::default()) } }
 impl<'gc, S: System> SymbolTable<'gc, S> {
     /// Creates a symbol table containing all the provided variable definitions.
-    pub fn from_ast(mc: MutationContext<'gc, '_>, vars: &[ast::VariableDef]) -> Self {
-        Self(vars.iter().map(|x| (x.trans_name.clone(), Value::from_ast(mc, &x.value).into())).collect())
+    pub fn from_ast(mc: MutationContext<'gc, '_>, vars: &[ast::VariableDef]) -> Result<Self, FromAstError> {
+        Ok(Self(vars.iter().map(|x| Ok((x.trans_name.clone(), Shared::Unique(Value::from_ast(mc, &x.value)?)))).collect::<Result<_,FromAstError>>()?))
     }
     /// Sets the value of an existing variable (as if by [`Shared::set`]) or defines it if it does not exist.
     /// If the variable does not exist, creates a [`Shared::Unique`] instance for the new `value`.
@@ -488,16 +512,16 @@ pub struct GlobalContext<'gc, S: System> {
                                pub entities: Vec<GcCell<'gc, Entity<'gc, S>>>,
 }
 impl<'gc, S: System> GlobalContext<'gc, S> {
-    pub fn from_ast(mc: MutationContext<'gc, '_>, role: &ast::Role) -> Self {
-        Self {
+    pub fn from_ast(mc: MutationContext<'gc, '_>, role: &ast::Role) -> Result<Self, FromAstError> {
+        Ok(Self {
             proj_name: role.name.clone(),
-            globals: SymbolTable::from_ast(mc, &role.globals),
-            entities: role.entities.iter().map(|entity| GcCell::allocate(mc, Entity {
+            globals: SymbolTable::from_ast(mc, &role.globals)?,
+            entities: role.entities.iter().map(|entity| Ok(GcCell::allocate(mc, Entity {
                 name: entity.trans_name.clone(),
-                fields: SymbolTable::from_ast(mc, &entity.fields),
+                fields: SymbolTable::from_ast(mc, &entity.fields)?,
                 alive: true,
-            })).collect(),
-        }
+            }))).collect::<Result<_,FromAstError>>()?,
+        })
     }
 }
 

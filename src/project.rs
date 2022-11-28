@@ -146,8 +146,8 @@ pub struct Project<'gc, S: System> {
     scripts: Vec<Script<'gc, S>>,
 }
 impl<'gc, S: System> Project<'gc, S> {
-    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, role: &'a ast::Role, settings: Settings, system: Rc<S>) -> (Self, Locations<'a>) {
-        let global_context = GlobalContext::from_ast(mc, role);
+    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, role: &'a ast::Role, settings: Settings, system: Rc<S>) -> Result<(Self, Locations<'a>), FromAstError> {
+        let global_context = GlobalContext::from_ast(mc, role)?;
         let (code, locations) = ByteCode::compile(role);
 
         let mut scripts = vec![];
@@ -171,7 +171,7 @@ impl<'gc, S: System> Project<'gc, S> {
             }
         }
 
-        (Self {
+        Ok((Self {
             scripts,
             state: State {
                 global_context: GcCell::allocate(mc, global_context),
@@ -181,7 +181,7 @@ impl<'gc, S: System> Project<'gc, S> {
                 process_queue: Default::default(),
                 system,
             }
-        }, locations)
+        }, locations))
     }
     pub fn input(&mut self, input: Input) {
         match input {
@@ -217,7 +217,9 @@ impl<'gc, S: System> Project<'gc, S> {
                     if msg_type == *script_msg_type {
                         let mut context = SymbolTable::default();
                         for field in fields.iter() {
-                            context.redefine_or_define(field, values.get(field).map(|x| Value::from_json(mc, x.clone()).ok()).flatten().unwrap_or_else(|| 0f64.into()).into());
+                            context.redefine_or_define(field,
+                                values.get(field).map(|x| Value::from_json(mc, x.clone()).ok())
+                                .flatten().unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
                         }
                         script.schedule(&mut self.state, context, None, reply_key.clone(), usize::MAX);
                     }
