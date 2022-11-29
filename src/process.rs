@@ -300,8 +300,6 @@ impl<'gc, S: System> Process<'gc, S> {
         }
 
         let mut entity = self.entity.write(mc);
-        if !entity.alive { return Ok(ProcessStep::Terminate { result: None }) }
-
         let mut global_context = self.global_context.write(mc);
         let mut context = [&mut global_context.globals, &mut entity.fields, &mut self.call_stack.last_mut().unwrap().locals];
         let mut context = LookupGroup::new(&mut context);

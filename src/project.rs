@@ -1,7 +1,6 @@
 use std::prelude::v1::*;
 use std::collections::{VecDeque, BTreeMap};
 use std::rc::Rc;
-use std::iter;
 
 use crate::*;
 use crate::gc::*;
@@ -12,21 +11,6 @@ use crate::process::*;
 
 new_key! {
     struct ProcessKey;
-}
-
-fn parse_key(key: &str) -> Option<KeyCode> {
-    Some(match key {
-        "any key" => return None,
-        "up arrow" => KeyCode::Up,
-        "down arrow" => KeyCode::Down,
-        "left arrow" => KeyCode::Left,
-        "right arrow" => KeyCode::Right,
-        "space" => KeyCode::Char(' '),
-        _ => {
-            assert_eq!(key.chars().count(), 1);
-            KeyCode::Char(key.chars().next().unwrap().to_ascii_lowercase())
-        }
-    })
 }
 
 /// Simulates input from the user.
@@ -40,12 +24,12 @@ pub enum Input {
     /// This has the effect of stopping all currently-running processes.
     /// Note that some hat blocks could cause new processes to spin up after this operation.
     Stop,
-    /// Simulates a key down event from the keyboard.
+    /// Simulates a key down hat from the keyboard.
     /// This should be repeated if the button is held down.
     KeyDown(KeyCode),
-    /// Simulates a key up event from the keyboard.
-    /// Due to the nature of the TTY interface, key up events are not always available, so this event does not need to be sent.
-    /// If not sent, a timeout is used to determine when a key is released (sending this event can short-circuit the timeout).
+    /// Simulates a key up hat from the keyboard.
+    /// Due to the nature of the TTY interface, key up events are not always available, so this hat does not need to be sent.
+    /// If not sent, a timeout is used to determine when a key is released (sending this hat can short-circuit the timeout).
     KeyUp(KeyCode),
 }
 
@@ -61,12 +45,38 @@ pub enum ProjectStep<'gc, S: System> {
     Error { error: ExecError<S>, proc: Process<'gc, S> },
 }
 
-enum Hat {
+pub enum Hat {
     OnFlag,
     LocalMessage { msg_type: String },
     NetworkMessage { msg_type: String, fields: Vec<String> },
-    /// Fire an event when a key is pressed. [`None`] is used to denote any key press.
+    /// Fire an hat when a key is pressed. [`None`] is used to denote any key press.
     OnKey { key: Option<KeyCode> },
+}
+impl Hat {
+    pub fn from_ast(hat: &ast::HatKind) -> Result<Self, FromAstError> {
+        Ok(match hat {
+            ast::HatKind::OnFlag => Hat::OnFlag,
+            ast::HatKind::LocalMessage { msg_type } => Hat::LocalMessage { msg_type: msg_type.clone() },
+            ast::HatKind::NetworkMessage { msg_type, fields } => Hat::NetworkMessage { msg_type: msg_type.clone(), fields: fields.iter().map(|x| x.trans_name.clone()).collect() },
+            ast::HatKind::OnKey { key } => Hat::OnKey {
+                key: match key.as_str() {
+                    "any key" => None,
+                    "up arrow" => Some(KeyCode::Up),
+                    "down arrow" => Some(KeyCode::Down),
+                    "left arrow" => Some(KeyCode::Left),
+                    "right arrow" => Some(KeyCode::Right),
+                    "space" => Some(KeyCode::Char(' ')),
+                    _ => {
+                        let mut chars = key.chars();
+                        let res = chars.next().map(|x| KeyCode::Char(x.to_ascii_lowercase())).ok_or_else(|| FromAstError::BadKeycode { key: key.clone() })?;
+                        if chars.next().is_some() { return Err(FromAstError::BadKeycode { key: key.clone() }); }
+                        Some(res)
+                    }
+                }
+            },
+            _ => return Err(FromAstError::UnsupportedEvent { kind: hat.clone() }),
+        })
+    }
 }
 
 #[derive(Collect)]
@@ -81,6 +91,7 @@ struct ContextEntry<'gc, S: System> {
 #[collect(no_drop, bound = "")]
 struct Script<'gc, S: System> {
     #[collect(require_static)] hat: Hat,
+    #[collect(require_static)] code: Rc<ByteCode>,
     #[collect(require_static)] start_pos: usize,
                                entity: GcCell<'gc, Entity<'gc, S>>,
     #[collect(require_static)] process: Option<ProcessKey>,
@@ -105,7 +116,7 @@ impl<'gc, S: System> Script<'gc, S> {
                 state.process_queue.push_back(key);
             }
             None => {
-                let mut process = Process::new(state.code.clone(), self.start_pos, state.global_context, self.entity, state.settings, state.system.clone());
+                let mut process = Process::new(self.code.clone(), self.start_pos, state.global_context, self.entity, state.settings, state.system.clone());
                 process.initialize(locals, barrier, reply_key);
                 let key = state.processes.insert(process);
                 state.process_queue.push_back(key);
@@ -132,9 +143,8 @@ impl<'gc, S: System> Script<'gc, S> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 struct State<'gc, S: System> {
-                               global_context: GcCell<'gc, GlobalContext<'gc, S>>,
-    #[collect(require_static)] code: Rc<ByteCode>,
     #[collect(require_static)] settings: Settings,
+                               global_context: GcCell<'gc, GlobalContext<'gc, S>>,
                                processes: SlotMap<ProcessKey, Process<'gc, S>>,
     #[collect(require_static)] process_queue: VecDeque<ProcessKey>,
     #[collect(require_static)] system: Rc<S>,
@@ -146,42 +156,29 @@ pub struct Project<'gc, S: System> {
     scripts: Vec<Script<'gc, S>>,
 }
 impl<'gc, S: System> Project<'gc, S> {
-    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, role: &'a ast::Role, settings: Settings, system: Rc<S>) -> Result<(Self, Locations<'a>), FromAstError> {
-        let global_context = GlobalContext::from_ast(mc, role)?;
-        let (code, locations) = ByteCode::compile(role);
-
-        let mut scripts = vec![];
-        for (entity, (ast_entity, locs)) in iter::zip(&global_context.entities, &locations.entities) {
-            for (script, loc) in iter::zip(&ast_entity.scripts, &locs.scripts) {
-                if let Some(hat) = &script.hat {
-                    scripts.push(Script {
-                        hat: match &hat.kind {
-                            ast::HatKind::OnFlag => Hat::OnFlag,
-                            ast::HatKind::LocalMessage { msg_type } => Hat::LocalMessage { msg_type: msg_type.clone() },
-                            ast::HatKind::NetworkMessage { msg_type, fields } => Hat::NetworkMessage { msg_type: msg_type.clone(), fields: fields.iter().map(|x| x.trans_name.clone()).collect() },
-                            ast::HatKind::OnKey { key } => Hat::OnKey { key: parse_key(key) },
-                            x => unimplemented!("{:?}", x),
-                        },
-                        entity: *entity,
-                        process: None,
-                        start_pos: loc.1,
-                        context_queue: Default::default(),
-                    });
-                }
-            }
-        }
-
-        Ok((Self {
-            scripts,
+    pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, S>>, settings: Settings, system: Rc<S>) -> Self {
+        Self {
             state: State {
-                global_context: GcCell::allocate(mc, global_context),
-                code: Rc::new(code),
-                settings,
+                global_context, settings, system,
                 processes: Default::default(),
                 process_queue: Default::default(),
-                system,
+            },
+            scripts: Default::default(),
+        }
+    }
+    pub fn add_script(&mut self, code: Rc<ByteCode>, start_pos: usize, entity: GcCell<'gc, Entity<'gc, S>>, hat: Option<Hat>) {
+        match hat {
+            Some(hat) => self.scripts.push(Script {
+                code, start_pos, hat, entity,
+                process: None,
+                context_queue: Default::default(),
+            }),
+            None => {
+                let process = Process::new(code, start_pos, self.state.global_context, entity, self.state.settings, self.state.system.clone());
+                let key = self.state.processes.insert(process);
+                self.state.process_queue.push_back(key);
             }
-        }, locations))
+        }
     }
     pub fn input(&mut self, input: Input) {
         match input {
@@ -264,8 +261,5 @@ impl<'gc, S: System> Project<'gc, S> {
                 proc: self.state.processes.remove(proc_key).unwrap(),
             },
         }
-    }
-    pub fn global_context(&self) -> GcCell<'gc, GlobalContext<'gc, S>> {
-        self.state.global_context
     }
 }

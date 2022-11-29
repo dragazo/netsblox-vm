@@ -13,14 +13,16 @@ use crate::json::*;
 
 #[derive(Debug)]
 pub enum NumberError {
-    Nan,
+    Nan, Infinity,
 }
 
 pub struct NumberChecker;
 impl FloatChecker<f64> for NumberChecker {
     type Error = NumberError;
     fn check(value: f64) -> Result<(), Self::Error> {
-        if value.is_nan() { Err(NumberError::Nan) } else { Ok(()) }
+        if value.is_nan() { return Err(NumberError::Nan); }
+        if value.is_infinite() { return Err(NumberError::Infinity); }
+        Ok(())
     }
 }
 
@@ -28,9 +30,11 @@ pub type Number = CheckedFloat<f64, NumberChecker>;
 
 #[derive(Debug)]
 pub enum FromAstError {
-    NumberError { error: NumberError },
+    BadNumber { error: NumberError },
+    BadKeycode { key: String },
+    UnsupportedEvent { kind: ast::HatKind },
 }
-impl From<NumberError> for FromAstError { fn from(error: NumberError) -> Self { Self::NumberError { error } } }
+impl From<NumberError> for FromAstError { fn from(error: NumberError) -> Self { Self::BadNumber { error } } }
 
 #[derive(Debug)]
 pub enum FromJsonError {
@@ -326,11 +330,10 @@ impl<S: System> fmt::Debug for Closure<'_, S> {
 pub struct Entity<'gc, S: System> {
     #[collect(require_static)] pub name: String,
                                pub fields: SymbolTable<'gc, S>,
-    #[collect(require_static)] pub alive: bool,
 }
 impl<S: System> fmt::Debug for Entity<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}Entity {:?}", if self.alive { "" } else { "Dead " }, self.name)
+        write!(f, "Entity {:?}", self.name)
     }
 }
 
@@ -509,20 +512,6 @@ impl<'gc, 'a, 'b, S: System> LookupGroup<'gc, 'a, 'b, S> {
 pub struct GlobalContext<'gc, S: System> {
     #[collect(require_static)] pub proj_name: String,
                                pub globals: SymbolTable<'gc, S>,
-                               pub entities: Vec<GcCell<'gc, Entity<'gc, S>>>,
-}
-impl<'gc, S: System> GlobalContext<'gc, S> {
-    pub fn from_ast(mc: MutationContext<'gc, '_>, role: &ast::Role) -> Result<Self, FromAstError> {
-        Ok(Self {
-            proj_name: role.name.clone(),
-            globals: SymbolTable::from_ast(mc, &role.globals)?,
-            entities: role.entities.iter().map(|entity| Ok(GcCell::allocate(mc, Entity {
-                name: entity.trans_name.clone(),
-                fields: SymbolTable::from_ast(mc, &entity.fields)?,
-                alive: true,
-            }))).collect::<Result<_,FromAstError>>()?,
-        })
-    }
 }
 
 /// A blocking handle for a [`BarrierCondition`].

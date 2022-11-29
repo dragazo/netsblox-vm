@@ -498,7 +498,7 @@ impl<C: CustomTypes> System for StdSystem<C> {
         match res {
             RpcIntercept::Intercepted => (),
             RpcIntercept::UseDefault { key, service, rpc, args } => {
-                let args = args.into_iter().map(|(k, v)| Ok::<(String, Json), ToJsonError<StdSystem<C>>>((k, v.to_json()?))).collect::<Result<_,_>>()?;
+                let args = args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_>>>()?;
                 self.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap();
             }
         }

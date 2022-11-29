@@ -38,7 +38,6 @@ use crate::json::*;
 use crate::std_system::*;
 use crate::bytecode::*;
 use crate::runtime::*;
-use crate::process::*;
 use crate::project::*;
 
 const STEPS_PER_IO_ITER: usize = 64;
@@ -97,10 +96,30 @@ struct Env<'gc, S: System> {
 make_arena!(EnvArena<S>, Env<S>);
 
 fn get_env<S: System>(role: &ast::Role, system: Rc<S>) -> Result<EnvArena<S>, FromAstError> {
-    Ok(EnvArena::new(Default::default(), |mc| {
-        let (proj, locs) = Project::from_ast(mc, role, Settings::default(), system)?;
+    EnvArena::try_new(Default::default(), |mc| {
+        let global_context = GcCell::allocate(mc, GlobalContext {
+            proj_name: role.name.clone(),
+            globals: SymbolTable::from_ast(mc, &role.globals)?,
+        });
+        let mut proj = Project::new(global_context, Default::default(), system);
+
+        let (code, locs) = ByteCode::compile(role);
+        let code = Rc::new(code);
+
+        for (ast_entity, entity_locs) in &locs.entities {
+            let entity = GcCell::allocate(mc, Entity {
+                name: ast_entity.trans_name.clone(),
+                fields: SymbolTable::from_ast(mc, &ast_entity.fields)?,
+            });
+            for (script, script_pos) in entity_locs.scripts.iter() {
+                if let Some(hat) = &script.hat {
+                    proj.add_script(code.clone(), *script_pos, entity, Some(Hat::from_ast(&hat.kind)?));
+                }
+            }
+        }
+
         Ok(Env { proj: GcCell::allocate(mc, proj), locs: locs.instructions.transform(ToOwned::to_owned) })
-    }))
+    })
 }
 
 /// Standard NetsBlox VM project actions that can be performed
@@ -264,7 +283,13 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
     let mut idle_sleeper = IdleSleeper::new();
     print!("public id: {}\r\n", system.get_public_id());
 
-    let env = get_env(role, system);
+    let env = match get_env(role, system.clone()) {
+        Ok(x) => x,
+        Err(e) => {
+            print!("error loading project: {e:?}\r\n");
+            return;
+        }
+    };
     env.mutate(|mc, env| env.proj.write(mc).input(Input::Start));
 
     let mut input_sequence = Vec::with_capacity(16);
@@ -339,7 +364,13 @@ fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &a
     let mut idle_sleeper = IdleSleeper::new();
     println!("public id: {}", system.get_public_id());
 
-    let env = get_env(role, system);
+    let env = match get_env(role, system.clone()) {
+        Ok(x) => x,
+        Err(e) => {
+            println!("error loading project: {e:?}");
+            return;
+        }
+    };
     env.mutate(|mc, env| env.proj.write(mc).input(Input::Start));
 
     loop {
@@ -495,7 +526,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
     thread::spawn(move || run_http(state, port));
 
     let (_, empty_role) = open_project(include_str!("assets/empty-proj.xml"), None).unwrap_or_else(|_| crash!(666: "default project failed to load"));
-    let mut env = get_env(&empty_role, system.clone());
+    let mut env = get_env(&empty_role, system.clone()).unwrap();
 
     'program: loop {
         'input: loop {
@@ -504,7 +535,10 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
                     Command::SetProject(content) => match open_project(&content, None) {
                         Ok((proj_name, role)) => {
                             tee_println!(weak_state.upgrade() => "\n>>> loaded project '{proj_name}'\n");
-                            env = get_env(&role, system.clone());
+                            match get_env(&role, system.clone()) {
+                                Ok(x) => env = x,
+                                Err(e) => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> keeping previous project...\n"),
+                            }
                         }
                         Err(e) => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> keeping previous project...\n"),
                     }
