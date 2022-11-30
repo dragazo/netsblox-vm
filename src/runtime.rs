@@ -13,7 +13,7 @@ use crate::json::*;
 
 #[derive(Debug)]
 pub enum NumberError {
-    Nan, Infinity,
+    Nan,
 }
 
 pub struct NumberChecker;
@@ -21,7 +21,6 @@ impl FloatChecker<f64> for NumberChecker {
     type Error = NumberError;
     fn check(value: f64) -> Result<(), Self::Error> {
         if value.is_nan() { return Err(NumberError::Nan); }
-        if value.is_infinite() { return Err(NumberError::Infinity); }
         Ok(())
     }
 }

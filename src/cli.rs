@@ -33,7 +33,7 @@ use crossterm::terminal::{self, ClearType};
 use crossterm::style::{ResetColor, SetForegroundColor, Color, Print};
 
 use crate::*;
-use crate::gc::{GcCell, Collect, make_arena};
+use crate::gc::*;
 use crate::json::*;
 use crate::std_system::*;
 use crate::bytecode::*;
@@ -93,7 +93,7 @@ struct Env<'gc, S: System> {
                                proj: GcCell<'gc, Project<'gc, S>>,
     #[collect(require_static)] locs: InsLocations<String>,
 }
-make_arena!(EnvArena<S>, Env<S>);
+type EnvArena<S> = Arena<Rootable![Env<'gc, S>]>;
 
 fn get_env<S: System>(role: &ast::Role, system: Rc<S>) -> Result<EnvArena<S>, FromAstError> {
     EnvArena::try_new(Default::default(), |mc| {

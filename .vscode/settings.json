@@ -31,6 +31,7 @@
         "getrandom",
         "Listcat",
         "powf",
+        "Rootable",
         "Seedable",
         "syscall",
         "syscalls",
