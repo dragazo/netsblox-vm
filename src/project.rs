@@ -156,6 +156,30 @@ pub struct Project<'gc, S: System> {
     scripts: Vec<Script<'gc, S>>,
 }
 impl<'gc, S: System> Project<'gc, S> {
+    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, role: &'a ast::Role, settings: Settings, system: Rc<S>) -> Result<(Self, InsLocations<&'a str>), FromAstError> {
+        let global_context = GcCell::allocate(mc, GlobalContext {
+            proj_name: role.name.clone(),
+            globals: SymbolTable::from_ast(mc, &role.globals)?,
+        });
+        let mut proj = Project::new(global_context, settings, system);
+
+        let (code, locs) = ByteCode::compile(role);
+        let code = Rc::new(code);
+
+        for (ast_entity, entity_locs) in &locs.entities {
+            let entity = GcCell::allocate(mc, Entity {
+                name: ast_entity.trans_name.clone(),
+                fields: SymbolTable::from_ast(mc, &ast_entity.fields)?,
+            });
+            for (script, script_pos) in entity_locs.scripts.iter() {
+                if let Some(hat) = &script.hat {
+                    proj.add_script(code.clone(), *script_pos, entity, Some(Hat::from_ast(&hat.kind)?));
+                }
+            }
+        }
+
+        Ok((proj, locs.instructions))
+    }
     pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, S>>, settings: Settings, system: Rc<S>) -> Self {
         Self {
             state: State {
@@ -261,5 +285,8 @@ impl<'gc, S: System> Project<'gc, S> {
                 proc: self.state.processes.remove(proc_key).unwrap(),
             },
         }
+    }
+    pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc, S>> {
+        self.state.global_context
     }
 }

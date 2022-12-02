@@ -16,6 +16,7 @@ fn assert_values_eq<'gc, S: System>(got: &Value<'gc, S>, expected: &Value<'gc, S
             if got != expected { panic!("{} - bool error - got {} expected {}", path, got, expected) }
         }
         (Value::Number(got), Value::Number(expected)) => {
+            let (got, expected) = (got.get(), expected.get());
             let good = if got.is_finite() && expected.is_finite() { (got - expected).abs() <= epsilon } else { got == expected };
             if !good { panic!("{} - number error - got {} expected {}", path, got, expected) }
         }

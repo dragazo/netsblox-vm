@@ -97,28 +97,8 @@ type EnvArena<S> = Arena<Rootable![Env<'gc, S>]>;
 
 fn get_env<S: System>(role: &ast::Role, system: Rc<S>) -> Result<EnvArena<S>, FromAstError> {
     EnvArena::try_new(Default::default(), |mc| {
-        let global_context = GcCell::allocate(mc, GlobalContext {
-            proj_name: role.name.clone(),
-            globals: SymbolTable::from_ast(mc, &role.globals)?,
-        });
-        let mut proj = Project::new(global_context, Default::default(), system);
-
-        let (code, locs) = ByteCode::compile(role);
-        let code = Rc::new(code);
-
-        for (ast_entity, entity_locs) in &locs.entities {
-            let entity = GcCell::allocate(mc, Entity {
-                name: ast_entity.trans_name.clone(),
-                fields: SymbolTable::from_ast(mc, &ast_entity.fields)?,
-            });
-            for (script, script_pos) in entity_locs.scripts.iter() {
-                if let Some(hat) = &script.hat {
-                    proj.add_script(code.clone(), *script_pos, entity, Some(Hat::from_ast(&hat.kind)?));
-                }
-            }
-        }
-
-        Ok(Env { proj: GcCell::allocate(mc, proj), locs: locs.instructions.transform(ToOwned::to_owned) })
+        let (proj, locs) = Project::from_ast(mc, role, Default::default(), system)?;
+        Ok(Env { proj: GcCell::allocate(mc, proj), locs: locs.transform(ToOwned::to_owned) })
     })
 }
 

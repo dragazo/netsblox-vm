@@ -45,7 +45,7 @@ struct Env<'gc> {
     proc: GcCell<'gc, Process<'gc, StdSystem<C>>>,
     glob: GcCell<'gc, GlobalContext<'gc, StdSystem<C>>>,
 }
-make_arena!(EnvArena, Env);
+type EnvArena = Arena<Rootable![Env<'gc>]>;
 
 fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>) -> (EnvArena, InsLocations<String>) {
     let parser = ast::ParserBuilder::default().build().unwrap();
@@ -56,8 +56,9 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
     let main = locs.funcs.iter().find(|x| x.0.trans_name.trim() == "main").expect("no main function at global scope");
 
     (EnvArena::new(Default::default(), |mc| {
-        let glob = GcCell::allocate(mc, GlobalContext::from_ast(mc, &ast.roles[0]));
-        let mut proc = Process::new(Rc::new(code), main.1, glob, glob.read().entities[0], settings, system);
+        let glob = GcCell::allocate(mc, GlobalContext { proj_name: "test proj".into(), globals: SymbolTable::from_ast(mc, &ast.roles[0].globals).unwrap() });
+        let entity = GcCell::allocate(mc, Entity { name: "test entity".into(), fields: SymbolTable::from_ast(mc, &ast.roles[0].entities[0].fields).unwrap() });
+        let mut proc = Process::new(Rc::new(code), main.1, glob, entity, settings, system);
         assert!(!proc.is_running());
         proc.initialize(Default::default(), None, None);
         assert!(proc.is_running());
@@ -117,7 +118,7 @@ fn test_proc_sum_123n() {
     for (n, expect) in [(0, json!("0")), (1, json!(1)), (2, json!(3)), (3, json!(6)), (4, json!(10)), (5, json!(15)), (6, json!(21))] {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
-            locals.redefine_or_define("n", Shared::Unique((n as f64).into()));
+            locals.redefine_or_define("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
             env.proc.write(mc).initialize(locals, None, None);
         });
         run_till_term(&mut env, |mc, _, res| {
@@ -140,7 +141,7 @@ fn test_proc_recursive_factorial() {
     for (n, expect) in [(0, json!("1")), (1, json!("1")), (2, json!(2)), (3, json!(6)), (4, json!(24)), (5, json!(120)), (6, json!(720)), (7, json!(5040))] {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
-            locals.redefine_or_define("n", Shared::Unique((n as f64).into()));
+            locals.redefine_or_define("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
             env.proc.write(mc).initialize(locals, None, None);
         });
         run_till_term(&mut env, |mc, _, res| {
@@ -247,7 +248,7 @@ fn test_proc_sieve_of_eratosthenes() {
 
     env.mutate(|mc, env| {
         let mut locals = SymbolTable::default();
-        locals.redefine_or_define("n", Shared::Unique(100.0.into()));
+        locals.redefine_or_define("n", Shared::Unique(Number::new(100.0).unwrap().into()));
 
         let mut proc = env.proc.write(mc);
         assert!(proc.is_running());
@@ -318,32 +319,32 @@ fn test_proc_all_arithmetic() {
     run_till_term(&mut env, |mc, _, res| {
         let inf = std::f64::INFINITY;
         let expect = Value::List(GcCell::allocate(mc, [
-            Value::List(GcCell::allocate(mc, [8.5, 2.9, -2.9, -8.5].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [2.9, 8.5, -8.5, -2.9].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [15.96, -15.96, -15.96, 15.96].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [2.035714285714286, -2.035714285714286, -2.035714285714286, 2.035714285714286].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [inf, -inf, -inf, inf].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [130.75237792066878, 0.007648044463151016].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.1, -2.7, 2.7, -0.1, 5.8, -1.3, 1.3, -5.8].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [7.0, 8.0, -7.0, -8.0].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [56.8, 6.3, inf, inf].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [-56.8, 6.3, -inf, inf].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [8.0, 8.0, -7.0, -7.0, inf, -inf].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [7.0, 7.0, -8.0, -8.0, inf, -inf].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [2.701851217221259, inf].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.12706460860135046, 0.7071067811865475].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.9918944425900297, 0.7071067811865476].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.12810295445305653, 1.0].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.0, 30.0, -30.0].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [90.0, 60.0, 120.0].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [-0.6931471805599453, 0.0, 2.186051276738094, inf].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [-0.3010299956639812, 0.0, 0.9493900066449128, inf].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [-1.0, 0.0, 3.1538053360790355, inf].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [1.0, 3.3201169227365472, 0.0001363889264820114, inf, 0.0].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [1.0, 15.848931924611133, 1.2589254117941663e-9, inf, 0.0].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [1.0, 2.2973967099940698, 0.002093307544016197, inf, 0.0].into_iter().map(|x| x.into()).collect())),
-            Value::List(GcCell::allocate(mc, [Value::String(Gc::allocate(mc, "0".into())), Value::String(Gc::allocate(mc, "1.2".into())), Value::String(Gc::allocate(mc, "-8.9".into())), Value::Number(inf), Value::Number(-inf)].into_iter().collect())),
+            Value::List(GcCell::allocate(mc, [8.5, 2.9, -2.9, -8.5].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [2.9, 8.5, -8.5, -2.9].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [15.96, -15.96, -15.96, 15.96].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [2.035714285714286, -2.035714285714286, -2.035714285714286, 2.035714285714286].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [inf, -inf, -inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [130.75237792066878, 0.007648044463151016].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.1, -2.7, 2.7, -0.1, 5.8, -1.3, 1.3, -5.8].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [7.0, 8.0, -7.0, -8.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [56.8, 6.3, inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [-56.8, 6.3, -inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [8.0, 8.0, -7.0, -7.0, inf, -inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [7.0, 7.0, -8.0, -8.0, inf, -inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [2.701851217221259, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.12706460860135046, 0.7071067811865475].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.9918944425900297, 0.7071067811865476].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.12810295445305653, 1.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.0, 30.0, -30.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [90.0, 60.0, 120.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [0.0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [-0.6931471805599453, 0.0, 2.186051276738094, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [-0.3010299956639812, 0.0, 0.9493900066449128, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [-1.0, 0.0, 3.1538053360790355, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [1.0, 3.3201169227365472, 0.0001363889264820114, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [1.0, 15.848931924611133, 1.2589254117941663e-9, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [1.0, 2.2973967099940698, 0.002093307544016197, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
+            Value::List(GcCell::allocate(mc, [Value::String(Gc::allocate(mc, "0".into())), Value::String(Gc::allocate(mc, "1.2".into())), Value::String(Gc::allocate(mc, "-8.9".into())), Number::new(inf).unwrap().into(), Number::new(-inf).unwrap().into()].into_iter().collect())),
         ].into_iter().collect()));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-7, "short circuit test");
     });
@@ -413,7 +414,7 @@ fn test_proc_warp_yields() {
     for (mode, (expected_counter, expected_yields)) in [(12, 12), (13, 13), (17, 0), (18, 0), (16, 0), (17, 2), (14, 0), (27, 3), (30, 7), (131, 109), (68, 23), (51, 0), (63, 14)].into_iter().enumerate() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
-            locals.redefine_or_define("mode", Shared::Unique((mode as f64).into()));
+            locals.redefine_or_define("mode", Shared::Unique(Number::new(mode as f64).unwrap().into()));
             env.proc.write(mc).initialize(locals, None, None);
         });
 
@@ -421,7 +422,7 @@ fn test_proc_warp_yields() {
             let (res, yields) = res.unwrap();
             assert_values_eq(res.as_ref().unwrap(), &Value::from_json(mc, json!("x")).unwrap(), 1e-20, &format!("yield test (mode {mode}) res"));
             let counter = env.glob.read().globals.lookup("counter").unwrap().get();
-            assert_values_eq(&counter, &(expected_counter as f64).into(), 1e-20, &format!("yield test (mode {mode}) value"));
+            assert_values_eq(&counter, &Number::new(expected_counter as f64).unwrap().into(), 1e-20, &format!("yield test (mode {mode}) value"));
             if yields != expected_yields { panic!("yield test (mode {}) yields - got {} expected {}", mode, yields, expected_yields) }
         });
     }
@@ -521,8 +522,8 @@ fn test_proc_rpc_call_basic() {
     for (lat, long, city) in [(36.1627, -86.7816, "Nashville"), (40.8136, -96.7026, "Lincoln"), (40.7608, -111.8910, "Salt Lake City")] {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
-            locals.redefine_or_define("lat", Shared::Unique(lat.into()));
-            locals.redefine_or_define("long", Shared::Unique(long.into()));
+            locals.redefine_or_define("lat", Shared::Unique(Number::new(lat).unwrap().into()));
+            locals.redefine_or_define("long", Shared::Unique(Number::new(long).unwrap().into()));
             env.proc.write(mc).initialize(locals, None, None);
         });
         run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
@@ -883,32 +884,32 @@ fn test_proc_pick_random() {
             if row.len() != 1024 { panic!("len error {}\n{row:?}", row.len()); }
         }
 
-        for val in results[0].iter() {
-            if !(1.0..=10.0).contains(val) || (*val != *val as i64 as f64) {
+        for val in results[0].iter().map(|x| x.get()) {
+            if !(1.0..=10.0).contains(&val) || (val != val as i64 as f64) {
                 panic!("res[0] error: {val}");
             }
         }
-        for val in results[1].iter() {
-            if !(-6.0..=5.0).contains(val) || (*val != *val as i64 as f64) {
+        for val in results[1].iter().map(|x| x.get()) {
+            if !(-6.0..=5.0).contains(&val) || (val != val as i64 as f64) {
                 panic!("res[1] error: {val}");
             }
         }
 
         let mut int_count = 0;
-        for val in results[2].iter() {
-            if !(-6.0..=5.1).contains(val) {
+        for val in results[2].iter().map(|x| x.get()) {
+            if !(-6.0..=5.1).contains(&val) {
                 panic!("res[2] error: {val}");
             }
-            if *val == *val as i64 as f64 { int_count += 1; }
+            if val == val as i64 as f64 { int_count += 1; }
         }
         assert!(int_count <= 5); // hard to test rng, but this is almost certainly true
 
         int_count = 0;
-        for val in results[3].iter() {
-            if !(0.0..=0.9999).contains(val) {
+        for val in results[3].iter().map(|x| x.get()) {
+            if !(0.0..=0.9999).contains(&val) {
                 panic!("res[3] error: {val}");
             }
-            if *val == *val as i64 as f64 { int_count += 1; }
+            if val == val as i64 as f64 { int_count += 1; }
         }
         assert!(int_count <= 5); // hard to test rng, but this is almost certainly true
     });

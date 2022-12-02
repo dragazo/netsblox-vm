@@ -1022,9 +1022,6 @@ mod ops {
         res
     }
 
-    const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
-    const RAD_TO_DEG: f64 = 180.0 / std::f64::consts::PI;
-
     fn binary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc, S>, b: &Value<'gc, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, S>, Identity<'gc, S>, bool), Value<'gc, S>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc, S>, &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>>) -> Result<Value<'gc, S>, ErrorCause<S>> {
         let cache_key = (a.identity(), b.identity(), matrix_mode);
         Ok(match cache.get(&cache_key) {
@@ -1079,13 +1076,13 @@ mod ops {
             BinaryOp::Div       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.div(b.to_number()?)?.into())),
             BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.powf(b.to_number()?)?.into())),
             BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(b.to_number()?.log(a.to_number()?)?.into())),
-            BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.atan2(b.to_number()?)?.into())),
+            BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(Number::new(a.to_number()?.get().atan2(b.to_number()?.get()).to_degrees())?.into())),
             BinaryOp::Greater   => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? > b.to_number()?).into())),
             BinaryOp::GreaterEq => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? >= b.to_number()?).into())),
             BinaryOp::Less      => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? < b.to_number()?).into())),
             BinaryOp::LessEq    => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? <= b.to_number()?).into())),
-            BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.min(b.to_number()?)?.into())),
-            BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.max(b.to_number()?)?.into())),
+            BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.min(b.to_number()?).into())),
+            BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.max(b.to_number()?).into())),
 
             BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
                 let (a, b) = (a.to_number()?.get(), b.to_number()?.get());
@@ -1139,12 +1136,12 @@ mod ops {
             UnaryOp::Round  => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.round()?.into())),
             UnaryOp::Floor  => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.floor()?.into())),
             UnaryOp::Ceil   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.ceil()?.into())),
-            UnaryOp::Sin    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::sin(x.to_number()?.get()) * DEG_TO_RAD)?.into())),
-            UnaryOp::Cos    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::cos(x.to_number()?.get()) * DEG_TO_RAD)?.into())),
-            UnaryOp::Tan    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::tan(x.to_number()?.get()) * DEG_TO_RAD)?.into())),
-            UnaryOp::Asin   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::asin(x.to_number()?.get()) * RAD_TO_DEG)?.into())),
-            UnaryOp::Acos   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::acos(x.to_number()?.get()) * RAD_TO_DEG)?.into())),
-            UnaryOp::Atan   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::atan(x.to_number()?.get()) * RAD_TO_DEG)?.into())),
+            UnaryOp::Sin    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::sin(x.to_number()?.get().to_radians()))?.into())),
+            UnaryOp::Cos    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::cos(x.to_number()?.get().to_radians()))?.into())),
+            UnaryOp::Tan    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::tan(x.to_number()?.get().to_radians()))?.into())),
+            UnaryOp::Asin   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::asin(x.to_number()?.get()).to_degrees())?.into())),
+            UnaryOp::Acos   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::acos(x.to_number()?.get()).to_degrees())?.into())),
+            UnaryOp::Atan   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::atan(x.to_number()?.get()).to_degrees())?.into())),
             UnaryOp::Strlen => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(x.to_string(mc)?.chars().count() as f64)?.into())),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, x, &mut cache, &|mc, x| {
