@@ -51,23 +51,23 @@ bin-pool = { version = "0.1.0", default-features = false }
 rand = { version = "0.8.5", default-features = false }
 checked-float = { version = "0.1.1", default-features = false }
 educe = { version = "0.4.20", default-features = false, features = ["Debug", "Clone", "Copy", "PartialOrd", "Ord", "PartialEq", "Eq", "Default"] }
-libm = "0.2.2"
+libm = "0.2.6"
 
 # std deps
 tokio = { version = "1", features = ["full"], optional = true }
-futures = { version = "0.3.23", optional = true }
-async-channel = { version = "1.7.1", optional = true }
+futures = { version = "0.3.25", optional = true }
+async-channel = { version = "1.8.0", optional = true }
 reqwest = { version = "0.11", features = ["json"], optional = true }
-tokio-tungstenite = { version = "0.17.2", features = ["native-tls"], optional = true }
+tokio-tungstenite = { version = "0.18.0", features = ["native-tls"], optional = true }
 names = { version = "0.14.0", default-features = false, optional = true }
-uuid = { version = "1.1.2", features = ["v4", "fast-rng"], optional = true }
+uuid = { version = "1.2.2", features = ["v4", "fast-rng"], optional = true }
 rand_chacha = { version = "0.3.1", optional = true }
-getrandom = { version = "0.2.7", optional = true }
+getrandom = { version = "0.2.8", optional = true }
 
 # cli deps
-clap = { version = "3.2.14", features = ["derive"], optional = true }
+clap = { version = "4.0.29", features = ["derive"], optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
-crossterm = { version = "0.24.0", optional = true }
-actix-web = { version = "4.1.0", optional = true }
-actix-cors = { version = "0.6.3", optional = true }
+crossterm = { version = "0.25.0", optional = true }
+actix-web = { version = "4.2.1", optional = true }
+actix-cors = { version = "0.6.4", optional = true }
 liquid = { version = "0.26.0", optional = true }
