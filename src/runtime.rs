@@ -11,11 +11,13 @@ use crate::*;
 use crate::gc::*;
 use crate::json::*;
 
+/// Error type used by [`NumberChecker`].
 #[derive(Debug)]
 pub enum NumberError {
     Nan,
 }
 
+/// [`FloatChecker`] type used for validating a [`Number`].
 pub struct NumberChecker;
 impl FloatChecker<f64> for NumberChecker {
     type Error = NumberError;
@@ -25,6 +27,7 @@ impl FloatChecker<f64> for NumberChecker {
     }
 }
 
+/// The type used to represent numbers in the runtime.
 pub type Number = CheckedFloat<f64, NumberChecker>;
 
 #[derive(Debug)]

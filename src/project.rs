@@ -41,24 +41,25 @@ pub enum ProjectStep<'gc, S: System> {
     Yield,
     /// The project had a running process, which did any non-yielding operation.
     Normal,
-    /// The project had a running process, which which encountered a runtime error.
+    /// The project had a running process, which encountered a runtime error.
+    /// The dead process is returned, which can be queried for diagnostic information.
     Error { error: ExecError<S>, proc: Process<'gc, S> },
 }
 
-pub enum Hat {
+pub enum Event {
     OnFlag,
     LocalMessage { msg_type: String },
     NetworkMessage { msg_type: String, fields: Vec<String> },
     /// Fire an hat when a key is pressed. [`None`] is used to denote any key press.
     OnKey { key: Option<KeyCode> },
 }
-impl Hat {
+impl Event {
     pub fn from_ast(hat: &ast::HatKind) -> Result<Self, FromAstError> {
         Ok(match hat {
-            ast::HatKind::OnFlag => Hat::OnFlag,
-            ast::HatKind::LocalMessage { msg_type } => Hat::LocalMessage { msg_type: msg_type.clone() },
-            ast::HatKind::NetworkMessage { msg_type, fields } => Hat::NetworkMessage { msg_type: msg_type.clone(), fields: fields.iter().map(|x| x.trans_name.clone()).collect() },
-            ast::HatKind::OnKey { key } => Hat::OnKey {
+            ast::HatKind::OnFlag => Event::OnFlag,
+            ast::HatKind::LocalMessage { msg_type } => Event::LocalMessage { msg_type: msg_type.clone() },
+            ast::HatKind::NetworkMessage { msg_type, fields } => Event::NetworkMessage { msg_type: msg_type.clone(), fields: fields.iter().map(|x| x.trans_name.clone()).collect() },
+            ast::HatKind::OnKey { key } => Event::OnKey {
                 key: match key.as_str() {
                     "any key" => None,
                     "up arrow" => Some(KeyCode::Up),
@@ -90,7 +91,7 @@ struct ContextEntry<'gc, S: System> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 struct Script<'gc, S: System> {
-    #[collect(require_static)] hat: Hat,
+    #[collect(require_static)] event: Event,
     #[collect(require_static)] code: Rc<ByteCode>,
     #[collect(require_static)] start_pos: usize,
                                entity: GcCell<'gc, Entity<'gc, S>>,
@@ -173,7 +174,7 @@ impl<'gc, S: System> Project<'gc, S> {
             });
             for (script, script_pos) in entity_locs.scripts.iter() {
                 if let Some(hat) = &script.hat {
-                    proj.add_script(code.clone(), *script_pos, entity, Some(Hat::from_ast(&hat.kind)?));
+                    proj.add_script(code.clone(), *script_pos, entity, Some(Event::from_ast(&hat.kind)?));
                 }
             }
         }
@@ -190,10 +191,10 @@ impl<'gc, S: System> Project<'gc, S> {
             scripts: Default::default(),
         }
     }
-    pub fn add_script(&mut self, code: Rc<ByteCode>, start_pos: usize, entity: GcCell<'gc, Entity<'gc, S>>, hat: Option<Hat>) {
-        match hat {
-            Some(hat) => self.scripts.push(Script {
-                code, start_pos, hat, entity,
+    pub fn add_script(&mut self, code: Rc<ByteCode>, start_pos: usize, entity: GcCell<'gc, Entity<'gc, S>>, event: Option<Event>) {
+        match event {
+            Some(event) => self.scripts.push(Script {
+                code, start_pos, event, entity,
                 process: None,
                 context_queue: Default::default(),
             }),
@@ -208,7 +209,7 @@ impl<'gc, S: System> Project<'gc, S> {
         match input {
             Input::Start => {
                 for script in self.scripts.iter_mut() {
-                    if let Hat::OnFlag = &script.hat {
+                    if let Event::OnFlag = &script.event {
                         script.stop_all(&mut self.state);
                         script.schedule(&mut self.state, Default::default(), None, None, 0);
                     }
@@ -220,7 +221,7 @@ impl<'gc, S: System> Project<'gc, S> {
             }
             Input::KeyDown(input_key) => {
                 for script in self.scripts.iter_mut() {
-                    if let Hat::OnKey { key } = &script.hat {
+                    if let Event::OnKey { key } = &script.event {
                         if key.map(|x| x == input_key).unwrap_or(true) {
                             script.schedule(&mut self.state, Default::default(), None, None, 0);
                         }
@@ -234,7 +235,7 @@ impl<'gc, S: System> Project<'gc, S> {
         if let Some((msg_type, values, reply_key)) = self.state.system.receive_message() {
             let values: BTreeMap<_,_> = values.into_iter().collect();
             for script in self.scripts.iter_mut() {
-                if let Hat::NetworkMessage { msg_type: script_msg_type, fields } = &script.hat {
+                if let Event::NetworkMessage { msg_type: script_msg_type, fields } = &script.event {
                     if msg_type == *script_msg_type {
                         let mut context = SymbolTable::default();
                         for field in fields.iter() {
@@ -269,7 +270,7 @@ impl<'gc, S: System> Project<'gc, S> {
                 ProcessStep::Idle => unreachable!(),
                 ProcessStep::Broadcast { msg_type, barrier } => {
                     for script in self.scripts.iter_mut() {
-                        if let Hat::LocalMessage { msg_type: recv_type } = &script.hat {
+                        if let Event::LocalMessage { msg_type: recv_type } = &script.event {
                             if *recv_type == *msg_type {
                                 script.stop_all(&mut self.state);
                                 script.schedule(&mut self.state, Default::default(), barrier.clone(), None, 0);

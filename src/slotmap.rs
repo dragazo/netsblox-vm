@@ -110,6 +110,7 @@ impl<K: Key, T> SlotMap<K, T> {
         #[cfg(test)] assert!(self.invariant());
         res
     }
+    /// Removes all values from the slotmap.
     pub fn clear(&mut self) {
         #[cfg(test)] assert!(self.invariant());
 
