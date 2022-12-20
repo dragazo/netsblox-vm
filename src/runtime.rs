@@ -596,6 +596,19 @@ pub enum SystemError {
     Other { desc: String },
 }
 
+pub enum Request<'gc, 'a, S: System> {
+    /// Performs a system call on the local hardware to access device resources.
+    Syscall { name: String, args: Vec<Value<'gc, S>> },
+    /// Request input from the user. The `prompt` argument is either [`Some`] prompt to display, or [`None`] for no prompt.
+    Input { prompt: Option<Value<'gc, S>>, entity: &'a Entity<'gc, S> },
+    /// Requests the system to execute the given RPC.
+    Rpc { service: String, rpc: String, args: Vec<(String, Value<'gc, S>)> },
+}
+pub enum Command<'gc, 'a, S: System> {
+    /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear. The [`Entity`] making the request is provided for context.
+    Print { value: Option<Value<'gc, S>>, entity: &'a Entity<'gc, S> },
+}
+
 /// Represents all the features of an implementing system.
 /// 
 /// This type encodes any features that cannot be performed without platform-specific resources.
@@ -620,6 +633,9 @@ pub trait System: 'static + Sized {
     /// Native types have reference semantics in the vm, just like for entities.
     type NativeValue: 'static + GetType + fmt::Debug;
 
+    type RequestKey: 'static;
+    type CommandKey: 'static;
+
     /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
     /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],
     /// which makes it possible to implement this function with any random provider under the [`rand`] crate standard.
@@ -630,43 +646,24 @@ pub trait System: 'static + Sized {
     /// Subsequent values are required to be non-decreasing.
     fn time_ms(&self) -> Result<u64, ErrorCause<Self>>;
 
-    /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
-    /// The [`Entity`] making the request is provided for context.
-    /// This operation should be infallible, but a no-op solution is sufficient.
-    fn print<'gc>(&self, mc: MutationContext<'gc, '_>, value: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<(), ErrorCause<Self>>;
+    /// Performs a general request which returns a value to the system.
+    /// Ideally, this function should be non-blocking, and the requestor will await the result asynchronously.
+    fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, Self>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RequestKey>, ErrorCause<Self>>;
+    /// Poll for the completion of an asynchronous request.
+    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>>;
 
-    /// Performs a system call on the local hardware to access device resources.
-    /// Returns a key that can be passed to [`System::poll_syscall`] to poll for the result.
-    /// If supported, this operation must be nn-blocking and eventually terminate and yield a value to [`System::poll_syscall`].
-    ///
-    /// This function returns [`MaybeAsync`] to facilitate synchronous behavior if the native resources can be accessed in a blocking fashion.
-    /// If this function always returns [`MaybeAsync::Sync`], then [`System::poll_syscall`] is never used and can be marked as [`unreachable`].
-    fn syscall<'gc>(&self, mc: MutationContext<'gc, '_>, name: String, args: Vec<Value<'gc, Self>>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::SyscallKey>, ErrorCause<Self>>;
-    /// Polls for the completion of an asynchronous call to [`System::syscall`].
-    /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
-    fn poll_syscall<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::SyscallKey) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>>;
+    /// Performs a general command which does not return a value to the system.
+    /// Ideally, this function should be non-blocking, and the commander will await the task's completion asynchronously.
+    fn perform_command<'gc>(&self, command: Command<'gc, '_, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<Self>>;
+    /// Poll for the completion of an asynchronous command.
+    fn poll_command<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::CommandKey) -> Result<AsyncPoll<Result<(), String>>, ErrorCause<Self>>;
 
-    /// Request input from the user.
-    /// The `prompt` argument is either [`Some`] prompt to display, or [`None`] for no prompt.
-    /// If supported, this operation must be non-blocking and eventually terminate and yield a value to [`System::poll_input`].
-    ///
-    /// This function returns [`MaybeAsync`] to facilitate synchronous behavior, such as if the input sequence is known ahead of time.
-    /// If this function always returns [`MaybeAsync::Sync`], then [`System::poll_input`] is never used and can be marked as [`unreachable`].
-    fn input<'gc>(&self, mc: MutationContext<'gc, '_>, prompt: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<String, Self::InputKey>, ErrorCause<Self>>;
-    /// Polls for the completion of an asynchronous call to [`System::input`].
-    /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
-    fn poll_input<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::InputKey) -> Result<AsyncPoll<String>, ErrorCause<Self>>;
 
-    /// Requests the system to execute the given RPC.
-    /// Returns a key that can be passed to [`System::poll_rpc`] to poll for the result.
-    /// If supported, this operation must be non-blocking and eventually terminate and yield a value to [`System::poll_rpc`].
-    ///
-    /// This function returns [`MaybeAsync`] to facilitate synchronous behavior, such as if overriding RPCs with local implementations.
-    /// If this function always returns [`MaybeAsync::Sync`], then [`System::poll_rpc`] is never used and can be marked as [`unreachable`].
-    fn call_rpc<'gc>(&self, mc: MutationContext<'gc, '_>, service: String, rpc: String, args: Vec<(String, Value<'gc, Self>)>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RpcKey>, ErrorCause<Self>>;
-    /// Polls for the completion of an asynchronous call to [`System::call_rpc`].
-    /// If [`AsyncPoll::Completed`] is returned, the system is allowed to invalidate the requested `key`, which will not be used again.
-    fn poll_rpc<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RpcKey) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>>;
+
+
+
+
+
 
     /// Sends a message containing a set of named `values` to each of the specified `targets`.
     /// The `expect_reply` value controls whether or not to use a reply mechanism to asynchronously receive a response from the target(s).
