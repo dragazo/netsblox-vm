@@ -237,28 +237,35 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
     let mut term_size = terminal::size().unwrap();
     let mut input_value = String::new();
 
-    let config = overrides.or(Config {
-        print: {
+    let config = Config {
+        command: {
             let update_flag = update_flag.clone();
-            Some(Rc::new(move |_, _, value, entity| {
-                if let Some(value) = value {
-                    print!("{entity:?} > {value:?}\r\n");
-                    update_flag.set(true);
+            Some(Rc::new(move |system, mc, key, command, entity| Ok(match command {
+                Command::Print { value } => {
+                    if let Some(value) = value {
+                        print!("{entity:?} > {value:?}\r\n");
+                        update_flag.set(true);
+                    }
+                    key.complete(Ok(()));
+                    CommandStatus::Handled
                 }
-                Ok(())
-            }))
+                _ => CommandStatus::UseDefault { key, command },
+            })))
         },
-        input: {
+        request: {
             let update_flag = update_flag.clone();
             let input_queries = input_queries.clone();
-            Some(Rc::new(move |_, _, key, prompt, entity| {
-                input_queries.borrow_mut().push_back((format!("{entity:?} {prompt:?} > "), key));
-                update_flag.set(true);
-                Ok(())
-            }))
+            Some(Rc::new(move |system, mc, key, request, entity| Ok(match request {
+                Request::Input { prompt } => {
+                    input_queries.borrow_mut().push_back((format!("{entity:?} {prompt:?} > "), key));
+                    update_flag.set(true);
+                    RequestStatus::Handled
+                }
+                _ => RequestStatus::UseDefault { key, request },
+            })))
         },
-        ..Default::default()
-    });
+    }.with_overrides(&overrides);
+
     let system = Rc::new(StdSystem::new(server, Some(project_name), config));
     let mut idle_sleeper = IdleSleeper::new();
     print!("public id: {}\r\n", system.get_public_id());
@@ -287,7 +294,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
                     }
                     RawKeyCode::Backspace => if in_input_mode() && input_value.pop().is_some() { update_flag.set(true) }
                     RawKeyCode::Enter => if let Some((_, res_key)) = input_queries.borrow_mut().pop_front() {
-                        res_key.complete(mem::take(&mut input_value));
+                        res_key.complete(Ok(C::Intermediate::from(Json::String(mem::take(&mut input_value)))));
                         update_flag.set(true);
                     }
                     RawKeyCode::Up => if !in_input_mode() { input_sequence.push(Input::KeyDown(KeyCode::Up)) }
@@ -336,10 +343,18 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
     execute!(stdout(), terminal::Clear(ClearType::CurrentLine)).unwrap();
 }
 fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C>) {
-    let config = overrides.or(Config {
-        print: Some(Rc::new(move |_, _, value, entity| Ok(if let Some(value) = value { println!("{entity:?} > {value:?}") }))),
-        ..Default::default()
-    });
+    let config = Config {
+        request: None,
+        command: Some(Rc::new(move |_, _, key, command, entity| Ok(match command {
+            Command::Print { value } => {
+                if let Some(value) = value { println!("{entity:?} > {value:?}") }
+                key.complete(Ok(()));
+                CommandStatus::Handled
+            }
+            _ => CommandStatus::UseDefault { key, command },
+        }))),
+    }.with_overrides(&overrides);
+
     let system = Rc::new(StdSystem::new(server, Some(project_name), config));
     let mut idle_sleeper = IdleSleeper::new();
     println!("public id: {}", system.get_public_id());
@@ -373,7 +388,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
         "syscalls": SyscallMenu::format(syscalls),
     })).unwrap();
 
-    enum Command {
+    enum ServerCommand {
         SetProject(String),
         Input(Input),
     }
@@ -401,7 +416,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
     struct State {
         extension: String,
         running: AtomicBool,
-        proj_sender: Mutex<Sender<Command>>,
+        proj_sender: Mutex<Sender<ServerCommand>>,
         output: Mutex<String>,
         errors: Mutex<Vec<Error>>,
     }
@@ -426,10 +441,17 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
     }
 
     let weak_state = Arc::downgrade(&state);
-    let config = overrides.or(Config {
-        print: Some(Rc::new(move |_, _, value, entity| Ok(if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") }))),
-        ..Default::default()
-    });
+    let config = Config {
+        request: None,
+        command: Some(Rc::new(move |_, _, key, command, entity| Ok(match command {
+            Command::Print { value } => {
+                if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") }
+                key.complete(Ok(()));
+                CommandStatus::Handled
+            }
+            _ => CommandStatus::UseDefault { key, command },
+        }))),
+    }.with_overrides(&overrides);
     let system = Rc::new(StdSystem::new(nb_server, Some("native-server"), config));
     let mut idle_sleeper = IdleSleeper::new();
     println!("public id: {}", system.get_public_id());
@@ -461,7 +483,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
         async fn set_project(state: web::Data<State>, body: web::Bytes) -> impl Responder {
             match String::from_utf8(body.to_vec()) {
                 Ok(content) => {
-                    state.proj_sender.lock().unwrap().send(Command::SetProject(content)).unwrap();
+                    state.proj_sender.lock().unwrap().send(ServerCommand::SetProject(content)).unwrap();
                     HttpResponse::Ok().content_type("text/plain").body("loaded project")
                 }
                 Err(_) => HttpResponse::BadRequest().content_type("text/plain").body("project was not valid utf8")
@@ -478,7 +500,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
                 }
                 Err(_) => return HttpResponse::BadRequest().content_type("text/plain").body("input was not valid utf8")
             };
-            state.proj_sender.lock().unwrap().send(Command::Input(input)).unwrap();
+            state.proj_sender.lock().unwrap().send(ServerCommand::Input(input)).unwrap();
             HttpResponse::Ok().content_type("text/plain").body("sent input")
         }
 
@@ -512,7 +534,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
         'input: loop {
             match proj_receiver.try_recv() {
                 Ok(command) => match command {
-                    Command::SetProject(content) => match open_project(&content, None) {
+                    ServerCommand::SetProject(content) => match open_project(&content, None) {
                         Ok((proj_name, role)) => {
                             tee_println!(weak_state.upgrade() => "\n>>> loaded project '{proj_name}'\n");
                             match get_env(&role, system.clone()) {
@@ -522,7 +544,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
                         }
                         Err(e) => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> keeping previous project...\n"),
                     }
-                    Command::Input(input) => {
+                    ServerCommand::Input(input) => {
                         if let Input::Start = &input {
                             if let Some(state) = weak_state.upgrade() {
                                 state.running.store(true, MemoryOrder::Relaxed);

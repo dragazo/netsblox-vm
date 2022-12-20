@@ -586,6 +586,8 @@ pub enum SystemFeature {
     Input,
     /// The ability of a process to perform a syscall of the given name.
     Syscall { name: String },
+    /// The ability of a process to perform an RPC call.
+    Rpc { service: String, rpc: String },
 }
 /// An error resulting from improper use of [`System`] resources.
 #[derive(Debug)]
@@ -596,17 +598,36 @@ pub enum SystemError {
     Other { desc: String },
 }
 
-pub enum Request<'gc, 'a, S: System> {
+pub enum Request<'gc, S: System> {
     /// Performs a system call on the local hardware to access device resources.
     Syscall { name: String, args: Vec<Value<'gc, S>> },
     /// Request input from the user. The `prompt` argument is either [`Some`] prompt to display, or [`None`] for no prompt.
-    Input { prompt: Option<Value<'gc, S>>, entity: &'a Entity<'gc, S> },
+    Input { prompt: Option<Value<'gc, S>> },
     /// Requests the system to execute the given RPC.
     Rpc { service: String, rpc: String, args: Vec<(String, Value<'gc, S>)> },
 }
-pub enum Command<'gc, 'a, S: System> {
-    /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear. The [`Entity`] making the request is provided for context.
-    Print { value: Option<Value<'gc, S>>, entity: &'a Entity<'gc, S> },
+impl<'gc, S: System> Request<'gc, S> {
+    /// Gets the [`SystemFeature`] associated with this request.
+    pub fn feature(&self) -> SystemFeature {
+        match self {
+            Request::Syscall { name, .. } => SystemFeature::Syscall { name: name.clone() },
+            Request::Input { .. } => SystemFeature::Input,
+            Request::Rpc { service, rpc, .. } => SystemFeature::Rpc { service: service.clone(), rpc: rpc.clone() },
+        }
+    }
+}
+
+pub enum Command<'gc, S: System> {
+    /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
+    Print { value: Option<Value<'gc, S>> },
+}
+impl<'gc, S: System> Command<'gc, S> {
+    /// Gets the [`SystemFeature`] associated with this command.
+    pub fn feature(&self) -> SystemFeature {
+        match self {
+            Command::Print { .. } => SystemFeature::Print,
+        }
+    }
 }
 
 /// Represents all the features of an implementing system.
@@ -616,25 +637,22 @@ pub enum Command<'gc, 'a, S: System> {
 /// When implementing [`System`] for some type, you may prefer to not support one or more features.
 /// This can be accomplished by returning the [`SystemError::NotSupported`] variant for the relevant [`SystemFeature`].
 pub trait System: 'static + Sized {
-    /// Key type used to await the result of a syscall.
-    type SyscallKey: 'static;
-    /// Key type used to await the result of an RPC request.
-    type RpcKey: 'static;
-    /// Key type used to await the result of an "ask" block (string input from the user).
-    type InputKey: 'static;
-    /// Key type used to await the result of a "send message and wait" block (response from target).
-    type ExternReplyKey: 'static;
-    /// Key type used to reply to a message that was sent to this client with the expectation of receiving a response.
-    /// This type is required to be [`Clone`] because there can be multiple message handlers for the same message type.
-    type InternReplyKey: 'static + Clone;
     /// A type representing native values that the system can operate on or return through syscalls.
     /// This could, for example, be used to allow a process to hold on to a file handle stored in a variable.
     /// If multiple native types are required, an enum can be used.
     /// Native types have reference semantics in the vm, just like for entities.
     type NativeValue: 'static + GetType + fmt::Debug;
 
+    /// Key type used to await the result of an asynchronous request.
     type RequestKey: 'static;
+    /// Key type used to await the completion of an asynchronous command.
     type CommandKey: 'static;
+
+    /// Key type used to await the result of a "send message and wait" block (response from target).
+    type ExternReplyKey: 'static;
+    /// Key type used to reply to a message that was sent to this client with the expectation of receiving a response.
+    /// This type is required to be [`Clone`] because there can be multiple message handlers for the same message type.
+    type InternReplyKey: 'static + Clone;
 
     /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
     /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],
@@ -648,22 +666,19 @@ pub trait System: 'static + Sized {
 
     /// Performs a general request which returns a value to the system.
     /// Ideally, this function should be non-blocking, and the requestor will await the result asynchronously.
-    fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, Self>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RequestKey>, ErrorCause<Self>>;
+    /// The [`Entity`] that made the request is provided for context.
+    fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RequestKey>, ErrorCause<Self>>;
     /// Poll for the completion of an asynchronous request.
-    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>>;
+    /// The [`Entity`] that made the request is provided for context.
+    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, entity: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>>;
 
     /// Performs a general command which does not return a value to the system.
     /// Ideally, this function should be non-blocking, and the commander will await the task's completion asynchronously.
-    fn perform_command<'gc>(&self, command: Command<'gc, '_, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<Self>>;
+    /// The [`Entity`] that issued the command is provided for context.
+    fn perform_command<'gc>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<Self>>;
     /// Poll for the completion of an asynchronous command.
-    fn poll_command<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::CommandKey) -> Result<AsyncPoll<Result<(), String>>, ErrorCause<Self>>;
-
-
-
-
-
-
-
+    /// The [`Entity`] that issued the command is provided for context.
+    fn poll_command<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::CommandKey, entity: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<(), String>>, ErrorCause<Self>>;
 
     /// Sends a message containing a set of named `values` to each of the specified `targets`.
     /// The `expect_reply` value controls whether or not to use a reply mechanism to asynchronously receive a response from the target(s).

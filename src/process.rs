@@ -94,12 +94,14 @@ pub struct CallStackEntry<'gc, S: System> {
 }
 
 enum Defer<S: System> {
-    SyscallResult { key: S::SyscallKey, aft_pos: usize },
-    RpcResult { key: S::RpcKey, aft_pos: usize },
+    Request { key: S::RequestKey, aft_pos: usize, action: RequestAction },
+    Command { key: S::CommandKey, aft_pos: usize },
     MessageReply { key: S::ExternReplyKey, aft_pos: usize },
     Barrier { condition: BarrierCondition, aft_pos: usize },
-    InputResult { key: S::InputKey, aft_pos: usize },
     Sleep { until: u64, aft_pos: usize },
+}
+enum RequestAction {
+    Rpc, Syscall, Input,
 }
 
 /// A [`ByteCode`] execution primitive.
@@ -212,26 +214,29 @@ impl<'gc, S: System> Process<'gc, S> {
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
     fn step_impl(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, S>, ErrorCause<S>> {
-        fn process_result<'gc, S: System>(mc: MutationContext<'gc, '_>, result: Result<Value<'gc, S>, String>, error_scheme: ErrorScheme, value_stack: &mut Vec<Value<'gc, S>>, last_error: &mut Option<Value<'gc, S>>) -> Result<(), ErrorCause<S>> {
-            Ok(value_stack.push(match result {
-                Ok(x) => {
-                    *last_error = None;
-                    x
-                }
+        fn process_result<'gc, S: System, T, G, B>(mc: MutationContext<'gc, '_>, result: Result<T, String>, error_scheme: ErrorScheme, good: G, bad: B) -> Result<(), ErrorCause<S>>
+        where G: FnOnce(MutationContext<'gc, '_>, T), B: FnOnce(MutationContext<'gc, '_>, String) -> Result<(), ErrorCause<S>> {
+            match result {
+                Ok(x) => Ok(good(mc, x)),
                 Err(x) => match error_scheme {
-                    ErrorScheme::Soft => {
-                        let x = Value::String(Gc::allocate(mc, x));
-                        *last_error = Some(x);
-                        x
-                    }
-                    ErrorScheme::Hard => return Err(ErrorCause::Promoted { error: x }),
+                    ErrorScheme::Soft => bad(mc, x),
+                    ErrorScheme::Hard => Err(ErrorCause::Promoted { error: x }),
                 }
-            }))
+            }
         }
 
         macro_rules! syscall_result {
             ($res:ident => $aft_pos:expr) => {{
-                process_result(mc, $res, self.settings.syscall_error_scheme, &mut self.value_stack, &mut self.last_syscall_error)?;
+                let good = |mc, x| {
+                    self.last_syscall_error = None;
+                    self.value_stack.push(x);
+                };
+                let bad = |mc, x| {
+                    let err = Gc::allocate(mc, x).into();
+                    self.last_syscall_error = Some(err);
+                    self.value_stack.push(err);
+                };
+                process_result(mc, $res, self.settings.syscall_error_scheme, good, bad)?;
                 self.pos = $aft_pos;
             }}
         }
@@ -243,30 +248,33 @@ impl<'gc, S: System> Process<'gc, S> {
         }
         macro_rules! input_result {
             ($res:ident => $aft_pos:expr) => {{
-                self.last_answer = Some(Gc::allocate(mc, $res).into());
+                match $res {
+                    Ok(
+                }
+                self.last_answer = Some($res);
                 self.pos = $aft_pos;
             }}
         }
 
         match &self.defer {
             None => (),
-            Some(Defer::SyscallResult { key, aft_pos }) => match self.system.poll_syscall(mc, key)? {
+            Some(Defer::Request { key, aft_pos, action }) => match self.system.poll_request(mc, key, &*self.entity.read())? {
                 AsyncPoll::Completed(x) => {
-                    syscall_result!(x => *aft_pos);
+                    match action {
+                        RequestAction::Rpc => rpc_result!(x => *aft_pos),
+                        RequestAction::Syscall => syscall_result!(x => *aft_pos),
+                        RequestAction::Input => input_result!(x => *aft_pos),
+                    }
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
             }
-            Some(Defer::RpcResult { key, aft_pos }) => match self.system.poll_rpc(mc, key)? {
+            Some(Defer::Command { key, aft_pos }) => match self.system.poll_command(mc, key, &*self.entity.read())? {
                 AsyncPoll::Completed(x) => {
-                    rpc_result!(x => *aft_pos);
-                    self.defer = None;
-                }
-                AsyncPoll::Pending => return Ok(ProcessStep::Yield),
-            }
-            Some(Defer::InputResult { key, aft_pos }) => match self.system.poll_input(mc, key)? {
-                AsyncPoll::Completed(x) => {
-                    input_result!(x => *aft_pos);
+                    match x {
+                        Ok(()) => (),
+                        Err(error) => return Err(ErrorCause::Promoted { error }),
+                    }
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
@@ -775,8 +783,8 @@ impl<'gc, S: System> Process<'gc, S> {
                     args_vec.push((arg_name, value));
                 }
                 args_vec.reverse();
-                match self.system.call_rpc(mc, service.to_owned(), rpc.to_owned(), args_vec)? {
-                    MaybeAsync::Async(key) => self.defer = Some(Defer::RpcResult { key, aft_pos }),
+                match self.system.perform_request(mc, Request::Rpc { service: service.to_owned(), rpc: rpc.to_owned(), args: args_vec}, &*entity)? {
+                    MaybeAsync::Async(key) => self.defer = Some(Defer::Request { key, aft_pos, action: RequestAction::Rpc }),
                     MaybeAsync::Sync(res) => rpc_result!(res => aft_pos),
                 }
             }
@@ -808,8 +816,8 @@ impl<'gc, S: System> Process<'gc, S> {
                     VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().copied().collect(),
                 };
                 let name = self.value_stack.pop().unwrap().to_string(mc)?.as_str().to_owned();
-                match self.system.syscall(mc, name, args)? {
-                    MaybeAsync::Async(key) => self.defer = Some(Defer::SyscallResult { key, aft_pos }),
+                match self.system.perform_request(mc, Request::Syscall { name, args }, &*entity)? {
+                    MaybeAsync::Async(key) => self.defer = Some(Defer::Request { key, aft_pos, action: RequestAction::Syscall }),
                     MaybeAsync::Sync(res) => syscall_result!(res => aft_pos),
                 }
                 self.pos = aft_pos;
@@ -836,14 +844,16 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::Print => {
                 let value = self.value_stack.pop().unwrap();
                 let is_empty = match value { Value::String(x) => x.is_empty(), _ => false };
-                self.system.print(mc, if is_empty { None } else { Some(value) }, &*entity)?;
-                self.pos = aft_pos;
+                match self.system.perform_command(mc, Command::Print { value: if is_empty { None } else { Some(value) } }, &*entity)? {
+                    MaybeAsync::Async(key) => self.defer = Some(Defer::Command { key, aft_pos }),
+                    MaybeAsync::Sync(res) => self.pos = aft_pos,
+                }
             }
             Instruction::Ask => {
                 let prompt = self.value_stack.pop().unwrap();
                 let is_empty = match prompt { Value::String(x) => x.is_empty(), _ => false };
-                match self.system.input(mc, if is_empty { None } else { Some(prompt) }, &*entity)? {
-                    MaybeAsync::Async(key) => self.defer = Some(Defer::InputResult { key, aft_pos }),
+                match self.system.perform_request(mc, Request::Input { prompt: if is_empty { None } else { Some(prompt) } }, &*entity)? {
+                    MaybeAsync::Async(key) => self.defer = Some(Defer::Request { key, aft_pos, action: RequestAction::Input }),
                     MaybeAsync::Sync(res) => input_result!(res => aft_pos),
                 }
             }

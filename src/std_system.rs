@@ -53,11 +53,11 @@ struct Context {
     role_name: String,
     role_id: String,
 }
-struct RpcRequest {
+struct RpcRequest<C: CustomTypes> {
     service: String,
     rpc: String,
     args: Vec<(String, Json)>,
-    key: RpcKey,
+    key: RequestKey<C>,
 }
 enum OutgoingMessage {
     Normal {
@@ -86,14 +86,21 @@ struct ReplyEntry {
     value: Option<Json>,
 }
 
-/// The status of a potentially-intercepted RPC.
-/// 
-/// See [`Config::intercept_rpc`] for details.
-pub enum RpcIntercept<'gc, C: CustomTypes> {
-    /// The RPC was intercepted and the value will be produced by the interceptor.
-    Intercepted,
-    /// The RPC was not intercepted, and the default implementation should be used.
-    UseDefault { key: RpcKey, service: String, rpc: String, args: Vec<(String, Value<'gc, StdSystem<C>>)> },
+/// The status of a potentially-handled request.
+pub enum RequestStatus<'gc, C: CustomTypes> {
+    /// The request was handled by the overriding client.
+    Handled,
+    /// The request was not handled by the overriding client,
+    /// and the default system implementation should be used instead.
+    UseDefault { key: RequestKey<C>, request: Request<'gc, StdSystem<C>> },
+}
+/// The status of a potentially-handled command.
+pub enum CommandStatus<'gc, C: CustomTypes> {
+    /// The command was handled by the overriding client.
+    Handled,
+    /// The command was not handled by the overriding client,
+    /// and the default system implementation should be used instead.
+    UseDefault { key: CommandKey, command: Command<'gc, StdSystem<C>> },
 }
 
 enum AsyncResult<T> {
@@ -128,48 +135,27 @@ impl<T> AsyncResultHandle<T> {
     }
 }
 
-/// A [`StdSystem`] key type for an async syscall request.
-/// 
-/// Internally, this manages a shared handle to value of type [`CustomTypes::Intermediate`],
-/// which allows you to define a custom type for the result of a syscall.
-/// Other helper methods must be defined in [`CustomTypes`] to convert between this type and
-/// an instance of [`Value`] that the vm can handle.
-pub struct SyscallKey<C: CustomTypes>(AsyncResultHandle<Result<C::Intermediate, String>>);
-impl<C: CustomTypes> SyscallKey<C> {
-    /// Completes the syscall with the given result.
-    /// A value of [`Ok`] denotes a successful syscall, whose value will be returned to the system
+/// A [`StdSystem`] key type for an asynchronous request.
+pub struct RequestKey<C: CustomTypes>(AsyncResultHandle<Result<C::Intermediate, String>>);
+impl<C: CustomTypes> RequestKey<C> {
+    /// Completes the request with the given result.
+    /// A value of [`Ok`] denotes a successful request, whose value will be returned to the system
     /// after conversion under [`CustomTypes::from_intermediate`].
-    /// A value of [`Err`] denotes a failed syscall, which will be returned as an error to the requestor,
-    /// subject to the caller's [`ErrorScheme`](crate::process::ErrorScheme) setting for syscalls.
+    /// A value of [`Err`] denotes a failed request, which will be returned as an error to the runtime,
+    /// subject to the caller's [`ErrorScheme`](crate::process::ErrorScheme) setting.
     pub fn complete(self, result: Result<C::Intermediate, String>) { self.0.complete(result) }
     pub(crate) fn poll(&self) -> AsyncPoll<Result<C::Intermediate, String>> { self.0.poll() }
 }
 
-/// A [`StdSystem`] key type for an async RPC request.
-/// 
-/// Internally, this manages a shared handle to a value of type [`Json`].
-/// Although RPCs can be intercepted to run on local hardware (e.g., via [`Config::intercept_rpc`]),
-/// the return value behavior of said RPCs should be indistinguishable, hence why this uses a standard [`Json`]
-/// result rather than a customizable type like [`SyscallKey`].
-pub struct RpcKey(AsyncResultHandle<Result<Json, String>>);
-impl RpcKey {
-    /// Completes the RPC call with the given result.
-    /// A value of [`Ok`] denotes a successful RPC request, whose value is returned to the system.
-    /// A value of [`Err`] denotes a failed syscall, which will be returned as an error to the requestor,
-    /// subject to the caller's [`ErrorScheme`](crate::process::ErrorScheme) setting for RPCs.
-    pub fn complete(self, result: Result<Json, String>) { self.0.complete(result) }
-    pub(crate) fn poll(&self) -> AsyncPoll<Result<Json, String>> { self.0.poll() }
-}
-
-/// A [`StdSystem`] key type for an async input request.
-/// 
-/// Internally, this manages a shared handle to a value of type [`String`],
-/// which is intended to be eventually provided with input from the user.
-pub struct InputKey(AsyncResultHandle<String>);
-impl InputKey {
-    /// Completes the input request with the given input from the user, which is then returned to the caller.
-    pub fn complete(self, result: String) { self.0.complete(result) }
-    pub(crate) fn poll(&self) -> AsyncPoll<String> { self.0.poll() }
+/// A [`StdSystem`] key type for an asynchronous command.
+pub struct CommandKey(AsyncResultHandle<Result<(), String>>);
+impl CommandKey {
+    /// Completes the command.
+    /// A value of [`Ok`] denotes a successful command.
+    /// A value of [`Err`] denotes a failed command, which will be returned as an error to the runtime,
+    /// subject to the caller's [`ErrorScheme`](crate::process::ErrorScheme) setting.
+    pub fn complete(self, result: Result<(), String>) { self.0.complete(result) }
+    pub(crate) fn poll(&self) -> AsyncPoll<Result<(), String>> { self.0.poll() }
 }
 
 type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
@@ -184,11 +170,11 @@ pub trait CustomTypes: 'static + Sized {
     /// which cannot be extended into the larger lifetime required for async operations.
     /// 
     /// Conversions are automatically performed between this type and [`Value`] via [`CustomTypes::from_intermediate`] and [`CustomTypes::to_intermediate`].
-    type Intermediate: 'static;
+    type Intermediate: 'static + Send + From<Json>;
 
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>>;
-    /// Converts a [`CustomTypes::Intermediate`] into a [`Value`] for use inside the vm's gc context.
+    /// Converts a [`CustomTypes::Intermediate`] into a [`Value`] for use inside the runtime's gc context.
     fn to_intermediate<'gc>(value: Value<'gc, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>>;
 }
 
@@ -196,43 +182,35 @@ pub trait CustomTypes: 'static + Sized {
 #[derive(Educe)]
 #[educe(Default, Clone)]
 pub struct Config<C: CustomTypes> {
-    /// A function used to process all "say" and "think" blocks.
-    /// Inputs include the actual message value, or [`None`] to clear the output (Snap!-style), and a reference to the entity making the request.
-    /// If not specified, the system will simply ignore all output requests.
-    pub print: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, Option<Value<'gc, StdSystem<C>>>, &Entity<'gc, StdSystem<C>>) -> Result<(), ErrorCause<StdSystem<C>>>>>,
-
-    /// A function used to request input from the user.
-    /// This should be non-blocking, and the result should eventually be forwarded to [`InputKey::complete`].
-    /// If not specified (default), the system gives an error when processes attempt to request user input.
-    pub input: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, InputKey, Option<Value<'gc, StdSystem<C>>>, &Entity<'gc, StdSystem<C>>) -> Result<(), ErrorCause<StdSystem<C>>>>>,
-
-    /// A function used to perform system calls on the local hardware.
-    /// This should not block (for an extended period of time), and the result should eventually be forwarded to [`SyscallKey::complete`].
-    /// If not specified (default), the system gives an error when processes attempt to perform a syscall.
-    ///
-    /// This function is permitted to return an error during its synchronous initialization;
-    /// however, this is intended for hard errors such as trying to invoke non-existent system calls.
-    /// Normal syscall failures should instead yield an [`Err`] value to [`SyscallKey::complete`],
-    /// which lets the runtime treat it similar to an RPC error that user code can handle properly.
-    pub syscall: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, SyscallKey<C>, String, Vec<Value<'gc, StdSystem<C>>>) -> Result<(), ErrorCause<StdSystem<C>>>>>,
-
-    /// A function used to intercept NetsBlox RPCs and redirect them for other purposes.
-    /// For instance, the RoboScape service could be intercepted and the commands used to drive physical hardware directly.
-    /// A result of type [`RpcIntercept::Intercepted`] denotes that the RPC was properly intercepted (and you are responsible for providing the result to [`RpcKey::complete`]).
-    /// A result of type [`RpcIntercept::UseDefault`] denotes that the RPC was not intercepted.
-    /// Note that even in the default case, the values returned can be modified, e.g., to facilitate passing platform specific types
-    /// that would otherwise not be able to serialize under normal [`Value`] semantics.
-    pub intercept_rpc: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, RpcKey, String, String, Vec<(String, Value<'gc, StdSystem<C>>)>) -> Result<RpcIntercept<'gc, C>, ErrorCause<StdSystem<C>>>>>,
+    /// A function used to perform asynchronous requests that yield a value back to the runtime.
+    pub request: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, RequestKey<C>, Request<'gc, StdSystem<C>>, &Entity<'gc, StdSystem<C>>) -> Result<RequestStatus<'gc, C>, ErrorCause<StdSystem<C>>>>>,
+    /// A function used to perform asynchronous tasks whose completion is awaited by the runtime.
+    pub command: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, CommandKey, Command<'gc, StdSystem<C>>, &Entity<'gc, StdSystem<C>>) -> Result<CommandStatus<'gc, C>, ErrorCause<StdSystem<C>>>>>,
 }
 impl<C: CustomTypes> Config<C> {
-    /// Combines this config object with another.
-    /// Equivalent to calling [`Option::or`] on every field.
-    pub fn or(self, other: Self) -> Self {
+    /// Composes two [`Config`] objects, prioritizing the implementation of `other`.
+    pub fn with_overrides(&self, other: &Self) -> Self {
         Self {
-            print: self.print.or(other.print),
-            input: self.input.or(other.input),
-            syscall: self.syscall.or(other.syscall),
-            intercept_rpc: self.intercept_rpc.or(other.intercept_rpc),
+            request: match (self.request.clone(), other.request.clone()) {
+                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, request, entity| {
+                    Ok(match b(system, mc, key, request, entity)? {
+                        RequestStatus::Handled => RequestStatus::Handled,
+                        RequestStatus::UseDefault { key, request } => a(system, mc, key, request, entity)?,
+                    })
+                })),
+                (Some(a), None) | (None, Some(a)) => Some(a),
+                (None, None) => None,
+            },
+            command: match (self.command.clone(), other.command.clone()) {
+                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, command, entity| {
+                    Ok(match b(system, mc, key, command, entity)? {
+                        CommandStatus::Handled => CommandStatus::Handled,
+                        CommandStatus::UseDefault { key, command } => a(system, mc, key, command, entity)?,
+                    })
+                })),
+                (Some(a), None) | (None, Some(a)) => Some(a),
+                (None, None) => None,
+            },
         }
     }
 }
@@ -266,7 +244,7 @@ pub struct StdSystem<C: CustomTypes> {
     start_time: Instant,
     rng: Mutex<ChaChaRng>,
 
-    rpc_request_pipe: Sender<RpcRequest>,
+    rpc_request_pipe: Sender<RpcRequest<C>>,
 
     message_replies: Arc<Mutex<MessageReplies>>,
     message_sender: Sender<OutgoingMessage>,
@@ -409,12 +387,12 @@ impl<C: CustomTypes> StdSystem<C> {
             let (sender, receiver) = channel();
 
             #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
-            async fn handler(client: Arc<reqwest::Client>, context: Arc<Context>, receiver: Receiver<RpcRequest>) {
+            async fn handler<C: CustomTypes>(client: Arc<reqwest::Client>, context: Arc<Context>, receiver: Receiver<RpcRequest<C>>) {
                 while let Ok(request) = receiver.recv() {
                     let (client, context) = (client.clone(), context.clone());
                     tokio::spawn(async move {
                         let res = call_rpc_async(&context, &client, &request.service, &request.rpc, &request.args.iter().map(|x| (x.0.as_str(), &x.1)).collect::<Vec<_>>()).await;
-                        request.key.complete(res);
+                        request.key.complete(res.map(Into::into));
                     });
                 }
             }
@@ -447,12 +425,13 @@ impl<C: CustomTypes> StdSystem<C> {
     }
 }
 impl<C: CustomTypes> System for StdSystem<C> {
-    type SyscallKey = SyscallKey<C>;
-    type RpcKey = RpcKey;
-    type InputKey = InputKey;
+    type NativeValue = C::NativeValue;
+
+    type RequestKey = RequestKey<C>;
+    type CommandKey = CommandKey;
+
     type ExternReplyKey = ExternReplyKey;
     type InternReplyKey = InternReplyKey;
-    type NativeValue = C::NativeValue;
 
     fn rand<T, R>(&self, range: R) -> Result<T, ErrorCause<StdSystem<C>>> where T: SampleUniform, R: SampleRange<T> {
         Ok(self.rng.lock().unwrap().gen_range(range))
@@ -462,24 +441,26 @@ impl<C: CustomTypes> System for StdSystem<C> {
         Ok(self.start_time.elapsed().as_millis() as u64)
     }
 
-    fn print<'gc>(&self, mc: MutationContext<'gc, '_>, value: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<(), ErrorCause<Self>> {
-        match self.config.print.as_ref() {
-            Some(print) => print(self, mc, value, entity),
-            None => Err(SystemError::NotSupported { feature: SystemFeature::Print }.into()),
-        }
-    }
-
-    fn syscall<'gc>(&self, mc: MutationContext<'gc, '_>, name: String, args: Vec<Value<'gc, Self>>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::SyscallKey>, ErrorCause<StdSystem<C>>> {
-        match self.config.syscall.as_ref() {
-            Some(syscall) => {
-                let key = SyscallKey(AsyncResultHandle::pending());
-                syscall(self, mc, SyscallKey(key.0.clone()), name, args)?;
+    fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RequestKey>, ErrorCause<Self>> {
+        match self.config.request.as_ref() {
+            Some(handler) => {
+                let key = RequestKey(AsyncResultHandle::pending());
+                match handler(self, mc, RequestKey(key.0.clone()), request, entity)? {
+                    RequestStatus::Handled => (),
+                    RequestStatus::UseDefault { key, request } => match request {
+                        Request::Rpc { service, rpc, args } => {
+                            let args = args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_>>>()?;
+                            self.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap();
+                        }
+                        _ => return Err(SystemError::NotSupported { feature: request.feature() }.into()),
+                    }
+                }
                 Ok(MaybeAsync::Async(key))
             }
-            None => Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }.into()),
+            None => Err(SystemError::NotSupported { feature: request.feature() }.into()),
         }
     }
-    fn poll_syscall<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::SyscallKey) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<StdSystem<C>>> {
+    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, entity: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>> {
         Ok(match key.poll() {
             AsyncPoll::Completed(x) => match x {
                 Ok(x) => AsyncPoll::Completed(Ok(C::from_intermediate(mc, x)?)),
@@ -489,42 +470,20 @@ impl<C: CustomTypes> System for StdSystem<C> {
         })
     }
 
-    fn call_rpc<'gc>(&self, mc: MutationContext<'gc, '_>, service: String, rpc: String, args: Vec<(String, Value<'gc, Self>)>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RpcKey>, ErrorCause<StdSystem<C>>> {
-        let key = RpcKey(AsyncResultHandle::pending());
-        let res = match self.config.intercept_rpc.as_ref() {
-            Some(intercept_rpc) => intercept_rpc(self, mc, RpcKey(key.0.clone()), service, rpc, args)?,
-            None => RpcIntercept::UseDefault { key: RpcKey(key.0.clone()), service, rpc, args },
-        };
-        match res {
-            RpcIntercept::Intercepted => (),
-            RpcIntercept::UseDefault { key, service, rpc, args } => {
-                let args = args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_>>>()?;
-                self.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap();
-            }
-        }
-        Ok(MaybeAsync::Async(key))
-    }
-    fn poll_rpc<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RpcKey) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>> {
-        Ok(match key.poll() {
-            AsyncPoll::Completed(x) => match x {
-                Ok(x) => AsyncPoll::Completed(Ok(Value::from_json(mc, x)?)),
-                Err(x) => AsyncPoll::Completed(Err(x)),
-            }
-            AsyncPoll::Pending => AsyncPoll::Pending,
-        })
-    }
-
-    fn input<'gc>(&self, mc: MutationContext<'gc, '_>, prompt: Option<Value<'gc, Self>>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<String, Self::InputKey>, ErrorCause<StdSystem<C>>> {
-        match self.config.input.as_ref() {
-            Some(input) => {
-                let key = InputKey(AsyncResultHandle::pending());
-                input(self, mc, InputKey(key.0.clone()), prompt, entity)?;
+    fn perform_command<'gc>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<Self>> {
+        match self.config.command.as_ref() {
+            Some(handler) => {
+                let key = CommandKey(AsyncResultHandle::pending());
+                match handler(self, mc, CommandKey(key.0.clone()), command, entity)? {
+                    CommandStatus::Handled => (),
+                    CommandStatus::UseDefault { key, command } => return Err(SystemError::NotSupported { feature: command.feature() }.into()),
+                }
                 Ok(MaybeAsync::Async(key))
             }
-            None => Err(SystemError::NotSupported { feature: SystemFeature::Input }.into()),
+            None => Err(SystemError::NotSupported { feature: command.feature() }.into()),
         }
     }
-    fn poll_input<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::InputKey) -> Result<AsyncPoll<String>, ErrorCause<Self>> {
+    fn poll_command<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::CommandKey, entity: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<(), String>>, ErrorCause<Self>> {
         Ok(key.poll())
     }
 
