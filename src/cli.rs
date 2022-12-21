@@ -240,7 +240,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
     let config = Config {
         command: {
             let update_flag = update_flag.clone();
-            Some(Rc::new(move |system, mc, key, command, entity| Ok(match command {
+            Some(Rc::new(move |_, _, key, command, entity| Ok(match command {
                 Command::Print { value } => {
                     if let Some(value) = value {
                         print!("{entity:?} > {value:?}\r\n");
@@ -255,7 +255,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
         request: {
             let update_flag = update_flag.clone();
             let input_queries = input_queries.clone();
-            Some(Rc::new(move |system, mc, key, request, entity| Ok(match request {
+            Some(Rc::new(move |_, _, key, request, entity| Ok(match request {
                 Request::Input { prompt } => {
                     input_queries.borrow_mut().push_back((format!("{entity:?} {prompt:?} > "), key));
                     update_flag.set(true);

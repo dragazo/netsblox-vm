@@ -587,8 +587,15 @@ fn test_proc_say() {
     let output = Rc::new(RefCell::new(String::new()));
     let output_cpy = output.clone();
     let config = Config {
-        print: Some(Rc::new(move |_, _, v, _| Ok(if let Some(v) = v { writeln!(*output_cpy.borrow_mut(), "{:?}", v).unwrap() }))),
-        ..Default::default()
+        request: None,
+        command: Some(Rc::new(move |_, _, key, command, _| Ok(match command {
+            Command::Print { value } => {
+                if let Some(value) = value { writeln!(*output_cpy.borrow_mut(), "{value:?}").unwrap() }
+                key.complete(Ok(()));
+                CommandStatus::Handled
+            }
+            _ => CommandStatus::UseDefault { key, command },
+        }))),
     };
     let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, config));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
@@ -607,22 +614,30 @@ fn test_proc_syscall() {
     let buffer = Rc::new(RefCell::new(String::new()));
     let buffer_cpy = buffer.clone();
     let config = Config {
-        syscall: Some(Rc::new(move |_, mc, key, name, args| Ok(match name.as_str() {
-            "bar" => match args.is_empty() {
-                false => {
-                    let mut buffer = buffer_cpy.borrow_mut();
-                    for value in args {
-                        buffer.push_str(value.to_string(mc).unwrap().as_str());
+        request: Some(Rc::new(move |_, mc, key, request, _| Ok(match request {
+            Request::Syscall { name, args } => match name.as_str() {
+                "bar" => match args.is_empty() {
+                    false => {
+                        let mut buffer = buffer_cpy.borrow_mut();
+                        for value in args {
+                            buffer.push_str(value.to_string(mc).unwrap().as_str());
+                        }
+                        key.complete(Ok(json!(buffer.len() as f64)));
+                        RequestStatus::Handled
                     }
-                    key.complete(Ok(json!(buffer.len() as f64)));
+                    true => {
+                        key.complete(Err("beep beep - called with empty args".to_owned()));
+                        RequestStatus::Handled
+                    }
                 }
-                true => key.complete(Err("beep beep - called with empty args".to_owned())),
+                "foo" => {
+                    let content = buffer_cpy.borrow().clone();
+                    key.complete(Ok(json!(content)));
+                    RequestStatus::Handled
+                }
+                _ => return Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }.into()),
             }
-            "foo" => {
-                let content = buffer_cpy.borrow().clone();
-                key.complete(Ok(json!(content)));
-            }
-            _ => return Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }.into()),
+            _ => RequestStatus::UseDefault { key, request },
         }))),
         ..Default::default()
     };

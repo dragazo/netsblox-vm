@@ -442,25 +442,28 @@ impl<C: CustomTypes> System for StdSystem<C> {
     }
 
     fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RequestKey>, ErrorCause<Self>> {
-        match self.config.request.as_ref() {
+        let key = RequestKey(AsyncResultHandle::pending());
+        let use_default = match self.config.request.as_ref() {
             Some(handler) => {
-                let key = RequestKey(AsyncResultHandle::pending());
                 match handler(self, mc, RequestKey(key.0.clone()), request, entity)? {
-                    RequestStatus::Handled => (),
-                    RequestStatus::UseDefault { key, request } => match request {
-                        Request::Rpc { service, rpc, args } => {
-                            let args = args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_>>>()?;
-                            self.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap();
-                        }
-                        _ => return Err(SystemError::NotSupported { feature: request.feature() }.into()),
-                    }
+                    RequestStatus::Handled => None,
+                    RequestStatus::UseDefault { key, request } => Some((key, request)),
                 }
-                Ok(MaybeAsync::Async(key))
             }
-            None => Err(SystemError::NotSupported { feature: request.feature() }.into()),
+            None => Some((RequestKey(key.0.clone()), request)),
+        };
+        if let Some((key, request)) = use_default {
+            match request {
+                Request::Rpc { service, rpc, args } => {
+                    let args = args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_>>>()?;
+                    self.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap();
+                }
+                _ => return Err(SystemError::NotSupported { feature: request.feature() }.into()),
+            }
         }
+        Ok(MaybeAsync::Async(key))
     }
-    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, entity: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>> {
+    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, _: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>> {
         Ok(match key.poll() {
             AsyncPoll::Completed(x) => match x {
                 Ok(x) => AsyncPoll::Completed(Ok(C::from_intermediate(mc, x)?)),
@@ -476,14 +479,14 @@ impl<C: CustomTypes> System for StdSystem<C> {
                 let key = CommandKey(AsyncResultHandle::pending());
                 match handler(self, mc, CommandKey(key.0.clone()), command, entity)? {
                     CommandStatus::Handled => (),
-                    CommandStatus::UseDefault { key, command } => return Err(SystemError::NotSupported { feature: command.feature() }.into()),
+                    CommandStatus::UseDefault { key: _, command } => return Err(SystemError::NotSupported { feature: command.feature() }.into()),
                 }
                 Ok(MaybeAsync::Async(key))
             }
             None => Err(SystemError::NotSupported { feature: command.feature() }.into()),
         }
     }
-    fn poll_command<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::CommandKey, entity: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<(), String>>, ErrorCause<Self>> {
+    fn poll_command<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::CommandKey, _: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<(), String>>, ErrorCause<Self>> {
         Ok(key.poll())
     }
 

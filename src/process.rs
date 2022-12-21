@@ -214,44 +214,49 @@ impl<'gc, S: System> Process<'gc, S> {
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
     fn step_impl(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, S>, ErrorCause<S>> {
-        fn process_result<'gc, S: System, T, G, B>(mc: MutationContext<'gc, '_>, result: Result<T, String>, error_scheme: ErrorScheme, good: G, bad: B) -> Result<(), ErrorCause<S>>
-        where G: FnOnce(MutationContext<'gc, '_>, T), B: FnOnce(MutationContext<'gc, '_>, String) -> Result<(), ErrorCause<S>> {
-            match result {
-                Ok(x) => Ok(good(mc, x)),
-                Err(x) => match error_scheme {
-                    ErrorScheme::Soft => bad(mc, x),
-                    ErrorScheme::Hard => Err(ErrorCause::Promoted { error: x }),
+        fn process_result<'gc, S: System, T: Copy>(mc: MutationContext<'gc, '_>, result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, S>>>, last_ok: Option<&mut Option<Value<'gc, S>>>, last_err: Option<&mut Option<Value<'gc, S>>>, to_value: fn(T) -> Option<Value<'gc, S>>) -> Result<(), ErrorCause<S>> {
+            Ok(match result {
+                Ok(x) => match to_value(x) {
+                    Some(x) => {
+                        if let Some(last_ok) = last_ok { *last_ok = Some(x) }
+                        if let Some(last_err) = last_err { *last_err = None }
+                        if let Some(stack) = stack { stack.push(x) }
+                    }
+                    None => assert!(last_ok.is_none() && stack.is_none()),
                 }
-            }
+                Err(x) => match error_scheme {
+                    ErrorScheme::Soft => {
+                        let x = Value::String(Gc::allocate(mc, x));
+                        if let Some(last_ok) = last_ok { *last_ok = None }
+                        if let Some(last_err) = last_err { *last_err = Some(x) }
+                        if let Some(stack) = stack { stack.push(x) }
+                    }
+                    ErrorScheme::Hard => return Err(ErrorCause::Promoted { error: x }),
+                }
+            })
         }
 
         macro_rules! syscall_result {
             ($res:ident => $aft_pos:expr) => {{
-                let good = |mc, x| {
-                    self.last_syscall_error = None;
-                    self.value_stack.push(x);
-                };
-                let bad = |mc, x| {
-                    let err = Gc::allocate(mc, x).into();
-                    self.last_syscall_error = Some(err);
-                    self.value_stack.push(err);
-                };
-                process_result(mc, $res, self.settings.syscall_error_scheme, good, bad)?;
+                process_result(mc, $res, self.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_syscall_error), Some)?;
                 self.pos = $aft_pos;
             }}
         }
         macro_rules! rpc_result {
             ($res:ident => $aft_pos:expr) => {{
-                process_result(mc, $res, self.settings.rpc_error_scheme, &mut self.value_stack, &mut self.last_rpc_error)?;
+                process_result(mc, $res, self.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?;
                 self.pos = $aft_pos;
             }}
         }
         macro_rules! input_result {
             ($res:ident => $aft_pos:expr) => {{
-                match $res {
-                    Ok(
-                }
-                self.last_answer = Some($res);
+                process_result(mc, $res, ErrorScheme::Hard, None, Some(&mut self.last_answer), None, |_| None)?;
+                self.pos = $aft_pos;
+            }}
+        }
+        macro_rules! command_result {
+            ($res:ident => $aft_pos:expr) => {{
+                process_result(mc, $res, ErrorScheme::Hard, None, None, None, |_| None)?;
                 self.pos = $aft_pos;
             }}
         }
@@ -271,10 +276,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Some(Defer::Command { key, aft_pos }) => match self.system.poll_command(mc, key, &*self.entity.read())? {
                 AsyncPoll::Completed(x) => {
-                    match x {
-                        Ok(()) => (),
-                        Err(error) => return Err(ErrorCause::Promoted { error }),
-                    }
+                    command_result!(x => *aft_pos);
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
@@ -846,7 +848,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let is_empty = match value { Value::String(x) => x.is_empty(), _ => false };
                 match self.system.perform_command(mc, Command::Print { value: if is_empty { None } else { Some(value) } }, &*entity)? {
                     MaybeAsync::Async(key) => self.defer = Some(Defer::Command { key, aft_pos }),
-                    MaybeAsync::Sync(res) => self.pos = aft_pos,
+                    MaybeAsync::Sync(res) => command_result!(res => aft_pos),
                 }
             }
             Instruction::Ask => {
