@@ -188,25 +188,25 @@ pub struct Config<C: CustomTypes> {
     pub command: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, CommandKey, Command<'gc, StdSystem<C>>, &Entity<'gc, StdSystem<C>>) -> Result<CommandStatus<'gc, C>, ErrorCause<StdSystem<C>>>>>,
 }
 impl<C: CustomTypes> Config<C> {
-    /// Composes two [`Config`] objects, prioritizing the implementation of `other`.
-    pub fn with_overrides(&self, other: &Self) -> Self {
+    /// Composes two [`Config`] objects, prioritizing the implementation of `self`.
+    pub fn fallback(&self, other: &Self) -> Self {
         Self {
             request: match (self.request.clone(), other.request.clone()) {
                 (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, request, entity| {
-                    Ok(match b(system, mc, key, request, entity)? {
-                        RequestStatus::Handled => RequestStatus::Handled,
-                        RequestStatus::UseDefault { key, request } => a(system, mc, key, request, entity)?,
-                    })
+                    match a(system, mc, key, request, entity)? {
+                        RequestStatus::Handled => Ok(RequestStatus::Handled),
+                        RequestStatus::UseDefault { key, request } => b(system, mc, key, request, entity),
+                    }
                 })),
                 (Some(a), None) | (None, Some(a)) => Some(a),
                 (None, None) => None,
             },
             command: match (self.command.clone(), other.command.clone()) {
                 (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, command, entity| {
-                    Ok(match b(system, mc, key, command, entity)? {
-                        CommandStatus::Handled => CommandStatus::Handled,
-                        CommandStatus::UseDefault { key, command } => a(system, mc, key, command, entity)?,
-                    })
+                    match a(system, mc, key, command, entity)? {
+                        CommandStatus::Handled => Ok(CommandStatus::Handled),
+                        CommandStatus::UseDefault { key, command } => b(system, mc, key, command, entity),
+                    }
                 })),
                 (Some(a), None) | (None, Some(a)) => Some(a),
                 (None, None) => None,
@@ -458,7 +458,7 @@ impl<C: CustomTypes> System for StdSystem<C> {
                     let args = args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_>>>()?;
                     self.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap();
                 }
-                _ => return Err(SystemError::NotSupported { feature: request.feature() }.into()),
+                _ => return Err(ErrorCause::NotSupported { feature: request.feature() }.into()),
             }
         }
         Ok(MaybeAsync::Async(key))
@@ -479,11 +479,11 @@ impl<C: CustomTypes> System for StdSystem<C> {
                 let key = CommandKey(AsyncResultHandle::pending());
                 match handler(self, mc, CommandKey(key.0.clone()), command, entity)? {
                     CommandStatus::Handled => (),
-                    CommandStatus::UseDefault { key: _, command } => return Err(SystemError::NotSupported { feature: command.feature() }.into()),
+                    CommandStatus::UseDefault { key: _, command } => return Err(ErrorCause::NotSupported { feature: command.feature() }.into()),
                 }
                 Ok(MaybeAsync::Async(key))
             }
-            None => Err(SystemError::NotSupported { feature: command.feature() }.into()),
+            None => Err(ErrorCause::NotSupported { feature: command.feature() }.into()),
         }
     }
     fn poll_command<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::CommandKey, _: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<(), String>>, ErrorCause<Self>> {

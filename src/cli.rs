@@ -237,7 +237,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
     let mut term_size = terminal::size().unwrap();
     let mut input_value = String::new();
 
-    let config = Config {
+    let config = overrides.fallback(&Config {
         command: {
             let update_flag = update_flag.clone();
             Some(Rc::new(move |_, _, key, command, entity| Ok(match command {
@@ -264,7 +264,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
                 _ => RequestStatus::UseDefault { key, request },
             })))
         },
-    }.with_overrides(&overrides);
+    });
 
     let system = Rc::new(StdSystem::new(server, Some(project_name), config));
     let mut idle_sleeper = IdleSleeper::new();
@@ -343,7 +343,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
     execute!(stdout(), terminal::Clear(ClearType::CurrentLine)).unwrap();
 }
 fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C>) {
-    let config = Config {
+    let config = overrides.fallback(&Config {
         request: None,
         command: Some(Rc::new(move |_, _, key, command, entity| Ok(match command {
             Command::Print { value } => {
@@ -353,7 +353,7 @@ fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &a
             }
             _ => CommandStatus::UseDefault { key, command },
         }))),
-    }.with_overrides(&overrides);
+    });
 
     let system = Rc::new(StdSystem::new(server, Some(project_name), config));
     let mut idle_sleeper = IdleSleeper::new();
@@ -441,7 +441,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
     }
 
     let weak_state = Arc::downgrade(&state);
-    let config = Config {
+    let config = overrides.fallback(&Config {
         request: None,
         command: Some(Rc::new(move |_, _, key, command, entity| Ok(match command {
             Command::Print { value } => {
@@ -451,7 +451,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
             }
             _ => CommandStatus::UseDefault { key, command },
         }))),
-    }.with_overrides(&overrides);
+    });
     let system = Rc::new(StdSystem::new(nb_server, Some("native-server"), config));
     let mut idle_sleeper = IdleSleeper::new();
     println!("public id: {}", system.get_public_id());

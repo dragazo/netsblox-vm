@@ -635,7 +635,7 @@ fn test_proc_syscall() {
                     key.complete(Ok(json!(content)));
                     RequestStatus::Handled
                 }
-                _ => return Err(SystemError::NotSupported { feature: SystemFeature::Syscall { name } }.into()),
+                _ => return Err(ErrorCause::NotSupported { feature: Feature::Syscall { name } }.into()),
             }
             _ => RequestStatus::UseDefault { key, request },
         }))),
