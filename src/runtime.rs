@@ -327,12 +327,20 @@ impl<S: System> fmt::Debug for Closure<'_, S> {
     }
 }
 
+/// The kind of entity being represented.
+pub enum EntityKind<'gc, 'a, S: System> {
+    Stage,
+    Sprite,
+    SpriteClone { parent: &'a Entity<'gc, S> },
+}
+
 /// Information about an entity (sprite or stage).
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Entity<'gc, S: System> {
     #[collect(require_static)] pub name: String,
                                pub fields: SymbolTable<'gc, S>,
+    #[collect(require_static)] pub state: S::EntityState,
 }
 impl<S: System> fmt::Debug for Entity<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -576,32 +584,48 @@ pub enum Feature {
     Random,
     /// The ability of a process to get the current time (not necessarily wall time).
     Time,
-    /// The ability of a process to display information.
-    Print,
+
     /// The ability of a process to request keyboard input from the user.
     Input,
     /// The ability of a process to perform a syscall of the given name.
     Syscall { name: String },
     /// The ability of a process to perform an RPC call.
     Rpc { service: String, rpc: String },
+    /// The ability of an entity to know its position.
+    Position,
+    /// The ability of an entity to know its heading.
+    Heading,
+
+    /// The ability of a process to display information.
+    Print,
+    /// The ability of an entity to move forward or backwards by a distance.
+    Forward,
+    /// The ability of an entity to turn right or left by a given angle.
+    Turn,
 }
 
 /// A value-returning request issued from the runtime.
 pub enum Request<'gc, S: System> {
-    /// Performs a system call on the local hardware to access device resources.
-    Syscall { name: String, args: Vec<Value<'gc, S>> },
     /// Request input from the user. The `prompt` argument is either [`Some`] prompt to display, or [`None`] for no prompt.
     Input { prompt: Option<Value<'gc, S>> },
+    /// Performs a system call on the local hardware to access device resources.
+    Syscall { name: String, args: Vec<Value<'gc, S>> },
     /// Requests the system to execute the given RPC.
     Rpc { service: String, rpc: String, args: Vec<(String, Value<'gc, S>)> },
+    /// Request to get the position of an entity. This should return a list of two numbers.
+    Position,
+    /// Request to get the heading of an entity. This should return a number.
+    Heading,
 }
 impl<'gc, S: System> Request<'gc, S> {
     /// Gets the [`Feature`] associated with this request.
     pub fn feature(&self) -> Feature {
         match self {
-            Request::Syscall { name, .. } => Feature::Syscall { name: name.clone() },
             Request::Input { .. } => Feature::Input,
+            Request::Syscall { name, .. } => Feature::Syscall { name: name.clone() },
             Request::Rpc { service, rpc, .. } => Feature::Rpc { service: service.clone(), rpc: rpc.clone() },
+            Request::Position => Feature::Position,
+            Request::Heading => Feature::Heading,
         }
     }
 }
@@ -610,12 +634,18 @@ impl<'gc, S: System> Request<'gc, S> {
 pub enum Command<'gc, S: System> {
     /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
     Print { value: Option<Value<'gc, S>> },
+    /// Move forward by a given distance. If the distance is negative, move backwards instead.
+    Forward { distance: Number },
+    /// Turn right by a given angle. If the angle is negative, turn left instead.
+    Turn { angle: Number },
 }
 impl<'gc, S: System> Command<'gc, S> {
     /// Gets the [`Feature`] associated with this command.
     pub fn feature(&self) -> Feature {
         match self {
             Command::Print { .. } => Feature::Print,
+            Command::Forward { .. } => Feature::Forward,
+            Command::Turn { .. } => Feature::Turn,
         }
     }
 }
@@ -643,6 +673,11 @@ pub trait System: 'static + Sized {
     /// Key type used to reply to a message that was sent to this client with the expectation of receiving a response.
     /// This type is required to be [`Clone`] because there can be multiple message handlers for the same message type.
     type InternReplyKey: 'static + Clone;
+
+    /// Type used to represent an entity's system-specific state.
+    /// This should include any details outside of core process functionality (e.g., graphics, position, orientation).
+    /// This type should be constructable from [`EntityKind`], which is used to initialize a new entity in the runtime.
+    type EntityState: 'static + for<'gc, 'a> From<EntityKind<'gc, 'a, Self>>;
 
     /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
     /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],

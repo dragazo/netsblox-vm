@@ -172,6 +172,9 @@ pub trait CustomTypes: 'static + Sized {
     /// Conversions are automatically performed between this type and [`Value`] via [`CustomTypes::from_intermediate`] and [`CustomTypes::to_intermediate`].
     type Intermediate: 'static + Send + From<Json>;
 
+    /// The type to use for [`System::EntityState`].
+    type EntityState: 'static + for<'gc, 'a> From<EntityKind<'gc, 'a, StdSystem<Self>>>;
+
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>>;
     /// Converts a [`CustomTypes::Intermediate`] into a [`Value`] for use inside the runtime's gc context.
@@ -432,6 +435,8 @@ impl<C: CustomTypes> System for StdSystem<C> {
 
     type ExternReplyKey = ExternReplyKey;
     type InternReplyKey = InternReplyKey;
+
+    type EntityState = C::EntityState;
 
     fn rand<T, R>(&self, range: R) -> Result<T, ErrorCause<StdSystem<C>>> where T: SampleUniform, R: SampleRange<T> {
         Ok(self.rng.lock().unwrap().gen_range(range))

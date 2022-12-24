@@ -13,32 +13,6 @@ use crate::std_system::*;
 
 use super::*;
 
-#[derive(Debug)]
-enum NativeValue {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NativeType {}
-
-impl GetType for NativeValue {
-    type Output = NativeType;
-    fn get_type(&self) -> Self::Output {
-        unreachable!()
-    }
-}
-
-struct C;
-impl CustomTypes for C {
-    type NativeValue = NativeValue;
-    type Intermediate = Json;
-
-    fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
-        Ok(Value::from_json(mc, value)?)
-    }
-    fn to_intermediate<'gc>(value: Value<'gc, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>> {
-        Ok(value.to_json()?)
-    }
-}
-
 #[derive(Collect)]
 #[collect(no_drop)]
 struct Env<'gc> {
@@ -56,8 +30,15 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
     let main = locs.funcs.iter().find(|x| x.0.trans_name.trim() == "main").expect("no main function at global scope");
 
     (EnvArena::new(Default::default(), |mc| {
-        let glob = GcCell::allocate(mc, GlobalContext { proj_name: "test proj".into(), globals: SymbolTable::from_ast(mc, &ast.roles[0].globals).unwrap() });
-        let entity = GcCell::allocate(mc, Entity { name: "test entity".into(), fields: SymbolTable::from_ast(mc, &ast.roles[0].entities[0].fields).unwrap() });
+        let glob = GcCell::allocate(mc, GlobalContext {
+            proj_name: "test proj".into(),
+            globals: SymbolTable::from_ast(mc, &ast.roles[0].globals).unwrap()
+        });
+        let entity = GcCell::allocate(mc, Entity {
+            name: "test entity".into(),
+            fields: SymbolTable::from_ast(mc, &ast.roles[0].entities[0].fields).unwrap(),
+            state: EntityKind::<StdSystem<C>>::Sprite.into()
+        });
         let mut proc = Process::new(Rc::new(code), main.1, glob, entity, settings, system);
         assert!(!proc.is_running());
         proc.initialize(Default::default(), None, None);
@@ -1241,4 +1222,80 @@ fn test_proc_index_over_bounds() {
         }
         assert_eq!(ins_locs.lookup(res.pos).as_deref().unwrap(), "item_18_4");
     });
+}
+
+#[test]
+fn test_proc_basic_motion() {
+    #[derive(PartialEq, Eq, Debug)]
+    enum Action {
+        Forward(i32),
+        Turn(i32),
+        Position,
+        Heading,
+    }
+    fn to_i32(x: Number) -> i32 {
+        let x = x.get();
+        let y = x as i32;
+        if x != y as f64 { panic!() }
+        y
+    }
+
+    let sequence = Rc::new(RefCell::new(Vec::with_capacity(16)));
+    let config = Config {
+        command: {
+            let sequence = sequence.clone();
+            Some(Rc::new(move |_, _, key, command, _| {
+                match command {
+                    Command::Forward { distance } => sequence.borrow_mut().push(Action::Forward(to_i32(distance))),
+                    Command::Turn { angle } => sequence.borrow_mut().push(Action::Turn(to_i32(angle))),
+                    _ => return Ok(CommandStatus::UseDefault { key, command }),
+                }
+                key.complete(Ok(()));
+                Ok(CommandStatus::Handled)
+            }))
+        },
+        request: {
+            let sequence = sequence.clone();
+            Some(Rc::new(move |_, _, key, request, _| {
+                match request {
+                    Request::Position => {
+                        sequence.borrow_mut().push(Action::Position);
+                        key.complete(Ok(json!([13, 54])));
+                    }
+                    Request::Heading => {
+                        sequence.borrow_mut().push(Action::Heading);
+                        key.complete(Ok(json!(39)));
+                    }
+                    _ => return Ok(RequestStatus::UseDefault { key, request }),
+                }
+                Ok(RequestStatus::Handled)
+            }))
+        },
+    };
+
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, config));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/basic-motion.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expected = Value::from_json(mc, json!([ 13, 54, 39 ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expected, 1e-4, "basic motion test")
+    });
+
+    let expected = [
+        Action::Forward(44),
+        Action::Forward(-42),
+        Action::Turn(91),
+        Action::Turn(-49),
+        Action::Turn(-51),
+        Action::Turn(57),
+        Action::Position,
+        Action::Position,
+        Action::Heading,
+    ];
+    assert_eq!(*sequence.borrow(), expected);
 }

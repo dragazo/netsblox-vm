@@ -289,6 +289,16 @@ pub(crate) enum Instruction<'a> {
     /// Consumes 1 value, `value`, from the value stack and sends it as the response to a received message.
     /// It is not an error to reply to a message that was not expecting a reply, in which case the value is simply discarded.
     SendNetworkReply,
+
+    /// Gets an entity's position and pushes it onto the value stack as a list of form `[x, y]`.
+    PushPosition,
+    /// Gets an entity's heading and pushes it onto the value stack.
+    PushHeading,
+
+    /// Consumes 1 value, `dist`, and asynchronously moves the entity forward by that distance (or backwards if negative).
+    Forward,
+    /// Consumes 1 value, `angle`, and asynchronously turns the entity left or right by that angle (opposite direction if negative).
+    Turn { right: bool },
 }
 
 pub(crate) enum RelocateInfo {
@@ -624,6 +634,13 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             86 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
             87 => read_prefixed!(Instruction::SendNetworkReply),
 
+            88 => read_prefixed!(Instruction::PushPosition),
+            89 => read_prefixed!(Instruction::PushHeading),
+
+            90 => read_prefixed!(Instruction::Forward),
+            91 => read_prefixed!(Instruction::Turn { right: true }),
+            92 => read_prefixed!(Instruction::Turn { right: false }),
+
             _ => unreachable!(),
         }
     }
@@ -768,6 +785,13 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(85: move str msg_type, values),
             Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(86: move str msg_type, values),
             Instruction::SendNetworkReply => append_prefixed!(87),
+
+            Instruction::PushPosition => append_prefixed!(88),
+            Instruction::PushHeading => append_prefixed!(89),
+
+            Instruction::Forward => append_prefixed!(90),
+            Instruction::Turn { right: true } => append_prefixed!(91),
+            Instruction::Turn { right: false } => append_prefixed!(92),
         }
     }
 }
@@ -921,6 +945,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::ListJson { value } => self.append_simple_ins(entity, &[value], Instruction::ListJson),
             ast::ExprKind::Answer => self.ins.push(Instruction::PushAnswer.into()),
             ast::ExprKind::Timer => self.ins.push(Instruction::PushTimer.into()),
+            ast::ExprKind::Heading => self.ins.push(Instruction::PushHeading.into()),
             ast::ExprKind::Add { values } => self.append_variadic_op(entity, values, VariadicOp::Add),
             ast::ExprKind::Mul { values } => self.append_variadic_op(entity, values, VariadicOp::Mul),
             ast::ExprKind::Min { values } => self.append_variadic_op(entity, values, VariadicOp::Min),
@@ -1175,6 +1200,16 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins[first_check_pos] = Instruction::ListPopFirstOrElse { goto: empty_list }.into();
                 self.ins[loop_done_pos] = Instruction::ListPopFirstOrElse { goto: ret }.into();
+            }
+            ast::ExprKind::XPos => {
+                self.ins.push(Instruction::PushInt { value: 1 }.into());
+                self.ins.push(Instruction::PushPosition.into());
+                self.ins.push(Instruction::ListGet.into());
+            }
+            ast::ExprKind::YPos => {
+                self.ins.push(Instruction::PushInt { value: 2 }.into());
+                self.ins.push(Instruction::PushPosition.into());
+                self.ins.push(Instruction::ListGet.into());
             }
             x => unimplemented!("{:?}", x),
         };
@@ -1433,6 +1468,18 @@ impl<'a> ByteCodeBuilder<'a> {
                 let len = self.append_variadic(args, entity);
                 self.ins.push(Instruction::Syscall { len }.into());
                 self.ins.push(Instruction::PopValue.into());
+            }
+            ast::StmtKind::Forward { distance } => {
+                self.append_expr(distance, entity);
+                self.ins.push(Instruction::Forward.into());
+            }
+            ast::StmtKind::TurnRight { angle } => {
+                self.append_expr(angle, entity);
+                self.ins.push(Instruction::Turn { right: true }.into());
+            }
+            ast::StmtKind::TurnLeft { angle } => {
+                self.append_expr(angle, entity);
+                self.ins.push(Instruction::Turn { right: false }.into());
             }
             x => unimplemented!("{:?}", x),
         }

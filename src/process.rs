@@ -101,7 +101,7 @@ enum Defer<S: System> {
     Sleep { until: u64, aft_pos: usize },
 }
 enum RequestAction {
-    Rpc, Syscall, Input,
+    Rpc, Syscall, Input, Push,
 }
 
 /// A [`ByteCode`] execution primitive.
@@ -236,27 +236,20 @@ impl<'gc, S: System> Process<'gc, S> {
             })
         }
 
-        macro_rules! syscall_result {
-            ($res:ident => $aft_pos:expr) => {{
-                process_result(mc, $res, self.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_syscall_error), Some)?;
+        macro_rules! process_command {
+            ($res:ident, $aft_pos:expr) => {{
+                process_result(mc, $res, ErrorScheme::Hard, None, None, None, |_: ()| None)?;
                 self.pos = $aft_pos;
             }}
         }
-        macro_rules! rpc_result {
-            ($res:ident => $aft_pos:expr) => {{
-                process_result(mc, $res, self.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?;
-                self.pos = $aft_pos;
-            }}
-        }
-        macro_rules! input_result {
-            ($res:ident => $aft_pos:expr) => {{
-                process_result(mc, $res, ErrorScheme::Hard, None, Some(&mut self.last_answer), None, |_| None)?;
-                self.pos = $aft_pos;
-            }}
-        }
-        macro_rules! command_result {
-            ($res:ident => $aft_pos:expr) => {{
-                process_result(mc, $res, ErrorScheme::Hard, None, None, None, |_| None)?;
+        macro_rules! process_request {
+            ($res:ident, $action:expr, $aft_pos:expr) => {{
+                match $action {
+                    RequestAction::Syscall => process_result(mc, $res, self.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_syscall_error), Some)?,
+                    RequestAction::Rpc => process_result(mc, $res, self.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?,
+                    RequestAction::Input => process_result(mc, $res, ErrorScheme::Hard, None, Some(&mut self.last_answer), None, Some)?,
+                    RequestAction::Push => process_result(mc, $res, ErrorScheme::Hard, Some(&mut self.value_stack), None, None, Some)?,
+                }
                 self.pos = $aft_pos;
             }}
         }
@@ -265,18 +258,14 @@ impl<'gc, S: System> Process<'gc, S> {
             None => (),
             Some(Defer::Request { key, aft_pos, action }) => match self.system.poll_request(mc, key, &*self.entity.read())? {
                 AsyncPoll::Completed(x) => {
-                    match action {
-                        RequestAction::Rpc => rpc_result!(x => *aft_pos),
-                        RequestAction::Syscall => syscall_result!(x => *aft_pos),
-                        RequestAction::Input => input_result!(x => *aft_pos),
-                    }
+                    process_request!(x, action, *aft_pos);
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
             }
             Some(Defer::Command { key, aft_pos }) => match self.system.poll_command(mc, key, &*self.entity.read())? {
                 AsyncPoll::Completed(x) => {
-                    command_result!(x => *aft_pos);
+                    process_command!(x, *aft_pos);
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
@@ -324,6 +313,23 @@ impl<'gc, S: System> Process<'gc, S> {
             }};
             ($var:expr) => {lookup_var!($var => lookup)};
             (mut $var:expr) => {lookup_var!($var => lookup_mut)};
+        }
+
+        macro_rules! perform_command {
+            ($command:expr, $aft_pos:expr) => {{
+                match self.system.perform_command(mc, $command, &*entity)? {
+                    MaybeAsync::Async(key) => self.defer = Some(Defer::Command { key, aft_pos: $aft_pos }),
+                    MaybeAsync::Sync(res) => process_command!(res, $aft_pos),
+                }
+            }}
+        }
+        macro_rules! perform_request {
+            ($request:expr, $action:expr, $aft_pos:expr) => {{
+                match self.system.perform_request(mc, $request, &*entity)? {
+                    MaybeAsync::Async(key) => self.defer = Some(Defer::Request { key, aft_pos: $aft_pos, action: $action }),
+                    MaybeAsync::Sync(res) => process_request!(res, $action, $aft_pos),
+                }
+            }}
         }
 
         let (ins, aft_pos) = Instruction::read(&self.bytecode.code, &self.bytecode.data, self.pos);
@@ -785,10 +791,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     args_vec.push((arg_name, value));
                 }
                 args_vec.reverse();
-                match self.system.perform_request(mc, Request::Rpc { service: service.to_owned(), rpc: rpc.to_owned(), args: args_vec}, &*entity)? {
-                    MaybeAsync::Async(key) => self.defer = Some(Defer::Request { key, aft_pos, action: RequestAction::Rpc }),
-                    MaybeAsync::Sync(res) => rpc_result!(res => aft_pos),
-                }
+                perform_request!(Request::Rpc { service: service.to_owned(), rpc: rpc.to_owned(), args: args_vec}, RequestAction::Rpc, aft_pos);
             }
             Instruction::Return => {
                 let return_point = self.call_stack.pop().unwrap();
@@ -818,11 +821,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().copied().collect(),
                 };
                 let name = self.value_stack.pop().unwrap().to_string(mc)?.as_str().to_owned();
-                match self.system.perform_request(mc, Request::Syscall { name, args }, &*entity)? {
-                    MaybeAsync::Async(key) => self.defer = Some(Defer::Request { key, aft_pos, action: RequestAction::Syscall }),
-                    MaybeAsync::Sync(res) => syscall_result!(res => aft_pos),
-                }
-                self.pos = aft_pos;
+                perform_request!(Request::Syscall { name, args }, RequestAction::Syscall, aft_pos);
             }
             Instruction::PushSyscallError => {
                 self.value_stack.push(self.last_syscall_error.unwrap_or_else(|| Gc::allocate(mc, String::new()).into()));
@@ -846,18 +845,12 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::Print => {
                 let value = self.value_stack.pop().unwrap();
                 let is_empty = match value { Value::String(x) => x.is_empty(), _ => false };
-                match self.system.perform_command(mc, Command::Print { value: if is_empty { None } else { Some(value) } }, &*entity)? {
-                    MaybeAsync::Async(key) => self.defer = Some(Defer::Command { key, aft_pos }),
-                    MaybeAsync::Sync(res) => command_result!(res => aft_pos),
-                }
+                perform_command!(Command::Print { value: if is_empty { None } else { Some(value) } }, aft_pos);
             }
             Instruction::Ask => {
                 let prompt = self.value_stack.pop().unwrap();
                 let is_empty = match prompt { Value::String(x) => x.is_empty(), _ => false };
-                match self.system.perform_request(mc, Request::Input { prompt: if is_empty { None } else { Some(prompt) } }, &*entity)? {
-                    MaybeAsync::Async(key) => self.defer = Some(Defer::Request { key, aft_pos, action: RequestAction::Input }),
-                    MaybeAsync::Sync(res) => input_result!(res => aft_pos),
-                }
+                perform_request!(Request::Input { prompt: if is_empty { None } else { Some(prompt) } }, RequestAction::Input, aft_pos);
             }
             Instruction::PushAnswer => {
                 self.value_stack.push(self.last_answer.unwrap_or_else(|| Gc::allocate(mc, String::new()).into()));
@@ -915,6 +908,17 @@ impl<'gc, S: System> Process<'gc, S> {
                     self.system.send_reply(key, value)?;
                 }
                 self.pos = aft_pos;
+            }
+            Instruction::PushPosition => perform_request!(Request::Position, RequestAction::Push, aft_pos),
+            Instruction::PushHeading => perform_request!(Request::Heading, RequestAction::Push, aft_pos),
+            Instruction::Forward => {
+                let distance = self.value_stack.pop().unwrap().to_number()?;
+                perform_command!(Command::Forward { distance }, aft_pos);
+            }
+            Instruction::Turn { right } => {
+                let mut angle = self.value_stack.pop().unwrap().to_number()?;
+                if !right { angle = angle.neg()? }
+                perform_command!(Command::Turn { angle }, aft_pos);
             }
         }
 

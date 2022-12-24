@@ -3,9 +3,46 @@ use std::iter;
 
 use crate::runtime::*;
 use crate::process::*;
+use crate::std_system::*;
+use crate::json::*;
+use crate::gc::*;
 
 mod process;
 mod project;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeType {}
+
+#[derive(Debug)]
+enum NativeValue {}
+impl GetType for NativeValue {
+    type Output = NativeType;
+    fn get_type(&self) -> Self::Output {
+        unreachable!()
+    }
+}
+
+struct EntityState;
+impl<S: System> From<EntityKind<'_, '_, S>> for EntityState {
+    fn from(_: EntityKind<'_, '_, S>) -> Self {
+        EntityState
+    }
+}
+
+struct C;
+impl CustomTypes for C {
+    type NativeValue = NativeValue;
+    type Intermediate = Json;
+
+    type EntityState = EntityState;
+
+    fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
+        Ok(Value::from_json(mc, value)?)
+    }
+    fn to_intermediate<'gc>(value: Value<'gc, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>> {
+        Ok(value.to_json()?)
+    }
+}
 
 fn assert_values_eq<'gc, S: System>(got: &Value<'gc, S>, expected: &Value<'gc, S>, epsilon: f64, path: &str) {
     if got.get_type() != expected.get_type() {

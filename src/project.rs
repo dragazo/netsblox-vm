@@ -167,10 +167,12 @@ impl<'gc, S: System> Project<'gc, S> {
         let (code, locs) = ByteCode::compile(role);
         let code = Rc::new(code);
 
-        for (ast_entity, entity_locs) in &locs.entities {
+        for (i, (ast_entity, entity_locs)) in locs.entities.iter().enumerate() {
+            let kind = if i == 0 { EntityKind::Stage } else { EntityKind::Sprite };
             let entity = GcCell::allocate(mc, Entity {
                 name: ast_entity.trans_name.clone(),
                 fields: SymbolTable::from_ast(mc, &ast_entity.fields)?,
+                state: kind.into(),
             });
             for (script, script_pos) in entity_locs.scripts.iter() {
                 if let Some(hat) = &script.hat {
