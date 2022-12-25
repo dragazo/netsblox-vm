@@ -244,14 +244,17 @@ pub(crate) enum Instruction<'a> {
     /// to assign to the parameters of `closure` before executing the closure's stored code.
     /// It is an error if the number of supplied arguments does not match the number of parameters.
     CallClosure { args: usize },
-    /// Consumes `args` values from the meta stack and value stack, representing arguments.
-    /// Then calls the given RPC, awaits the result, and pushes the return value onto the value stack.
-    CallRpc { service: &'a str, rpc: &'a str, args: usize },
     /// Pops a return address from the call stack and jumps to it.
     /// The return value is left on the top of the value stack.
     /// If the call stack is empty, this instead terminates the process
     /// with the reported value being the (only) value remaining in the value stack.
     Return,
+
+    /// Consumes `args` values from the meta stack and value stack, representing arguments.
+    /// Then calls the given RPC, awaits the result, and pushes the return value onto the value stack.
+    CallRpc { service: &'a str, rpc: &'a str, args: usize },
+    /// Pushes the last RPC error message onto the value stack.
+    PushRpcError,
 
     /// Consumes `len` values (in reverse order) representing arguments to a system call.
     /// Consumes 1 addition value representing the system call name.
@@ -613,33 +616,35 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             70 => read_prefixed!(Instruction::Call {} : pos, params),
             71 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
             72 => read_prefixed!(Instruction::CallClosure {} : args),
-            73 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
-            74 => read_prefixed!(Instruction::Return),
+            73 => read_prefixed!(Instruction::Return),
 
-            75 => read_prefixed!(Instruction::Syscall {} : len),
-            76 => read_prefixed!(Instruction::PushSyscallError),
+            74 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
+            75 => read_prefixed!(Instruction::PushRpcError),
 
-            77 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            78 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            76 => read_prefixed!(Instruction::Syscall {} : len),
+            77 => read_prefixed!(Instruction::PushSyscallError),
 
-            79 => read_prefixed!(Instruction::Print),
-            80 => read_prefixed!(Instruction::Ask),
-            81 => read_prefixed!(Instruction::PushAnswer),
+            78 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            79 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
-            82 => read_prefixed!(Instruction::ResetTimer),
-            83 => read_prefixed!(Instruction::PushTimer),
-            84 => read_prefixed!(Instruction::Sleep),
+            80 => read_prefixed!(Instruction::Print),
+            81 => read_prefixed!(Instruction::Ask),
+            82 => read_prefixed!(Instruction::PushAnswer),
 
-            85 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
-            86 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
-            87 => read_prefixed!(Instruction::SendNetworkReply),
+            83 => read_prefixed!(Instruction::ResetTimer),
+            84 => read_prefixed!(Instruction::PushTimer),
+            85 => read_prefixed!(Instruction::Sleep),
 
-            88 => read_prefixed!(Instruction::PushPosition),
-            89 => read_prefixed!(Instruction::PushHeading),
+            86 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
+            87 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
+            88 => read_prefixed!(Instruction::SendNetworkReply),
 
-            90 => read_prefixed!(Instruction::Forward),
-            91 => read_prefixed!(Instruction::Turn { right: true }),
-            92 => read_prefixed!(Instruction::Turn { right: false }),
+            89 => read_prefixed!(Instruction::PushPosition),
+            90 => read_prefixed!(Instruction::PushHeading),
+
+            91 => read_prefixed!(Instruction::Forward),
+            92 => read_prefixed!(Instruction::Turn { right: true }),
+            93 => read_prefixed!(Instruction::Turn { right: false }),
 
             _ => unreachable!(),
         }
@@ -765,33 +770,35 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::Call { pos, params } => append_prefixed!(70: move pos, params),
             Instruction::MakeClosure { pos, params, captures } => append_prefixed!(71: move pos, params, captures),
             Instruction::CallClosure { args } => append_prefixed!(72: args),
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(73: move str service, move str rpc, args),
-            Instruction::Return => append_prefixed!(74),
+            Instruction::Return => append_prefixed!(73),
 
-            Instruction::Syscall { len } => append_prefixed!(75: len),
-            Instruction::PushSyscallError => append_prefixed!(76),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(74: move str service, move str rpc, args),
+            Instruction::PushRpcError => append_prefixed!(75),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(77),
-            Instruction::Broadcast { wait: true } => append_prefixed!(78),
+            Instruction::Syscall { len } => append_prefixed!(76: len),
+            Instruction::PushSyscallError => append_prefixed!(77),
 
-            Instruction::Print => append_prefixed!(79),
-            Instruction::Ask => append_prefixed!(80),
-            Instruction::PushAnswer => append_prefixed!(81),
+            Instruction::Broadcast { wait: false } => append_prefixed!(78),
+            Instruction::Broadcast { wait: true } => append_prefixed!(79),
 
-            Instruction::ResetTimer => append_prefixed!(82),
-            Instruction::PushTimer => append_prefixed!(83),
-            Instruction::Sleep => append_prefixed!(84),
+            Instruction::Print => append_prefixed!(80),
+            Instruction::Ask => append_prefixed!(81),
+            Instruction::PushAnswer => append_prefixed!(82),
 
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(85: move str msg_type, values),
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(86: move str msg_type, values),
-            Instruction::SendNetworkReply => append_prefixed!(87),
+            Instruction::ResetTimer => append_prefixed!(83),
+            Instruction::PushTimer => append_prefixed!(84),
+            Instruction::Sleep => append_prefixed!(85),
 
-            Instruction::PushPosition => append_prefixed!(88),
-            Instruction::PushHeading => append_prefixed!(89),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(86: move str msg_type, values),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(87: move str msg_type, values),
+            Instruction::SendNetworkReply => append_prefixed!(88),
 
-            Instruction::Forward => append_prefixed!(90),
-            Instruction::Turn { right: true } => append_prefixed!(91),
-            Instruction::Turn { right: false } => append_prefixed!(92),
+            Instruction::PushPosition => append_prefixed!(89),
+            Instruction::PushHeading => append_prefixed!(90),
+
+            Instruction::Forward => append_prefixed!(91),
+            Instruction::Turn { right: true } => append_prefixed!(92),
+            Instruction::Turn { right: false } => append_prefixed!(93),
         }
     }
 }
@@ -943,6 +950,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::ListContains { list, value } => self.append_simple_ins(entity, &[list, value], Instruction::ListContains),
             ast::ExprKind::Random { a, b } => self.append_simple_ins(entity, &[a, b], BinaryOp::Random.into()),
             ast::ExprKind::ListJson { value } => self.append_simple_ins(entity, &[value], Instruction::ListJson),
+            ast::ExprKind::RpcError => self.ins.push(Instruction::PushRpcError.into()),
             ast::ExprKind::Answer => self.ins.push(Instruction::PushAnswer.into()),
             ast::ExprKind::Timer => self.ins.push(Instruction::PushTimer.into()),
             ast::ExprKind::Heading => self.ins.push(Instruction::PushHeading.into()),

@@ -247,7 +247,7 @@ impl<'gc, S: System> Process<'gc, S> {
             ($res:ident, $action:expr, $aft_pos:expr) => {{
                 match $action {
                     RequestAction::Syscall => process_result(mc, $res, self.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_syscall_error), Some)?,
-                    RequestAction::Rpc => process_result(mc, $res, self.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?,
+                    RequestAction::Rpc => process_result(mc, $res, self.settings.rpc_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?,
                     RequestAction::Input => process_result(mc, $res, ErrorScheme::Hard, None, Some(&mut self.last_answer), None, Some)?,
                     RequestAction::Push => process_result(mc, $res, ErrorScheme::Hard, Some(&mut self.value_stack), None, None, Some)?,
                 }
@@ -783,17 +783,6 @@ impl<'gc, S: System> Process<'gc, S> {
                 });
                 self.pos = closure.pos;
             }
-            Instruction::CallRpc { service, rpc, args } => {
-                debug_assert_eq!(self.meta_stack.len(), args);
-                let mut args_vec = Vec::with_capacity(args);
-                for _ in 0..args {
-                    let arg_name = self.meta_stack.pop().unwrap();
-                    let value = self.value_stack.pop().unwrap();
-                    args_vec.push((arg_name, value));
-                }
-                args_vec.reverse();
-                perform_request!(Request::Rpc { service: service.to_owned(), rpc: rpc.to_owned(), args: args_vec}, RequestAction::Rpc, aft_pos);
-            }
             Instruction::Return => {
                 let return_point = self.call_stack.pop().unwrap();
                 let return_value = self.value_stack.pop().unwrap();
@@ -812,6 +801,21 @@ impl<'gc, S: System> Process<'gc, S> {
                     self.pos = return_point.return_to;
                     self.warp_counter = return_point.warp_counter;
                 }
+            }
+            Instruction::CallRpc { service, rpc, args } => {
+                debug_assert_eq!(self.meta_stack.len(), args);
+                let mut args_vec = Vec::with_capacity(args);
+                for _ in 0..args {
+                    let arg_name = self.meta_stack.pop().unwrap();
+                    let value = self.value_stack.pop().unwrap();
+                    args_vec.push((arg_name, value));
+                }
+                args_vec.reverse();
+                perform_request!(Request::Rpc { service: service.to_owned(), rpc: rpc.to_owned(), args: args_vec}, RequestAction::Rpc, aft_pos);
+            }
+            Instruction::PushRpcError => {
+                self.value_stack.push(self.last_rpc_error.unwrap_or_else(|| Gc::allocate(mc, String::new()).into()));
+                self.pos = aft_pos;
             }
             Instruction::Syscall { len } => {
                 let args = match len {
