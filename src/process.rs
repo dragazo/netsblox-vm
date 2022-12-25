@@ -10,6 +10,7 @@ use std::prelude::v1::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
 use std::rc::Rc;
 use std::iter::{self, Cycle};
+use std::cmp::Ordering;
 
 use crate::*;
 use crate::gc::*;
@@ -1038,6 +1039,13 @@ mod ops {
         res
     }
 
+    fn cmp_values<'gc, S: System>(mc: MutationContext<'gc, '_>, a: &Value<'gc, S>, b: &Value<'gc, S>) -> Result<Ordering, ErrorCause<S>> {
+        Ok(match (a.to_number(), b.to_number()) {
+            (Ok(a), Ok(b)) => a.cmp(&b),
+            _ => a.to_string(mc)?.cmp(&*b.to_string(mc)?),
+        })
+    }
+
     fn binary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc, S>, b: &Value<'gc, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, S>, Identity<'gc, S>, bool), Value<'gc, S>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc, S>, &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>>) -> Result<Value<'gc, S>, ErrorCause<S>> {
         let cache_key = (a.identity(), b.identity(), matrix_mode);
         Ok(match cache.get(&cache_key) {
@@ -1093,10 +1101,10 @@ mod ops {
             BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.powf(b.to_number()?)?.into())),
             BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(b.to_number()?.log(a.to_number()?)?.into())),
             BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(Number::new(a.to_number()?.get().atan2(b.to_number()?.get()).to_degrees())?.into())),
-            BinaryOp::Greater   => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? > b.to_number()?).into())),
-            BinaryOp::GreaterEq => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? >= b.to_number()?).into())),
-            BinaryOp::Less      => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? < b.to_number()?).into())),
-            BinaryOp::LessEq    => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((a.to_number()? <= b.to_number()?).into())),
+            BinaryOp::Greater   => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| Ok((cmp_values(mc, a, b)? == Ordering::Greater).into())),
+            BinaryOp::GreaterEq => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| Ok((cmp_values(mc, a, b)? != Ordering::Less).into())),
+            BinaryOp::Less      => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| Ok((cmp_values(mc, a, b)? == Ordering::Less).into())),
+            BinaryOp::LessEq    => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| Ok((cmp_values(mc, a, b)? != Ordering::Greater).into())),
             BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.min(b.to_number()?).into())),
             BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.max(b.to_number()?).into())),
 
