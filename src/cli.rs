@@ -316,6 +316,9 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
             for input in input_sequence.drain(..) { proj.input(input); }
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
+                if let ProjectStep::Error { error, proc } = &res {
+                    print!("\r\n>>> runtime error in entity {:?}: {:?}\r\n\r\n", proc.get_entity().read().name, error.cause);
+                }
                 idle_sleeper.consume(&res);
             }
         });
@@ -357,12 +360,12 @@ fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &a
 
     let system = Rc::new(StdSystem::new(server, Some(project_name), config));
     let mut idle_sleeper = IdleSleeper::new();
-    println!("public id: {}", system.get_public_id());
+    println!(">>> public id: {}\n", system.get_public_id());
 
     let env = match get_env(role, system.clone()) {
         Ok(x) => x,
         Err(e) => {
-            println!("error loading project: {e:?}");
+            println!(">>> error loading project: {e:?}");
             return;
         }
     };
@@ -373,6 +376,9 @@ fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &a
             let mut proj = env.proj.write(mc);
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
+                if let ProjectStep::Error { error, proc } = &res {
+                    println!("\n>>> runtime error in entity {:?}: {:?}\n", proc.get_entity().read().name, error.cause);
+                }
                 idle_sleeper.consume(&res);
             }
         });
