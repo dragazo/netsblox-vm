@@ -161,6 +161,7 @@ impl<'gc, S: System> Project<'gc, S> {
         let global_context = GcCell::allocate(mc, GlobalContext {
             proj_name: role.name.clone(),
             globals: SymbolTable::from_ast(mc, &role.globals)?,
+            timer_start: system.time_ms().unwrap(),
         });
         let mut proj = Project::new(global_context, settings, system);
 

@@ -518,6 +518,7 @@ impl<'gc, 'a, 'b, S: System> LookupGroup<'gc, 'a, 'b, S> {
 pub struct GlobalContext<'gc, S: System> {
     #[collect(require_static)] pub proj_name: String,
                                pub globals: SymbolTable<'gc, S>,
+    #[collect(require_static)] pub timer_start: u64,
 }
 
 /// A blocking handle for a [`BarrierCondition`].

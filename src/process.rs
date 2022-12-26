@@ -129,7 +129,6 @@ pub struct Process<'gc, S: System> {
                                last_syscall_error: Option<Value<'gc, S>>,
                                last_rpc_error: Option<Value<'gc, S>>,
                                last_answer: Option<Value<'gc, S>>,
-    #[collect(require_static)] timer_start: u64,
     #[collect(require_static)] system: Rc<S>,
 }
 impl<'gc, S: System> Process<'gc, S> {
@@ -150,7 +149,6 @@ impl<'gc, S: System> Process<'gc, S> {
             last_syscall_error: None,
             last_rpc_error: None,
             last_answer: None,
-            timer_start: 0,
             system,
         }
     }
@@ -198,7 +196,6 @@ impl<'gc, S: System> Process<'gc, S> {
         self.last_syscall_error = None;
         self.last_rpc_error = None;
         self.last_answer = None;
-        self.timer_start = self.system.time_ms().unwrap_or(0);
     }
     /// Executes a single bytecode instruction.
     /// The return value can be used to determine what additional effects the script has requested,
@@ -862,11 +859,11 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::ResetTimer => {
-                self.timer_start = self.system.time_ms()?;
+                global_context.timer_start = self.system.time_ms()?;
                 self.pos = aft_pos;
             }
             Instruction::PushTimer => {
-                self.value_stack.push(Number::new(self.system.time_ms()?.saturating_sub(self.timer_start) as f64 / 1000.0)?.into());
+                self.value_stack.push(Number::new(self.system.time_ms()?.saturating_sub(global_context.timer_start) as f64 / 1000.0)?.into());
                 self.pos = aft_pos;
             }
             Instruction::Sleep => {

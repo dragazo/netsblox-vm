@@ -32,7 +32,8 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
     (EnvArena::new(Default::default(), |mc| {
         let glob = GcCell::allocate(mc, GlobalContext {
             proj_name: "test proj".into(),
-            globals: SymbolTable::from_ast(mc, &ast.roles[0].globals).unwrap()
+            globals: SymbolTable::from_ast(mc, &ast.roles[0].globals).unwrap(),
+            timer_start: system.time_ms().unwrap(),
         });
         let entity = GcCell::allocate(mc, Entity {
             name: "test entity".into(),
