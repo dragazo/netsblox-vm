@@ -100,7 +100,7 @@ impl<K: Key, T> SlotMap<K, T> {
         #[cfg(test)] assert!(self.invariant());
 
         let slot = self.slots.get_mut(key.get_slot())?;
-        let res = slot.value.take();
+        let res = if slot.generation == key.get_generation() { slot.value.take() } else { None };
         if res.is_some() {
             slot.generation += 1;
             self.num_values -= 1;
@@ -318,4 +318,18 @@ fn test_slotmap() {
         assert_eq!(map.get(key).copied(), None);
         assert_eq!(map.get_mut(key).copied(), None);
     }
+
+    map.clear();
+    let k1 = map.insert(12);
+    assert_eq!(map.remove(k1), Some(12));
+    assert_eq!(map.remove(k1), None);
+    assert_eq!(map.remove(k1), None);
+    let k2 = map.insert(13);
+    assert_eq!(k1.0, k2.0);
+    assert_eq!(k1.1 + 1, k2.1);
+    assert_eq!(map.remove(k1), None);
+    assert_eq!(map.remove(k1), None);
+    assert_eq!(map.remove(k2), Some(13));
+    assert_eq!(map.remove(k2), None);
+    assert_eq!(map.remove(k2), None);
 }

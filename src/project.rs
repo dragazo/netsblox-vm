@@ -41,6 +41,10 @@ pub enum ProjectStep<'gc, S: System> {
     Yield,
     /// The project had a running process, which did any non-yielding operation.
     Normal,
+    /// The project had a running process which terminated successfully.
+    /// This can be though of as a special case of [`ProjectStep::Normal`],
+    /// but also returns the result and process so it can be queried for state information if needed.
+    ProcessTerminated { result: Option<Value<'gc, S>>, proc: Process<'gc, S> },
     /// The project had a running process, which encountered a runtime error.
     /// The dead process is returned, which can be queried for diagnostic information.
     Error { error: ExecError<S>, proc: Process<'gc, S> },
@@ -126,9 +130,8 @@ impl<'gc, S: System> Script<'gc, S> {
         }
     }
     fn stop_all(&mut self, state: &mut State<'gc, S>) {
-        if let Some(process) = self.process {
+        if let Some(process) = self.process.take() {
             state.processes.remove(process);
-            self.process = None;
         }
         self.context_queue.clear();
     }
@@ -269,8 +272,6 @@ impl<'gc, S: System> Project<'gc, S> {
                     self.state.process_queue.push_back(proc_key);
                     ProjectStep::Yield
                 }
-                ProcessStep::Terminate { .. } => ProjectStep::Normal,
-                ProcessStep::Idle => unreachable!(),
                 ProcessStep::Broadcast { msg_type, barrier } => {
                     for script in self.scripts.iter_mut() {
                         if let Event::LocalMessage { msg_type: recv_type } = &script.event {
@@ -283,11 +284,10 @@ impl<'gc, S: System> Project<'gc, S> {
                     self.state.process_queue.push_front(proc_key); // keep executing same process, if it was a wait, it'll yield next step
                     ProjectStep::Normal
                 }
+                ProcessStep::Terminate { result } => ProjectStep::ProcessTerminated { result, proc: self.state.processes.remove(proc_key).unwrap() },
+                ProcessStep::Idle => unreachable!(),
             }
-            Err(error) => ProjectStep::Error {
-                error,
-                proc: self.state.processes.remove(proc_key).unwrap(),
-            },
+            Err(error) => ProjectStep::Error { error, proc: self.state.processes.remove(proc_key).unwrap() },
         }
     }
     pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc, S>> {

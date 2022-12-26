@@ -60,7 +60,7 @@ impl IdleSleeper {
                     self.sleep_now();
                 }
             }
-            ProjectStep::Normal | ProjectStep::Error { .. } => self.yield_count = 0,
+            ProjectStep::Normal | ProjectStep::ProcessTerminated { .. } | ProjectStep::Error { .. } => self.yield_count = 0,
         }
     }
     fn sleep_now(&mut self) {
