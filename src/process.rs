@@ -213,7 +213,7 @@ impl<'gc, S: System> Process<'gc, S> {
     }
     fn step_impl(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, S>, ErrorCause<S>> {
         fn process_result<'gc, S: System, T: Copy>(mc: MutationContext<'gc, '_>, result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, S>>>, last_ok: Option<&mut Option<Value<'gc, S>>>, last_err: Option<&mut Option<Value<'gc, S>>>, to_value: fn(T) -> Option<Value<'gc, S>>) -> Result<(), ErrorCause<S>> {
-            Ok(match result {
+            match result {
                 Ok(x) => match to_value(x) {
                     Some(x) => {
                         if let Some(last_ok) = last_ok { *last_ok = Some(x) }
@@ -231,7 +231,8 @@ impl<'gc, S: System> Process<'gc, S> {
                     }
                     ErrorScheme::Hard => return Err(ErrorCause::Promoted { error: x }),
                 }
-            })
+            }
+            Ok(())
         }
 
         macro_rules! process_command {
@@ -946,7 +947,7 @@ mod ops {
         if good { Some(vals) } else { None }
     }
 
-    pub(super) fn prep_list_index<'gc, S: System>(index: &Value<'gc, S>, list_len: usize) -> Result<usize, ErrorCause<S>> {
+    pub(super) fn prep_list_index<S: System>(index: &Value<'_, S>, list_len: usize) -> Result<usize, ErrorCause<S>> {
         let raw_index = index.to_number()?.get();
         if raw_index < 1.0 || raw_index > list_len as f64 { return Err(ErrorCause::IndexOutOfBounds { index: raw_index, list_len }) }
         let index = raw_index as u64;
@@ -955,7 +956,7 @@ mod ops {
     }
     pub(super) fn prep_rand_index<S: System>(system: &S, list_len: usize) -> Result<usize, ErrorCause<S>> {
         if list_len == 0 { return Err(ErrorCause::IndexOutOfBounds { index: 0.0, list_len: 0 }) }
-        Ok(system.rand(0..list_len)?)
+        system.rand(0..list_len)
     }
 
     pub(super) fn flatten<'gc, S: System>(value: &Value<'gc, S>) -> Result<VecDeque<Value<'gc, S>>, ErrorCause<S>> {
@@ -979,7 +980,7 @@ mod ops {
         debug_assert_eq!(cache.len(), 0);
         Ok(res)
     }
-    pub(super) fn dimensions<'gc, S: System>(value: &Value<'gc, S>) -> Result<Vec<usize>, ErrorCause<S>> {
+    pub(super) fn dimensions<S: System>(value: &Value<'_, S>) -> Result<Vec<usize>, ErrorCause<S>> {
         fn dimensions_impl<'gc, S: System>(value: &Value<'gc, S>, depth: usize, res: &mut Vec<usize>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<(), ErrorCause<S>> {
             debug_assert!(depth <= res.len());
 

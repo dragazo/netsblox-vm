@@ -219,7 +219,7 @@ impl<'gc, S: System> Value<'gc, S> {
         Ok(match value {
             Json::Null => return Err(FromJsonError::HadNull),
             Json::Bool(x) => Value::Bool(x),
-            Json::Number(x) => Value::Number(x.as_f64().map(|x| Number::new(x).ok()).flatten().ok_or(FromJsonError::HadBadNumber)?),
+            Json::Number(x) => Value::Number(x.as_f64().and_then(|x| Number::new(x).ok()).ok_or(FromJsonError::HadBadNumber)?),
             Json::String(x) => Value::String(Gc::allocate(mc, x)),
             Json::Array(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|x| Value::from_json(mc, x)).collect::<Result<_,_>>()?)),
             Json::Object(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|(k, v)| {
@@ -235,7 +235,7 @@ impl<'gc, S: System> Value<'gc, S> {
         fn simplify<'gc, S: System>(value: &Value<'gc, S>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<Json, ToJsonError<S>> {
             Ok(match value {
                 Value::Bool(x) => Json::Bool(*x),
-                Value::Number(x) => Json::Number(serde_json::Number::from_f64(x.get()).ok_or(ToJsonError::BadNumber(x.get()))?),
+                Value::Number(x) => Json::Number(serde_json::Number::from_f64(x.get()).ok_or_else(|| ToJsonError::BadNumber(x.get()))?),
                 Value::String(x) => Json::String(x.as_str().to_owned()),
                 Value::Closure(_) | Value::Entity(_) | Value::Native(_) => return Err(ToJsonError::ComplexType(value.get_type())),
                 Value::List(x) => {
@@ -278,7 +278,7 @@ impl<'gc, S: System> Value<'gc, S> {
     pub fn to_number(&self) -> Result<Number, ConversionError<S>> {
         Ok(match self {
             Value::Number(x) => *x,
-            Value::String(x) => x.parse().ok().map(|x| Number::new(x).ok()).flatten().ok_or_else(|| ConversionError { got: Type::String, expected: Type::Number })?,
+            Value::String(x) => x.parse().ok().and_then(|x| Number::new(x).ok()).ok_or(ConversionError { got: Type::String, expected: Type::Number })?,
             x => return Err(ConversionError { got: x.get_type(), expected: Type::Number }),
         })
     }
@@ -431,6 +431,10 @@ impl<'gc, S: System> SymbolTable<'gc, S> {
     /// Gets the number of symbols currently stored in the symbol table.
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+    /// Checks if the symbol table is currently empty (no defined symbols).
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
     /// Iterates over the key value pairs stored in the symbol table.
     pub fn iter(&self) -> symbol_table::Iter<'gc, '_, S> {

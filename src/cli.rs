@@ -270,7 +270,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
     let mut idle_sleeper = IdleSleeper::new();
     print!("public id: {}\r\n", system.get_public_id());
 
-    let env = match get_env(role, system.clone()) {
+    let env = match get_env(role, system) {
         Ok(x) => x,
         Err(e) => {
             print!("error loading project: {e:?}\r\n");
@@ -362,7 +362,7 @@ fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &a
     let mut idle_sleeper = IdleSleeper::new();
     println!(">>> public id: {}\n", system.get_public_id());
 
-    let env = match get_env(role, system.clone()) {
+    let env = match get_env(role, system) {
         Ok(x) => x,
         Err(e) => {
             println!(">>> error loading project: {e:?}");
@@ -579,7 +579,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
                         let cause = format!("{:?}", error.cause);
                         tee_println!(Some(&state) => "\n>>> runtime error in entity {entity:?}: {cause:?}\n>>> see red error comments...\n");
 
-                        fn summarize_symbols<'gc, C: CustomTypes>(symbols: &SymbolTable<'gc, StdSystem<C>>) -> Vec<VarEntry> {
+                        fn summarize_symbols<C: CustomTypes>(symbols: &SymbolTable<'_, StdSystem<C>>) -> Vec<VarEntry> {
                             let mut res = Vec::with_capacity(symbols.len());
                             for (k, v) in symbols {
                                 res.push(VarEntry { name: k.clone(), value: format!("{:?}", v.get()) });

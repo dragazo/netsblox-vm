@@ -34,7 +34,7 @@ impl CustomTypes for C {
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
         Ok(Value::from_json(mc, value)?)
     }
-    fn to_intermediate<'gc>(value: Value<'gc, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>> {
+    fn to_intermediate(value: Value<'_, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>> {
         Ok(value.to_json()?)
     }
 }

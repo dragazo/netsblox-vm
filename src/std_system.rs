@@ -178,7 +178,7 @@ pub trait CustomTypes: 'static + Sized {
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>>;
     /// Converts a [`CustomTypes::Intermediate`] into a [`Value`] for use inside the runtime's gc context.
-    fn to_intermediate<'gc>(value: Value<'gc, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>>;
+    fn to_intermediate(value: Value<'_, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>>;
 }
 
 /// A collection of implementation options for [`StdSystem`].
@@ -463,7 +463,7 @@ impl<C: CustomTypes> System for StdSystem<C> {
                     let args = args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_>>>()?;
                     self.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap();
                 }
-                _ => return Err(ErrorCause::NotSupported { feature: request.feature() }.into()),
+                _ => return Err(ErrorCause::NotSupported { feature: request.feature() }),
             }
         }
         Ok(MaybeAsync::Async(key))
@@ -484,11 +484,11 @@ impl<C: CustomTypes> System for StdSystem<C> {
                 let key = CommandKey(AsyncResultHandle::pending());
                 match handler(self, mc, CommandKey(key.0.clone()), command, entity)? {
                     CommandStatus::Handled => (),
-                    CommandStatus::UseDefault { key: _, command } => return Err(ErrorCause::NotSupported { feature: command.feature() }.into()),
+                    CommandStatus::UseDefault { key: _, command } => return Err(ErrorCause::NotSupported { feature: command.feature() }),
                 }
                 Ok(MaybeAsync::Async(key))
             }
-            None => Err(ErrorCause::NotSupported { feature: command.feature() }.into()),
+            None => Err(ErrorCause::NotSupported { feature: command.feature() }),
         }
     }
     fn poll_command<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::CommandKey, _: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<(), String>>, ErrorCause<Self>> {

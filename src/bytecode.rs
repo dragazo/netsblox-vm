@@ -892,7 +892,7 @@ impl<'a> ByteCodeBuilder<'a> {
         }
     }
     fn append_expr(&mut self, expr: &'a ast::Expr, entity: Option<&'a ast::Entity>) {
-        let res = match &expr.kind {
+        match &expr.kind {
             ast::ExprKind::Value(v) => self.ins.push(match v {
                 ast::Value::Number(v) => Instruction::PushNumber { value: *v },
                 ast::Value::String(v) => Instruction::PushString { value: v },
@@ -1220,13 +1220,11 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::ListGet.into());
             }
             x => unimplemented!("{:?}", x),
-        };
+        }
 
         if let Some(location) = expr.info.location.as_deref() {
             self.ins_locations.insert(self.ins.len(), location);
         }
-
-        res
     }
     fn append_stmt(&mut self, stmt: &'a ast::Stmt, entity: Option<&'a ast::Entity>) {
         match &stmt.kind {
