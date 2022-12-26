@@ -1312,6 +1312,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 for stmt in stmts {
                     self.append_stmt(stmt, entity);
                 }
+                self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
                 let aft = self.ins.len();
 

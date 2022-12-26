@@ -80,6 +80,24 @@ fn test_proj_broadcast() {
 }
 
 #[test]
+fn test_proj_loop_yields() {
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/loop-yields.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        assert_values_eq(&global_context.globals.lookup("counter").unwrap().get(), &Number::new(150.0).unwrap().into(), 1e-20, "counter");
+        let expected = Value::from_json(mc, json!([
+            1, 3, 6, 10, 15, 16, 18, 21, 25, 30, 31, 33, 36, 40, 45, 46, 48, 51, 55, 60, 61, 63, 66, 70, 75,
+            76, 78, 81, 85, 90, 91, 93, 96, 100, 105, 106, 108, 111, 115, 120, 121, 123, 126, 130, 135, 136, 138, 141, 145, 150
+        ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("history").unwrap().get(), &expected, 1e-20, "history")
+    });
+}
+
+#[test]
 fn test_proj_parallel_rpcs() {
     let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), system);
