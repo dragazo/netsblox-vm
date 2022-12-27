@@ -39,9 +39,6 @@ impl CustomTypes for C {
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
         Ok(Value::from_json(mc, value)?)
     }
-    fn to_intermediate<'gc>(value: Value<'gc, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>> {
-        Ok(value.to_json()?)
-    }
 }
 
 fn assert_values_eq<'gc, S: System>(got: &Value<'gc, S>, expected: &Value<'gc, S>, epsilon: f64, path: &str) {

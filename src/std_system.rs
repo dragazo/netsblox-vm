@@ -169,7 +169,7 @@ pub trait CustomTypes: 'static + Sized {
     /// The reason this is needed is that [`Value`] can only be used during the lifetime of an associated [`MutationContext`] handle,
     /// which cannot be extended into the larger lifetime required for async operations.
     /// 
-    /// Conversions are automatically performed between this type and [`Value`] via [`CustomTypes::from_intermediate`] and [`CustomTypes::to_intermediate`].
+    /// Conversions are automatically performed from this type to [`Value`] via [`CustomTypes::from_intermediate`].
     type Intermediate: 'static + Send + From<Json>;
 
     /// The type to use for [`System::EntityState`].
@@ -177,8 +177,6 @@ pub trait CustomTypes: 'static + Sized {
 
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>>;
-    /// Converts a [`CustomTypes::Intermediate`] into a [`Value`] for use inside the runtime's gc context.
-    fn to_intermediate(value: Value<'_, StdSystem<Self>>) -> Result<Self::Intermediate, ErrorCause<StdSystem<Self>>>;
 }
 
 /// A collection of implementation options for [`StdSystem`].

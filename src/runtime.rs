@@ -171,7 +171,7 @@ impl<S: System> fmt::Debug for Value<'_, S> {
                 Value::String(x) => write!(f, "{:?}", x.as_str()),
                 Value::Closure(x) => write!(f, "{:?}", &*x.read()),
                 Value::Entity(x) => write!(f, "{:?}", &*x.read()),
-                Value::Native(x) => write!(f, "{:?}", &*x.read()),
+                Value::Native(x) => write!(f, "{:?}", x.read().0),
                 Value::List(x) => {
                     let identity = value.identity();
                     if !cache.insert(identity) { return write!(f, "[...]") }
