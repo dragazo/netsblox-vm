@@ -596,13 +596,13 @@ fn test_proc_syscall() {
     let buffer = Rc::new(RefCell::new(String::new()));
     let buffer_cpy = buffer.clone();
     let config = Config {
-        request: Some(Rc::new(move |_, mc, key, request, _| match &request {
+        request: Some(Rc::new(move |_, _, key, request, _| match &request {
             Request::Syscall { name, args } => match name.as_str() {
                 "bar" => match args.is_empty() {
                     false => {
                         let mut buffer = buffer_cpy.borrow_mut();
                         for value in args {
-                            buffer.push_str(value.to_string(mc).unwrap().as_str());
+                            buffer.push_str(value.to_string().unwrap().as_ref());
                         }
                         key.complete(Ok(json!(buffer.len() as f64)));
                         RequestStatus::Handled

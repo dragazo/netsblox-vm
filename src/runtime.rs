@@ -2,6 +2,7 @@ use std::prelude::v1::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
+use std::borrow::Cow;
 use std::fmt;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
@@ -283,10 +284,10 @@ impl<'gc, S: System> Value<'gc, S> {
         })
     }
     /// Attempts to interpret this value as a string.
-    pub fn to_string(&self, mc: MutationContext<'gc, '_>) -> Result<Gc<'gc, String>, ConversionError<S>> {
+    pub fn to_string(&self) -> Result<Cow<str>, ConversionError<S>> {
         Ok(match self {
-            Value::String(x) => *x,
-            Value::Number(x) => Gc::allocate(mc, x.to_string()),
+            Value::String(x) => Cow::Borrowed(&*x),
+            Value::Number(x) => Cow::Owned(x.to_string()),
             x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
         })
     }

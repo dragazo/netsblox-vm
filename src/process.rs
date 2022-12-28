@@ -46,7 +46,7 @@ pub enum ProcessStep<'gc, S: System> {
     /// such as a stop script command or the death of the process's associated entity.
     Terminate { result: Option<Value<'gc, S>> },
     /// The process has requested to broadcast a message to all entities, which may trigger other code to execute.
-    Broadcast { msg_type: Gc<'gc, String>, barrier: Option<Barrier> },
+    Broadcast { msg_type: String, barrier: Option<Barrier> },
 }
 
 /// The error promotion paradigm to use for certain types of runtime errors.
@@ -644,7 +644,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 }
                 let mut res = String::new();
                 for value in values.iter().rev() {
-                    res += value.to_string(mc)?.as_str();
+                    res += value.to_string()?.as_ref();
                 }
                 self.value_stack.push(Gc::allocate(mc, res).into());
                 self.pos = aft_pos;
@@ -823,7 +823,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     }
                     VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().copied().collect(),
                 };
-                let name = self.value_stack.pop().unwrap().to_string(mc)?.as_str().to_owned();
+                let name = self.value_stack.pop().unwrap().to_string()?.into_owned();
                 perform_request!(Request::Syscall { name, args }, RequestAction::Syscall, aft_pos);
             }
             Instruction::PushSyscallError => {
@@ -831,7 +831,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::Broadcast { wait } => {
-                let msg_type = self.value_stack.pop().unwrap().to_string(mc)?;
+                let msg_type = self.value_stack.pop().unwrap().to_string()?.into_owned();
                 let barrier = match wait {
                     false => {
                         self.pos = aft_pos;
@@ -1041,10 +1041,10 @@ mod ops {
         res
     }
 
-    fn cmp_values<'gc, S: System>(mc: MutationContext<'gc, '_>, a: &Value<'gc, S>, b: &Value<'gc, S>) -> Result<Ordering, ErrorCause<S>> {
+    fn cmp_values<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>) -> Result<Ordering, ErrorCause<S>> {
         Ok(match (a.to_number(), b.to_number()) {
             (Ok(a), Ok(b)) => a.cmp(&b),
-            _ => a.to_string(mc)?.cmp(&*b.to_string(mc)?),
+            _ => a.to_string()?.as_ref().cmp(b.to_string()?.as_ref()),
         })
     }
 
@@ -1103,10 +1103,10 @@ mod ops {
             BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.powf(b.to_number()?)?.into())),
             BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(b.to_number()?.log(a.to_number()?)?.into())),
             BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(Number::new(a.to_number()?.get().atan2(b.to_number()?.get()).to_degrees())?.into())),
-            BinaryOp::Greater   => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| Ok((cmp_values(mc, a, b)? == Ordering::Greater).into())),
-            BinaryOp::GreaterEq => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| Ok((cmp_values(mc, a, b)? != Ordering::Less).into())),
-            BinaryOp::Less      => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| Ok((cmp_values(mc, a, b)? == Ordering::Less).into())),
-            BinaryOp::LessEq    => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| Ok((cmp_values(mc, a, b)? != Ordering::Greater).into())),
+            BinaryOp::Greater   => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? == Ordering::Greater).into())),
+            BinaryOp::GreaterEq => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? != Ordering::Less).into())),
+            BinaryOp::Less      => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? == Ordering::Less).into())),
+            BinaryOp::LessEq    => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? != Ordering::Greater).into())),
             BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.min(b.to_number()?).into())),
             BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.max(b.to_number()?).into())),
 
@@ -1115,8 +1115,8 @@ mod ops {
                 Ok(Number::new(if a.is_sign_positive() == b.is_sign_positive() { a % b } else { b + (a % -b) })?.into())
             }),
             BinaryOp::SplitCustom => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
-                let (text, pattern) = (a.to_string(mc)?, b.to_string(mc)?);
-                Ok(GcCell::allocate(mc, text.split(pattern.as_str()).map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                let (text, pattern) = (a.to_string()?, b.to_string()?);
+                Ok(GcCell::allocate(mc, text.split(pattern.as_ref()).map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             BinaryOp::Random => binary_op_impl(mc, system, a, b, true, &mut cache, |_, system, a, b| {
                 let (mut a, mut b) = (a.to_number()?.get(), b.to_number()?.get());
@@ -1168,35 +1168,35 @@ mod ops {
             UnaryOp::Asin   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::asin(x.to_number()?.get()).to_degrees())?.into())),
             UnaryOp::Acos   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::acos(x.to_number()?.get()).to_degrees())?.into())),
             UnaryOp::Atan   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::atan(x.to_number()?.get()).to_degrees())?.into())),
-            UnaryOp::Strlen => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(x.to_string(mc)?.chars().count() as f64)?.into())),
+            UnaryOp::Strlen => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(x.to_string()?.chars().count() as f64)?.into())),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                Ok(GcCell::allocate(mc, x.to_string(mc)?.chars().map(|x| Gc::allocate(mc, x.to_string()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string()?.chars().map(|x| Gc::allocate(mc, x.to_string()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitWord => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                Ok(GcCell::allocate(mc, x.to_string(mc)?.split_whitespace().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string()?.split_whitespace().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitTab => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                Ok(GcCell::allocate(mc, x.to_string(mc)?.split('\t').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string()?.split('\t').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitCR => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                Ok(GcCell::allocate(mc, x.to_string(mc)?.split('\r').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string()?.split('\r').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitLF => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                Ok(GcCell::allocate(mc, x.to_string(mc)?.lines().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string()?.lines().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitCsv => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                let lines = x.to_string(mc)?.lines().map(|line| GcCell::allocate(mc, line.split(',').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into()).collect::<VecDeque<_>>();
+                let lines = x.to_string()?.lines().map(|line| GcCell::allocate(mc, line.split(',').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into()).collect::<VecDeque<_>>();
                 Ok(match lines.len() {
                     1 => lines.into_iter().next().unwrap(),
                     _ => GcCell::allocate(mc, lines).into(),
                 })
             }),
             UnaryOp::SplitJson => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                let value = x.to_string(mc)?;
-                match serde_json::from_str::<Json>(value.as_str()) {
+                let value = x.to_string()?;
+                match serde_json::from_str::<Json>(&*value) {
                     Ok(json) => Ok(Value::from_json(mc, json)?),
-                    Err(_) => Err(ErrorCause::NotJson { value: (*value).clone() }),
+                    Err(_) => Err(ErrorCause::NotJson { value: value.into_owned() }),
                 }
             }),
 
@@ -1211,7 +1211,7 @@ mod ops {
                 }
             }),
             UnaryOp::CharToUnicode => unary_op_impl(mc, x, &mut cache, &|mc, x| {
-                let src = x.to_string(mc)?;
+                let src = x.to_string()?;
                 let values: VecDeque<_> = src.chars().map(|ch| Ok(Number::new(ch as u32 as f64)?.into())).collect::<Result<_, NumberError>>()?;
                 Ok(match values.len() {
                     1 => values.into_iter().next().unwrap(),

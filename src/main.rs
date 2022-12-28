@@ -76,7 +76,7 @@ fn main() {
             Request::Syscall { name, args } => match name.as_str() {
                 "open" => {
                     let (path, mode) = match args.as_slice() {
-                        [path, mode] => match (path.to_string(mc), mode.to_string(mc)) {
+                        [path, mode] => match (path.to_string(), mode.to_string()) {
                             (Ok(path), Ok(mode)) => (path, mode),
                             _ => {
                                 key.complete(Err(format!("syscall open - expected 2 string args, received {:?} and {:?}", path.get_type(), mode.get_type())));
@@ -90,7 +90,7 @@ fn main() {
                     };
 
                     let mut opts = OpenOptions::new();
-                    match mode.as_str() {
+                    match mode.as_ref() {
                         "r" => { opts.read(true); }
                         "w" => { opts.write(true).create(true).truncate(true); }
                         "a" => { opts.write(true).create(true).append(true); }
@@ -100,7 +100,7 @@ fn main() {
                         }
                     }
 
-                    let file = match opts.open(path.as_str()) {
+                    let file = match opts.open(path.as_ref()) {
                         Ok(x) => x,
                         Err(e) => {
                             key.complete(Err(format!("syscall open - file open error: {e:?}")));
@@ -108,7 +108,7 @@ fn main() {
                         }
                     };
 
-                    let res = match mode.as_str() {
+                    let res = match mode.as_ref() {
                         "r" => NativeValue::InputFile { handle: Some(BufReader::new(file)) },
                         "w" | "a" => NativeValue::OutputFile { handle: Some(BufWriter::new(file)) },
                         _ => unreachable!(),
@@ -172,7 +172,7 @@ fn main() {
                     }
                 }
                 "writeLine" => match args.as_slice() {
-                    [file, content] => match (file, content.to_string(mc)) {
+                    [file, content] => match (file, content.to_string()) {
                         (Value::Native(x), Ok(content)) => match &mut x.write(mc).0 {
                             NativeValue::OutputFile { handle } => match handle.as_mut() {
                                 Some(handle) => match writeln!(*handle, "{content}") {
