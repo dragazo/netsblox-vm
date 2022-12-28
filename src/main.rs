@@ -80,12 +80,12 @@ fn main() {
                             (Ok(path), Ok(mode)) => (path, mode),
                             _ => {
                                 key.complete(Err(format!("syscall open - expected 2 string args, received {:?} and {:?}", path.get_type(), mode.get_type())));
-                                return Ok(RequestStatus::Handled);
+                                return RequestStatus::Handled;
                             }
                         }
                         _ => {
                             key.complete(Err(format!("syscall open - expected 2 args, received {}", args.len())));
-                            return Ok(RequestStatus::Handled);
+                            return RequestStatus::Handled;
                         }
                     };
 
@@ -96,7 +96,7 @@ fn main() {
                         "a" => { opts.write(true).create(true).append(true); }
                         x => {
                             key.complete(Err(format!("syscall open - unknown mode '{x}' expected 'r', 'w', or 'a'")));
-                            return Ok(RequestStatus::Handled);
+                            return RequestStatus::Handled;
                         }
                     }
 
@@ -104,7 +104,7 @@ fn main() {
                         Ok(x) => x,
                         Err(e) => {
                             key.complete(Err(format!("syscall open - file open error: {e:?}")));
-                            return Ok(RequestStatus::Handled);
+                            return RequestStatus::Handled;
                         }
                     };
 
@@ -115,7 +115,7 @@ fn main() {
                     };
 
                     key.complete(Ok(Intermediate::Native(res)));
-                    Ok(RequestStatus::Handled)
+                    RequestStatus::Handled
                 }
                 "close" => match args.as_slice() {
                     [file] => match file {
@@ -125,16 +125,16 @@ fn main() {
                                 NativeValue::OutputFile { handle } => *handle = None,
                             }
                             key.complete(Ok(json!("OK").into()));
-                            return Ok(RequestStatus::Handled);
+                            return RequestStatus::Handled;
                         }
                         _ => {
                             key.complete(Err(format!("syscall readLine - expected type {:?} or {:?}, received type {:?}", NativeType::InputFile, NativeType::OutputFile, file.get_type())));
-                            return Ok(RequestStatus::Handled);
+                            return RequestStatus::Handled;
                         }
                     }
                     _ => {
                         key.complete(Err(format!("syscall close - expected 1 arg, received {}", args.len())));
-                        return Ok(RequestStatus::Handled);
+                        return RequestStatus::Handled;
                     }
                 }
                 "readLine" => match args.as_slice() {
@@ -145,30 +145,30 @@ fn main() {
                                     let mut res = String::new();
                                     if let Err(e) = handle.read_line(&mut res) {
                                         key.complete(Err(format!("syscall readLine - read error: {e:?}")));
-                                        return Ok(RequestStatus::Handled);
+                                        return RequestStatus::Handled;
                                     }
 
                                     key.complete(Ok(json!(res).into()));
-                                    return Ok(RequestStatus::Handled);
+                                    return RequestStatus::Handled;
                                 }
                                 None => {
                                     key.complete(Err(format!("syscall readLine - this file has been closed")));
-                                    return Ok(RequestStatus::Handled);
+                                    return RequestStatus::Handled;
                                 }
                             }
                             _ => {
                                 key.complete(Err(format!("syscall readLine - expected type {:?}, received type {:?}", NativeType::InputFile, file.get_type())));
-                                return Ok(RequestStatus::Handled);
+                                return RequestStatus::Handled;
                             }
                         }
                         _ => {
                             key.complete(Err(format!("syscall readLine - expected type {:?}, received type {:?}", NativeType::InputFile, file.get_type())));
-                            return Ok(RequestStatus::Handled);
+                            return RequestStatus::Handled;
                         }
                     }
                     _ => {
                         key.complete(Err(format!("syscall readLine - expected 1 arg, received {}", args.len())));
-                        return Ok(RequestStatus::Handled);
+                        return RequestStatus::Handled;
                     }
                 }
                 "writeLine" => match args.as_slice() {
@@ -178,36 +178,36 @@ fn main() {
                                 Some(handle) => match writeln!(*handle, "{content}") {
                                     Ok(_) => {
                                         key.complete(Ok(Intermediate::Json(json!("OK"))));
-                                        return Ok(RequestStatus::Handled);
+                                        return RequestStatus::Handled;
                                     }
                                     Err(e) => {
                                         key.complete(Err(format!("syscall writeLine - write error: {e:?}")));
-                                        return Ok(RequestStatus::Handled);
+                                        return RequestStatus::Handled;
                                     }
                                 }
                                 None => {
                                     key.complete(Err(format!("syscall writeLine - this file has been closed")));
-                                    return Ok(RequestStatus::Handled);
+                                    return RequestStatus::Handled;
                                 }
                             }
                             _ => {
                                 key.complete(Err(format!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<StdSystem<C>>::String, file.get_type(), Type::<StdSystem<C>>::String)));
-                                return Ok(RequestStatus::Handled);
+                                return RequestStatus::Handled;
                             }
                         }
                         _ => {
                             key.complete(Err(format!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<StdSystem<C>>::String, file.get_type(), content.get_type())));
-                            return Ok(RequestStatus::Handled);
+                            return RequestStatus::Handled;
                         }
                     }
                     _ => {
                         key.complete(Err(format!("syscall writeLine - expected 2 args, received {}", args.len())));
-                        return Ok(RequestStatus::Handled);
+                        return RequestStatus::Handled;
                     }
                 }
-                _ => Ok(RequestStatus::UseDefault { key, request }),
+                _ => RequestStatus::UseDefault { key, request },
             }
-            _ => Ok(RequestStatus::UseDefault { key, request }),
+            _ => RequestStatus::UseDefault { key, request },
         })),
         command: None,
     };

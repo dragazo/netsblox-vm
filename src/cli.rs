@@ -240,7 +240,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
     let config = overrides.fallback(&Config {
         command: {
             let update_flag = update_flag.clone();
-            Some(Rc::new(move |_, _, key, command, entity| Ok(match command {
+            Some(Rc::new(move |_, _, key, command, entity| match command {
                 Command::Print { value } => {
                     if let Some(value) = value {
                         print!("{entity:?} > {value:?}\r\n");
@@ -250,19 +250,19 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
                     CommandStatus::Handled
                 }
                 _ => CommandStatus::UseDefault { key, command },
-            })))
+            }))
         },
         request: {
             let update_flag = update_flag.clone();
             let input_queries = input_queries.clone();
-            Some(Rc::new(move |_, _, key, request, entity| Ok(match request {
+            Some(Rc::new(move |_, _, key, request, entity| match request {
                 Request::Input { prompt } => {
                     input_queries.borrow_mut().push_back((format!("{entity:?} {prompt:?} > "), key));
                     update_flag.set(true);
                     RequestStatus::Handled
                 }
                 _ => RequestStatus::UseDefault { key, request },
-            })))
+            }))
         },
     });
 
@@ -348,14 +348,14 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
 fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C>) {
     let config = overrides.fallback(&Config {
         request: None,
-        command: Some(Rc::new(move |_, _, key, command, entity| Ok(match command {
+        command: Some(Rc::new(move |_, _, key, command, entity| match command {
             Command::Print { value } => {
                 if let Some(value) = value { println!("{entity:?} > {value:?}") }
                 key.complete(Ok(()));
                 CommandStatus::Handled
             }
             _ => CommandStatus::UseDefault { key, command },
-        }))),
+        })),
     });
 
     let system = Rc::new(StdSystem::new(server, Some(project_name), config));
@@ -449,14 +449,14 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
     let weak_state = Arc::downgrade(&state);
     let config = overrides.fallback(&Config {
         request: None,
-        command: Some(Rc::new(move |_, _, key, command, entity| Ok(match command {
+        command: Some(Rc::new(move |_, _, key, command, entity| match command {
             Command::Print { value } => {
                 if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") }
                 key.complete(Ok(()));
                 CommandStatus::Handled
             }
             _ => CommandStatus::UseDefault { key, command },
-        }))),
+        })),
     });
     let system = Rc::new(StdSystem::new(nb_server, Some("native-server"), config));
     let mut idle_sleeper = IdleSleeper::new();

@@ -184,9 +184,9 @@ pub trait CustomTypes: 'static + Sized {
 #[educe(Default, Clone)]
 pub struct Config<C: CustomTypes> {
     /// A function used to perform asynchronous requests that yield a value back to the runtime.
-    pub request: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, RequestKey<C>, Request<'gc, StdSystem<C>>, &Entity<'gc, StdSystem<C>>) -> Result<RequestStatus<'gc, C>, ErrorCause<StdSystem<C>>>>>,
+    pub request: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, RequestKey<C>, Request<'gc, StdSystem<C>>, &Entity<'gc, StdSystem<C>>) -> RequestStatus<'gc, C>>>,
     /// A function used to perform asynchronous tasks whose completion is awaited by the runtime.
-    pub command: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, CommandKey, Command<'gc, StdSystem<C>>, &Entity<'gc, StdSystem<C>>) -> Result<CommandStatus<'gc, C>, ErrorCause<StdSystem<C>>>>>,
+    pub command: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, CommandKey, Command<'gc, StdSystem<C>>, &Entity<'gc, StdSystem<C>>) -> CommandStatus<'gc, C>>>,
 }
 impl<C: CustomTypes> Config<C> {
     /// Composes two [`Config`] objects, prioritizing the implementation of `self`.
@@ -194,8 +194,8 @@ impl<C: CustomTypes> Config<C> {
         Self {
             request: match (self.request.clone(), other.request.clone()) {
                 (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, request, entity| {
-                    match a(system, mc, key, request, entity)? {
-                        RequestStatus::Handled => Ok(RequestStatus::Handled),
+                    match a(system, mc, key, request, entity) {
+                        RequestStatus::Handled => RequestStatus::Handled,
                         RequestStatus::UseDefault { key, request } => b(system, mc, key, request, entity),
                     }
                 })),
@@ -204,8 +204,8 @@ impl<C: CustomTypes> Config<C> {
             },
             command: match (self.command.clone(), other.command.clone()) {
                 (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, command, entity| {
-                    match a(system, mc, key, command, entity)? {
-                        CommandStatus::Handled => Ok(CommandStatus::Handled),
+                    match a(system, mc, key, command, entity) {
+                        CommandStatus::Handled => CommandStatus::Handled,
                         CommandStatus::UseDefault { key, command } => b(system, mc, key, command, entity),
                     }
                 })),
@@ -448,7 +448,7 @@ impl<C: CustomTypes> System for StdSystem<C> {
         let key = RequestKey(AsyncResultHandle::pending());
         let use_default = match self.config.request.as_ref() {
             Some(handler) => {
-                match handler(self, mc, RequestKey(key.0.clone()), request, entity)? {
+                match handler(self, mc, RequestKey(key.0.clone()), request, entity) {
                     RequestStatus::Handled => None,
                     RequestStatus::UseDefault { key, request } => Some((key, request)),
                 }
@@ -480,7 +480,7 @@ impl<C: CustomTypes> System for StdSystem<C> {
         match self.config.command.as_ref() {
             Some(handler) => {
                 let key = CommandKey(AsyncResultHandle::pending());
-                match handler(self, mc, CommandKey(key.0.clone()), command, entity)? {
+                match handler(self, mc, CommandKey(key.0.clone()), command, entity) {
                     CommandStatus::Handled => (),
                     CommandStatus::UseDefault { key: _, command } => return Err(ErrorCause::NotSupported { feature: command.feature() }),
                 }

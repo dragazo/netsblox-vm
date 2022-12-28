@@ -570,14 +570,14 @@ fn test_proc_say() {
     let output_cpy = output.clone();
     let config = Config {
         request: None,
-        command: Some(Rc::new(move |_, _, key, command, _| Ok(match command {
+        command: Some(Rc::new(move |_, _, key, command, _| match command {
             Command::Print { value } => {
                 if let Some(value) = value { writeln!(*output_cpy.borrow_mut(), "{value:?}").unwrap() }
                 key.complete(Ok(()));
                 CommandStatus::Handled
             }
             _ => CommandStatus::UseDefault { key, command },
-        }))),
+        })),
     };
     let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, config));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
@@ -596,7 +596,7 @@ fn test_proc_syscall() {
     let buffer = Rc::new(RefCell::new(String::new()));
     let buffer_cpy = buffer.clone();
     let config = Config {
-        request: Some(Rc::new(move |_, mc, key, request, _| Ok(match request {
+        request: Some(Rc::new(move |_, mc, key, request, _| match &request {
             Request::Syscall { name, args } => match name.as_str() {
                 "bar" => match args.is_empty() {
                     false => {
@@ -617,10 +617,10 @@ fn test_proc_syscall() {
                     key.complete(Ok(json!(content)));
                     RequestStatus::Handled
                 }
-                _ => return Err(ErrorCause::NotSupported { feature: Feature::Syscall { name } }.into()),
+                _ => RequestStatus::UseDefault { key, request },
             }
             _ => RequestStatus::UseDefault { key, request },
-        }))),
+        })),
         ..Default::default()
     };
     let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, config));
@@ -1249,10 +1249,10 @@ fn test_proc_basic_motion() {
                 match command {
                     Command::Forward { distance } => sequence.borrow_mut().push(Action::Forward(to_i32(distance))),
                     Command::Turn { angle } => sequence.borrow_mut().push(Action::Turn(to_i32(angle))),
-                    _ => return Ok(CommandStatus::UseDefault { key, command }),
+                    _ => return CommandStatus::UseDefault { key, command },
                 }
                 key.complete(Ok(()));
-                Ok(CommandStatus::Handled)
+                CommandStatus::Handled
             }))
         },
         request: {
@@ -1267,9 +1267,9 @@ fn test_proc_basic_motion() {
                         sequence.borrow_mut().push(Action::Heading);
                         key.complete(Ok(json!(39)));
                     }
-                    _ => return Ok(RequestStatus::UseDefault { key, request }),
+                    _ => return RequestStatus::UseDefault { key, request },
                 }
-                Ok(RequestStatus::Handled)
+                RequestStatus::Handled
             }))
         },
     };
