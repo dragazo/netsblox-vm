@@ -106,6 +106,8 @@ pub enum ErrorCause<S: System> {
     NumberError { error: NumberError },
     /// Attempt to use an unsupported feature.
     NotSupported { feature: Feature },
+    /// A custom error generated explicitly from user code.
+    Custom { msg: String }
 }
 impl<S: System> From<ConversionError<S>> for ErrorCause<S> { fn from(e: ConversionError<S>) -> Self { Self::ConversionError { got: e.got, expected: e.expected } } }
 impl<S: System> From<ToJsonError<S>> for ErrorCause<S> { fn from(error: ToJsonError<S>) -> Self { Self::ToJsonError { error } } }

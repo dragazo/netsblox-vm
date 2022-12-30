@@ -92,6 +92,12 @@ pub struct CallStackEntry<'gc, S: System> {
 
     #[collect(require_static)] warp_counter: usize,
     #[collect(require_static)] value_stack_size: usize,
+    #[collect(require_static)] handler_stack_size: usize,
+}
+
+struct Handler {
+    pos: usize,
+    var: String,
 }
 
 enum Defer<S: System> {
@@ -124,6 +130,7 @@ pub struct Process<'gc, S: System> {
     #[collect(require_static)] warp_counter: usize,
                                call_stack: Vec<CallStackEntry<'gc, S>>,
                                value_stack: Vec<Value<'gc, S>>,
+    #[collect(require_static)] handler_stack: Vec<Handler>,
     #[collect(require_static)] meta_stack: Vec<String>,
     #[collect(require_static)] defer: Option<Defer<S>>,
                                last_syscall_error: Option<Value<'gc, S>>,
@@ -144,6 +151,7 @@ impl<'gc, S: System> Process<'gc, S> {
             warp_counter: 0,
             call_stack: vec![],
             value_stack: vec![],
+            handler_stack: vec![],
             meta_stack: vec![],
             defer: None,
             last_syscall_error: None,
@@ -188,9 +196,11 @@ impl<'gc, S: System> Process<'gc, S> {
             return_to: usize::MAX,
             warp_counter: 0,
             value_stack_size: 0,
+            handler_stack_size: 0,
             locals,
         });
         self.value_stack.clear();
+        self.handler_stack.clear();
         self.meta_stack.clear();
         self.defer = None;
         self.last_syscall_error = None;
@@ -203,8 +213,17 @@ impl<'gc, S: System> Process<'gc, S> {
     /// 
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`ProcessStep::Terminate`].
     pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, S>, ExecError<S>> {
-        let res = self.step_impl(mc);
-        if let Ok(ProcessStep::Terminate { .. }) | Err(_) = res {
+        let mut res = self.step_impl(mc);
+        if let Err(err) = &res {
+            if let Some(handler) = self.handler_stack.last() {
+                let msg = format!("{err:?}");
+                self.call_stack.last_mut().unwrap().locals.redefine_or_define(&handler.var, Shared::Unique(Value::String(Gc::allocate(mc, msg))));
+                self.pos = handler.pos;
+                res = Ok(ProcessStep::Normal);
+            }
+        }
+
+        if let Ok(ProcessStep::Terminate { .. }) | Err(_) = &res {
             self.running = false;
             self.barrier = None;
             self.reply_key = None;
@@ -742,6 +761,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     return_to: aft_pos,
                     warp_counter: self.warp_counter,
                     value_stack_size: self.value_stack.len(),
+                    handler_stack_size: self.handler_stack.len(),
                     locals
                 });
                 self.pos = pos;
@@ -777,6 +797,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     return_to: aft_pos,
                     warp_counter: self.warp_counter,
                     value_stack_size: self.value_stack.len(),
+                    handler_stack_size: self.handler_stack.len(),
                     locals,
                 });
                 self.pos = closure.pos;
@@ -784,8 +805,12 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::Return => {
                 let return_point = self.call_stack.pop().unwrap();
                 let return_value = self.value_stack.pop().unwrap();
+
                 self.value_stack.drain(return_point.value_stack_size..);
+                self.handler_stack.drain(return_point.handler_stack_size..);
                 debug_assert_eq!(self.value_stack.len(), return_point.value_stack_size);
+                debug_assert_eq!(self.handler_stack.len(), return_point.handler_stack_size);
+
                 self.value_stack.push(return_value);
 
                 if self.call_stack.is_empty() {
@@ -794,11 +819,24 @@ impl<'gc, S: System> Process<'gc, S> {
                     debug_assert_eq!(return_point.return_to, usize::MAX);
                     debug_assert_eq!(return_point.warp_counter, 0);
                     debug_assert_eq!(return_point.value_stack_size, 0);
+                    debug_assert_eq!(return_point.handler_stack_size, 0);
                     return Ok(ProcessStep::Terminate { result: Some(self.value_stack.pop().unwrap()) });
                 } else {
                     self.pos = return_point.return_to;
                     self.warp_counter = return_point.warp_counter;
                 }
+            }
+            Instruction::PushHandler { pos, var } => {
+                self.handler_stack.push(Handler { pos, var: var.to_owned() });
+                self.pos = aft_pos;
+            }
+            Instruction::PopHandler => {
+                self.handler_stack.pop().unwrap();
+                self.pos = aft_pos;
+            }
+            Instruction::Throw => {
+                let msg = self.value_stack.pop().unwrap().to_string()?.into_owned();
+                return Err(ErrorCause::Custom { msg });
             }
             Instruction::CallRpc { service, rpc, args } => {
                 debug_assert_eq!(self.meta_stack.len(), args);
