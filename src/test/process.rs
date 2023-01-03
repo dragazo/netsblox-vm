@@ -1333,8 +1333,40 @@ fn test_proc_try_catch_throw() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ "starting", "start code", "got error", "Custom { msg: \"test error\" }", "done" ])).unwrap();
+        let expect = Value::from_json(mc, json!([ "starting", "start code", "got error", "test error", "done" ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "try catch throw");
+    });
+}
+
+#[test]
+fn test_proc_exception_unregister() {
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/exception-unregister.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([ "top start", "before test", "before inner", "inner error", "IndexOutOfBounds { index: 332534.0, list_len: 3 }", "after test", "top error", "IndexOutOfBounds { index: 332534.0, list_len: 6 }", "top done"])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "exception res");
+    });
+}
+
+#[test]
+fn test_proc_exception_rethrow() {
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/exception-rethrow.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([ "IndexOutOfBounds { index: 543548.0, list_len: 0 }", "test error here" ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "exception res");
     });
 }
 

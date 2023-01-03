@@ -98,6 +98,9 @@ pub struct CallStackEntry<'gc, S: System> {
 struct Handler {
     pos: usize,
     var: String,
+    warp_counter: usize,
+    call_stack_size: usize,
+    value_stack_size: usize,
 }
 
 enum Defer<S: System> {
@@ -215,10 +218,19 @@ impl<'gc, S: System> Process<'gc, S> {
     pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, S>, ExecError<S>> {
         let mut res = self.step_impl(mc);
         if let Err(err) = &res {
-            if let Some(handler) = self.handler_stack.last() {
-                let msg = format!("{err:?}");
-                self.call_stack.last_mut().unwrap().locals.redefine_or_define(&handler.var, Shared::Unique(Value::String(Gc::allocate(mc, msg))));
-                self.pos = handler.pos;
+            if let Some(Handler { pos, var, warp_counter, call_stack_size, value_stack_size }) = self.handler_stack.last() {
+                self.warp_counter = *warp_counter;
+                self.call_stack.drain(*call_stack_size..);
+                self.value_stack.drain(*value_stack_size..);
+                debug_assert_eq!(self.call_stack.len(), *call_stack_size);
+                debug_assert_eq!(self.value_stack.len(), *value_stack_size);
+
+                let msg = match err {
+                    ErrorCause::Custom { msg } => msg.clone(),
+                    _ => format!("{err:?}"),
+                };
+                self.call_stack.last_mut().unwrap().locals.redefine_or_define(var, Shared::Unique(Value::String(Gc::allocate(mc, msg))));
+                self.pos = *pos;
                 res = Ok(ProcessStep::Normal);
             }
         }
@@ -803,31 +815,36 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = closure.pos;
             }
             Instruction::Return => {
-                let return_point = self.call_stack.pop().unwrap();
+                let CallStackEntry { called_from, return_to, locals: _, warp_counter, value_stack_size, handler_stack_size } = self.call_stack.pop().unwrap();
                 let return_value = self.value_stack.pop().unwrap();
 
-                self.value_stack.drain(return_point.value_stack_size..);
-                self.handler_stack.drain(return_point.handler_stack_size..);
-                debug_assert_eq!(self.value_stack.len(), return_point.value_stack_size);
-                debug_assert_eq!(self.handler_stack.len(), return_point.handler_stack_size);
+                self.pos = return_to;
+                self.warp_counter = warp_counter;
+                self.value_stack.drain(value_stack_size..);
+                self.handler_stack.drain(handler_stack_size..);
+                debug_assert_eq!(self.value_stack.len(), value_stack_size);
+                debug_assert_eq!(self.handler_stack.len(), handler_stack_size);
 
                 self.value_stack.push(return_value);
 
                 if self.call_stack.is_empty() {
                     debug_assert_eq!(self.value_stack.len(), 1);
-                    debug_assert_eq!(return_point.called_from, usize::MAX);
-                    debug_assert_eq!(return_point.return_to, usize::MAX);
-                    debug_assert_eq!(return_point.warp_counter, 0);
-                    debug_assert_eq!(return_point.value_stack_size, 0);
-                    debug_assert_eq!(return_point.handler_stack_size, 0);
+                    debug_assert_eq!(called_from, usize::MAX);
+                    debug_assert_eq!(return_to, usize::MAX);
+                    debug_assert_eq!(warp_counter, 0);
+                    debug_assert_eq!(value_stack_size, 0);
+                    debug_assert_eq!(handler_stack_size, 0);
                     return Ok(ProcessStep::Terminate { result: Some(self.value_stack.pop().unwrap()) });
-                } else {
-                    self.pos = return_point.return_to;
-                    self.warp_counter = return_point.warp_counter;
                 }
             }
             Instruction::PushHandler { pos, var } => {
-                self.handler_stack.push(Handler { pos, var: var.to_owned() });
+                self.handler_stack.push(Handler {
+                    pos,
+                    var: var.to_owned(),
+                    warp_counter: self.warp_counter,
+                    call_stack_size: self.call_stack.len(),
+                    value_stack_size: self.value_stack.len(),
+                });
                 self.pos = aft_pos;
             }
             Instruction::PopHandler => {

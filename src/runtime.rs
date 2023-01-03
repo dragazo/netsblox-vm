@@ -80,32 +80,32 @@ pub enum ErrorCause<S: System> {
     ConversionError { got: Type<S>, expected: Type<S> },
     /// The result of a failed variadic type conversion (expected type `T` or a list of type `T`).
     VariadicConversionError { got: Type<S>, expected: Type<S> },
-    /// Attempt to index a list with a non-integer numeric value, `index`.
-    IndexNotInteger { index: f64 },
     /// An indexing operation on a list had an out of bounds index, `index`, on a list of size `list_len`. Note that Snap!/NetsBlox use 1-based indexing.
     IndexOutOfBounds { index: f64, list_len: usize },
+    /// Attempt to index a list with a non-integer numeric value, `index`.
+    IndexNotInteger { index: f64 },
     /// Attempt to use a number which was not a valid size (must be convertible to [`usize`]).
     InvalidSize { value: f64 },
+    /// Attempt to interpret an invalid unicode code point (number) as a character.
+    InvalidUnicode { value: f64 },
     /// Exceeded the maximum call depth.
     CallDepthLimit { limit: usize },
     /// Attempt to call a closure which required `expected` arguments, but `got` arguments were supplied.
     ClosureArgCount { expected: usize, got: usize },
     /// An acyclic operation received a cyclic input value.
     CyclicValue,
+    /// Attempt to parse an invalid JSON-encoded string.
+    NotJson { value: String },
     /// A failed attempt to convert a native vm [`Value`] to [`Json`] for use outside the vm.
     ToJsonError { error: ToJsonError<S> },
     /// A failed attempt to convert a [`Json`] value into a [`Value`] for use in the vm.
     FromJsonError { error: FromJsonError },
-    /// Attempt to parse an invalid JSON-encoded string.
-    NotJson { value: String },
-    /// Attempt to interpret an invalid unicode code point (number) as a character.
-    InvalidUnicode { value: f64 },
-    /// A soft error (e.g., RPC or syscall failure) was promoted to a hard error.
-    Promoted { error: String },
     /// A numeric value took on an invalid value such as NaN.
     NumberError { error: NumberError },
     /// Attempt to use an unsupported feature.
     NotSupported { feature: Feature },
+    /// A soft error (e.g., RPC or syscall failure) was promoted to a hard error.
+    Promoted { error: String },
     /// A custom error generated explicitly from user code.
     Custom { msg: String }
 }
