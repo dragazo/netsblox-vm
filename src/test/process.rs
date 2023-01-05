@@ -1126,6 +1126,41 @@ fn test_proc_variadic_strcat() {
 }
 
 #[test]
+fn test_proc_binary_make_range() {
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/binary-make-range.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            [1,2,3,4,5],
+            [
+                [1,2,3,4,5],
+                [2,3,4,5],
+                [8,7,6,5],
+                [5],
+            ],
+            [
+                [3,2,1],
+                [3,2],
+                [3,4,5,6,7,8],
+                [3,4,5],
+            ],
+            [
+                [4,3,2,1],
+                [8,7,6,5,4,3,2],
+                [5,6,7,8],
+            ],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "binary make range");
+    });
+}
+
+#[test]
 fn test_proc_list_rev() {
     let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),

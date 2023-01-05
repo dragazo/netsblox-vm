@@ -442,28 +442,6 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.push(GcCell::allocate(mc, vals).into());
                 self.pos = aft_pos;
             }
-            Instruction::MakeListRange => {
-                let b = self.value_stack.pop().unwrap().to_number()?.get();
-                let mut a = self.value_stack.pop().unwrap().to_number()?.get();
-
-                let mut res = VecDeque::new();
-                if a.is_finite() && b.is_finite() {
-                    if a <= b {
-                        while a <= b {
-                            res.push_back(Number::new(a)?.into());
-                            a += 1.0;
-                        }
-                    } else {
-                        while a >= b {
-                            res.push_back(Number::new(a)?.into());
-                            a -= 1.0;
-                        }
-                    }
-                }
-
-                self.value_stack.push(GcCell::allocate(mc, res).into());
-                self.pos = aft_pos;
-            }
 
             Instruction::ListCons => {
                 let mut res = self.value_stack.pop().unwrap().as_list()?.read().clone();
@@ -1175,9 +1153,28 @@ mod ops {
                 let (a, b) = (a.to_number()?.get(), b.to_number()?.get());
                 Ok(Number::new(if a.is_sign_positive() == b.is_sign_positive() { a % b } else { b + (a % -b) })?.into())
             }),
-            BinaryOp::SplitCustom => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
+            BinaryOp::SplitBy => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
                 let (text, pattern) = (a.to_string()?, b.to_string()?);
                 Ok(GcCell::allocate(mc, text.split(pattern.as_ref()).map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+            }),
+
+            BinaryOp::Range => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
+                let (mut a, b) = (a.to_number()?.get(), b.to_number()?.get());
+                let mut res = VecDeque::new();
+                if a.is_finite() && b.is_finite() {
+                    if a <= b {
+                        while a <= b {
+                            res.push_back(Number::new(a)?.into());
+                            a += 1.0;
+                        }
+                    } else {
+                        while a >= b {
+                            res.push_back(Number::new(a)?.into());
+                            a -= 1.0;
+                        }
+                    }
+                }
+                Ok(GcCell::allocate(mc, res).into())
             }),
             BinaryOp::Random => binary_op_impl(mc, system, a, b, true, &mut cache, |_, system, a, b| {
                 let (mut a, mut b) = (a.to_number()?.get(), b.to_number()?.get());
@@ -1189,7 +1186,7 @@ mod ops {
                     system.rand(a..=b)?
                 };
                 Ok(Number::new(res)?.into())
-            })
+            }),
         }
     }
 
