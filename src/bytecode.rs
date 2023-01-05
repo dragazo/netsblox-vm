@@ -26,6 +26,7 @@ pub(crate) enum BinaryOp {
     Min, Max,
     SplitCustom,
     Random,
+    StrGet,
 }
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
@@ -37,7 +38,8 @@ pub(crate) enum UnaryOp {
     Sin, Cos, Tan,
     Asin, Acos, Atan,
     SplitLetter, SplitWord, SplitTab, SplitCR, SplitLF, SplitCsv, SplitJson,
-    Strlen,
+    StrLen,
+    StrGetLast, StrGetRandom,
     UnicodeToChar, CharToUnicode,
 }
 
@@ -199,7 +201,7 @@ pub(crate) enum Instruction<'a> {
     ListPopFirstOrElse { goto: usize },
 
     /// Consumes `args` values from the value stack in reverse order and concatenates them into a single string, which is then pushed onto the value stack.
-    Strcat { args: usize },
+    StrCat { args: usize },
 
     /// Consumes 2 values, `b` and `a`, from the value stack, and pushes the value `f(a, b)` onto the value stack.
     BinaryOp { op: BinaryOp },
@@ -587,7 +589,7 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
 
             45 => read_prefixed!(Instruction::ListPopFirstOrElse {} : goto),
 
-            46 => read_prefixed!(Instruction::Strcat {} : args),
+            46 => read_prefixed!(Instruction::StrCat {} : args),
 
             47 => read_prefixed!(Instruction::Eq),
             48 => read_prefixed!(Instruction::Neq),
@@ -745,7 +747,7 @@ impl BinaryWrite for Instruction<'_> {
 
             Instruction::ListPopFirstOrElse { goto } => append_prefixed!(45: move goto),
 
-            Instruction::Strcat { args } => append_prefixed!(46: args),
+            Instruction::StrCat { args } => append_prefixed!(46: args),
 
             Instruction::Eq => append_prefixed!(47),
             Instruction::Neq => append_prefixed!(48),
@@ -944,13 +946,13 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::Floor { value } => self.append_simple_ins(entity, &[value], UnaryOp::Floor.into()),
             ast::ExprKind::Ceil { value } => self.append_simple_ins(entity, &[value], UnaryOp::Ceil.into()),
             ast::ExprKind::Not { value } => self.append_simple_ins(entity, &[value], UnaryOp::Not.into()),
-            ast::ExprKind::Strlen { value } => self.append_simple_ins(entity, &[value], UnaryOp::Strlen.into()),
+            ast::ExprKind::Strlen { value } => self.append_simple_ins(entity, &[value], UnaryOp::StrLen.into()),
             ast::ExprKind::UnicodeToChar { value } => self.append_simple_ins(entity, &[value], UnaryOp::UnicodeToChar.into()),
             ast::ExprKind::CharToUnicode { value } => self.append_simple_ins(entity, &[value], UnaryOp::CharToUnicode.into()),
             ast::ExprKind::Eq { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::Eq),
             ast::ExprKind::Neq { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::Neq),
             ast::ExprKind::ListGet { list, index } => self.append_simple_ins(entity, &[index, list], Instruction::ListGet),
-            ast::ExprKind::ListLastIndex { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetLast),
+            ast::ExprKind::ListGetLast { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetLast),
             ast::ExprKind::ListGetRandom { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetRandom),
             ast::ExprKind::ListLength { value } => self.append_simple_ins(entity, &[value], Instruction::ListLength),
             ast::ExprKind::ListDims { value } => self.append_simple_ins(entity, &[value], Instruction::ListDims),
@@ -965,6 +967,9 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::ListContains { list, value } => self.append_simple_ins(entity, &[list, value], Instruction::ListContains),
             ast::ExprKind::Random { a, b } => self.append_simple_ins(entity, &[a, b], BinaryOp::Random.into()),
             ast::ExprKind::ListJson { value } => self.append_simple_ins(entity, &[value], Instruction::ListJson),
+            ast::ExprKind::StrGet { string, index } => self.append_simple_ins(entity, &[index, string], BinaryOp::StrGet.into()),
+            ast::ExprKind::StrGetLast { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetLast.into()),
+            ast::ExprKind::StrGetRandom { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetRandom.into()),
             ast::ExprKind::RpcError => self.ins.push(Instruction::PushRpcError.into()),
             ast::ExprKind::Answer => self.ins.push(Instruction::PushAnswer.into()),
             ast::ExprKind::Timer => self.ins.push(Instruction::PushTimer.into()),
@@ -987,7 +992,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     for value in values {
                         self.append_expr(value, entity);
                     }
-                    self.ins.push(Instruction::Strcat { args: values.len() }.into());
+                    self.ins.push(Instruction::StrCat { args: values.len() }.into());
                 }
                 ast::VariadicInput::VarArgs(_) => unimplemented!(),
             },

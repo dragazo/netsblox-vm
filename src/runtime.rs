@@ -80,8 +80,8 @@ pub enum ErrorCause<S: System> {
     ConversionError { got: Type<S>, expected: Type<S> },
     /// The result of a failed variadic type conversion (expected type `T` or a list of type `T`).
     VariadicConversionError { got: Type<S>, expected: Type<S> },
-    /// An indexing operation on a list had an out of bounds index, `index`, on a list of size `list_len`. Note that Snap!/NetsBlox use 1-based indexing.
-    IndexOutOfBounds { index: f64, list_len: usize },
+    /// An indexing operation on a list/string had an out of bounds index, `index`, on a list/string of size `len`. Note that Snap!/NetsBlox use 1-based indexing.
+    IndexOutOfBounds { index: f64, len: usize },
     /// Attempt to index a list with a non-integer numeric value, `index`.
     IndexNotInteger { index: f64 },
     /// Attempt to use a number which was not a valid size (must be convertible to [`usize`]).

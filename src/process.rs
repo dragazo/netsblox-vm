@@ -473,7 +473,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::ListCdr => {
                 let mut res = self.value_stack.pop().unwrap().as_list()?.read().clone();
-                if res.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }) }
+                if res.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }) }
                 res.pop_front().unwrap();
                 self.value_stack.push(GcCell::allocate(mc, res).into());
                 self.pos = aft_pos;
@@ -570,7 +570,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let val = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
 
-                let index = ops::prep_list_index(&index, list.len() + 1)?;
+                let index = ops::prep_index(&index, list.len() + 1)?;
                 list.insert(index, val);
                 self.pos = aft_pos;
             }
@@ -593,14 +593,14 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::ListGet => {
                 let list = self.value_stack.pop().unwrap();
                 let index = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::index_list(mc, &list, &index)?);
+                self.value_stack.push(ops::index_list(mc, &*self.system, &list, &index)?);
                 self.pos = aft_pos;
             }
             Instruction::ListGetLast => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 self.value_stack.push(match list.read().back() {
                     Some(x) => *x,
-                    None => return Err(ErrorCause::IndexOutOfBounds { index: 0.0, list_len: 0 }),
+                    None => return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }),
                 });
                 self.pos = aft_pos;
             }
@@ -618,7 +618,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let index = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
 
-                let index = ops::prep_list_index(&index, list.len())?;
+                let index = ops::prep_index(&index, list.len())?;
                 list[index] = value;
                 self.pos = aft_pos;
             }
@@ -626,7 +626,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let value = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let mut list = list.write(mc);
-                if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }); }
+                if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }); }
                 *list.back_mut().unwrap() = value;
                 self.pos = aft_pos;
             }
@@ -644,14 +644,14 @@ impl<'gc, S: System> Process<'gc, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let index = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
-                let index = ops::prep_list_index(&index, list.len())?;
+                let index = ops::prep_index(&index, list.len())?;
                 list.remove(index);
                 self.pos = aft_pos;
             }
             Instruction::ListRemoveLast => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let mut list = list.write(mc);
-                if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, list_len: 0 }) }
+                if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }) }
                 list.pop_back().unwrap();
                 self.pos = aft_pos;
             }
@@ -668,7 +668,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 None => self.pos = goto,
             }
 
-            Instruction::Strcat { args } => {
+            Instruction::StrCat { args } => {
                 let mut values = Vec::with_capacity(args);
                 for _ in 0..args {
                     values.push(self.value_stack.pop().unwrap());
@@ -725,7 +725,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::UnaryOp { op } => {
                 let x = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::unary_op(mc, &x, op)?);
+                self.value_stack.push(ops::unary_op(mc, &*self.system, &x, op)?);
                 self.pos = aft_pos;
             }
 
@@ -1002,16 +1002,16 @@ mod ops {
         if good { Some(vals) } else { None }
     }
 
-    pub(super) fn prep_list_index<S: System>(index: &Value<'_, S>, list_len: usize) -> Result<usize, ErrorCause<S>> {
+    pub(super) fn prep_index<S: System>(index: &Value<'_, S>, len: usize) -> Result<usize, ErrorCause<S>> {
         let raw_index = index.to_number()?.get();
-        if raw_index < 1.0 || raw_index > list_len as f64 { return Err(ErrorCause::IndexOutOfBounds { index: raw_index, list_len }) }
+        if raw_index < 1.0 || raw_index > len as f64 { return Err(ErrorCause::IndexOutOfBounds { index: raw_index, len }) }
         let index = raw_index as u64;
         if index as f64 != raw_index { return Err(ErrorCause::IndexNotInteger { index: raw_index }) }
         Ok(index as usize - 1)
     }
-    pub(super) fn prep_rand_index<S: System>(system: &S, list_len: usize) -> Result<usize, ErrorCause<S>> {
-        if list_len == 0 { return Err(ErrorCause::IndexOutOfBounds { index: 0.0, list_len: 0 }) }
-        system.rand(0..list_len)
+    pub(super) fn prep_rand_index<S: System>(system: &S, len: usize) -> Result<usize, ErrorCause<S>> {
+        if len == 0 { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }) }
+        system.rand(0..len)
     }
 
     pub(super) fn flatten<'gc, S: System>(value: &Value<'gc, S>) -> Result<VecDeque<Value<'gc, S>>, ErrorCause<S>> {
@@ -1165,6 +1165,12 @@ mod ops {
             BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.min(b.to_number()?).into())),
             BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.max(b.to_number()?).into())),
 
+            BinaryOp::StrGet => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
+                let string = b.to_string()?;
+                let index = prep_index(a, string.chars().count())?;
+                Ok(Gc::allocate(mc, string.chars().nth(index).unwrap().to_string()).into())
+            }),
+
             BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
                 let (a, b) = (a.to_number()?.get(), b.to_number()?.get());
                 Ok(Number::new(if a.is_sign_positive() == b.is_sign_positive() { a % b } else { b + (a % -b) })?.into())
@@ -1187,7 +1193,7 @@ mod ops {
         }
     }
 
-    fn unary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, x: &Value<'gc, S>, cache: &mut BTreeMap<Identity<'gc, S>, Value<'gc, S>>, scalar_op: &dyn Fn(MutationContext<'gc, '_>, &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>>) -> Result<Value<'gc, S>, ErrorCause<S>> {
+    fn unary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, x: &Value<'gc, S>, cache: &mut BTreeMap<Identity<'gc, S>, Value<'gc, S>>, scalar_op: &dyn Fn(MutationContext<'gc, '_>, &S, &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>>) -> Result<Value<'gc, S>, ErrorCause<S>> {
         let cache_key = x.identity();
         Ok(match cache.get(&cache_key) {
             Some(x) => *x,
@@ -1199,55 +1205,65 @@ mod ops {
                     let res = as_list(&real_res).unwrap();
                     let mut res = res.write(mc);
                     for x in &*x {
-                        res.push_back(unary_op_impl(mc, x, cache, scalar_op)?);
+                        res.push_back(unary_op_impl(mc, system, x, cache, scalar_op)?);
                     }
                     real_res
                 }
-                None => scalar_op(mc, x)?,
+                None => scalar_op(mc, system, x)?,
             }
         })
     }
-    pub(super) fn unary_op<'gc, S: System>(mc: MutationContext<'gc, '_>, x: &Value<'gc, S>, op: UnaryOp) -> Result<Value<'gc, S>, ErrorCause<S>> {
+    pub(super) fn unary_op<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, x: &Value<'gc, S>, op: UnaryOp) -> Result<Value<'gc, S>, ErrorCause<S>> {
         let mut cache = Default::default();
         match op {
-            UnaryOp::Not    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok((!x.to_bool()?).into())),
-            UnaryOp::Abs    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.abs()?.into())),
-            UnaryOp::Neg    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.neg()?.into())),
-            UnaryOp::Sqrt   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.sqrt()?.into())),
-            UnaryOp::Round  => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.round()?.into())),
-            UnaryOp::Floor  => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.floor()?.into())),
-            UnaryOp::Ceil   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(x.to_number()?.ceil()?.into())),
-            UnaryOp::Sin    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::sin(x.to_number()?.get().to_radians()))?.into())),
-            UnaryOp::Cos    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::cos(x.to_number()?.get().to_radians()))?.into())),
-            UnaryOp::Tan    => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::tan(x.to_number()?.get().to_radians()))?.into())),
-            UnaryOp::Asin   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::asin(x.to_number()?.get()).to_degrees())?.into())),
-            UnaryOp::Acos   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::acos(x.to_number()?.get()).to_degrees())?.into())),
-            UnaryOp::Atan   => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(libm::atan(x.to_number()?.get()).to_degrees())?.into())),
-            UnaryOp::Strlen => unary_op_impl(mc, x, &mut cache, &|_, x| Ok(Number::new(x.to_string()?.chars().count() as f64)?.into())),
+            UnaryOp::Not    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok((!x.to_bool()?).into())),
+            UnaryOp::Abs    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.abs()?.into())),
+            UnaryOp::Neg    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.neg()?.into())),
+            UnaryOp::Sqrt   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.sqrt()?.into())),
+            UnaryOp::Round  => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.round()?.into())),
+            UnaryOp::Floor  => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.floor()?.into())),
+            UnaryOp::Ceil   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.ceil()?.into())),
+            UnaryOp::Sin    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::sin(x.to_number()?.get().to_radians()))?.into())),
+            UnaryOp::Cos    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::cos(x.to_number()?.get().to_radians()))?.into())),
+            UnaryOp::Tan    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::tan(x.to_number()?.get().to_radians()))?.into())),
+            UnaryOp::Asin   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::asin(x.to_number()?.get()).to_degrees())?.into())),
+            UnaryOp::Acos   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::acos(x.to_number()?.get()).to_degrees())?.into())),
+            UnaryOp::Atan   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::atan(x.to_number()?.get()).to_degrees())?.into())),
+            UnaryOp::StrLen => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(x.to_string()?.chars().count() as f64)?.into())),
 
-            UnaryOp::SplitLetter => unary_op_impl(mc, x, &mut cache, &|mc, x| {
+            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| match x.to_string()?.chars().rev().next() {
+                Some(ch) => Ok(Gc::allocate(mc, ch.to_string()).into()),
+                None => return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }),
+            }),
+            UnaryOp::StrGetRandom => unary_op_impl(mc, system, x, &mut cache, &|mc, system, x| {
+                let x = x.to_string()?;
+                let i = prep_rand_index(system, x.chars().count())?;
+                Ok(Gc::allocate(mc, x.chars().nth(i).unwrap().to_string()).into())
+            }),
+
+            UnaryOp::SplitLetter => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 Ok(GcCell::allocate(mc, x.to_string()?.chars().map(|x| Gc::allocate(mc, x.to_string()).into()).collect::<VecDeque<_>>()).into())
             }),
-            UnaryOp::SplitWord => unary_op_impl(mc, x, &mut cache, &|mc, x| {
+            UnaryOp::SplitWord => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 Ok(GcCell::allocate(mc, x.to_string()?.split_whitespace().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
-            UnaryOp::SplitTab => unary_op_impl(mc, x, &mut cache, &|mc, x| {
+            UnaryOp::SplitTab => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 Ok(GcCell::allocate(mc, x.to_string()?.split('\t').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
-            UnaryOp::SplitCR => unary_op_impl(mc, x, &mut cache, &|mc, x| {
+            UnaryOp::SplitCR => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 Ok(GcCell::allocate(mc, x.to_string()?.split('\r').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
-            UnaryOp::SplitLF => unary_op_impl(mc, x, &mut cache, &|mc, x| {
+            UnaryOp::SplitLF => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 Ok(GcCell::allocate(mc, x.to_string()?.lines().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
-            UnaryOp::SplitCsv => unary_op_impl(mc, x, &mut cache, &|mc, x| {
+            UnaryOp::SplitCsv => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 let lines = x.to_string()?.lines().map(|line| GcCell::allocate(mc, line.split(',').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into()).collect::<VecDeque<_>>();
                 Ok(match lines.len() {
                     1 => lines.into_iter().next().unwrap(),
                     _ => GcCell::allocate(mc, lines).into(),
                 })
             }),
-            UnaryOp::SplitJson => unary_op_impl(mc, x, &mut cache, &|mc, x| {
+            UnaryOp::SplitJson => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 let value = x.to_string()?;
                 match serde_json::from_str::<Json>(&*value) {
                     Ok(json) => Ok(Value::from_json(mc, json)?),
@@ -1255,7 +1271,7 @@ mod ops {
                 }
             }),
 
-            UnaryOp::UnicodeToChar => unary_op_impl(mc, x, &mut cache, &|mc, x| {
+            UnaryOp::UnicodeToChar => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 let fnum = x.to_number()?.get();
                 if fnum < 0.0 || fnum > u32::MAX as f64 { return Err(ErrorCause::InvalidUnicode { value: fnum }) }
                 let num = fnum as u32;
@@ -1265,7 +1281,7 @@ mod ops {
                     None => Err(ErrorCause::InvalidUnicode { value: fnum }),
                 }
             }),
-            UnaryOp::CharToUnicode => unary_op_impl(mc, x, &mut cache, &|mc, x| {
+            UnaryOp::CharToUnicode => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 let src = x.to_string()?;
                 let values: VecDeque<_> = src.chars().map(|ch| Ok(Number::new(ch as u32 as f64)?.into())).collect::<Result<_, NumberError>>()?;
                 Ok(match values.len() {
@@ -1275,10 +1291,10 @@ mod ops {
             }),
         }
     }
-    pub(super) fn index_list<'gc, S: System>(mc: MutationContext<'gc, '_>, list: &Value<'gc, S>, index: &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>> {
+    pub(super) fn index_list<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, list: &Value<'gc, S>, index: &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>> {
         let list = list.as_list()?;
         let list = list.read();
-        unary_op_impl(mc, index, &mut Default::default(), &|_, x| Ok(list[prep_list_index(x, list.len())?]))
+        unary_op_impl(mc, system, index, &mut Default::default(), &|_, _, x| Ok(list[prep_index(x, list.len())?]))
     }
 
     fn check_eq_impl<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>, cache: &mut BTreeSet<(Identity<'gc, S>, Identity<'gc, S>)>) -> bool {

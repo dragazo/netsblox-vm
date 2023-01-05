@@ -1082,6 +1082,29 @@ fn test_proc_list_len_rank_dims() {
 }
 
 #[test]
+fn test_proc_string_index() {
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/string-index.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            ["안", "요", "세"],
+            ["h", "w", ["t", "i"], "d"],
+            ["o", "d", ["s", "s"], "g"],
+            ["셋", "하", ["섯", "둘"], "다"],
+            ["요", "d", "수", "r", "일"],
+            [3, 2],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "string index");
+    });
+}
+
+#[test]
 fn test_proc_list_rev() {
     let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
@@ -1215,9 +1238,9 @@ fn test_proc_index_over_bounds() {
     run_till_term(&mut env, |_, _, res| {
         let res = res.unwrap_err();
         match &res.cause {
-            ErrorCause::IndexOutOfBounds { index, list_len } => {
+            ErrorCause::IndexOutOfBounds { index, len } => {
                 assert!((index - 11.0).abs() < 1e-10);
-                assert_eq!(*list_len, 10);
+                assert_eq!(*len, 10);
             }
             x => panic!("{x:?}"),
         }
@@ -1349,7 +1372,7 @@ fn test_proc_exception_unregister() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ "top start", "before test", "before inner", "inner error", "IndexOutOfBounds { index: 332534.0, list_len: 3 }", "after test", "top error", "IndexOutOfBounds { index: 332534.0, list_len: 6 }", "top done"])).unwrap();
+        let expect = Value::from_json(mc, json!([ "top start", "before test", "before inner", "inner error", "IndexOutOfBounds { index: 332534.0, len: 3 }", "after test", "top error", "IndexOutOfBounds { index: 332534.0, len: 6 }", "top done"])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "exception res");
     });
 }
@@ -1365,7 +1388,7 @@ fn test_proc_exception_rethrow() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ "IndexOutOfBounds { index: 543548.0, list_len: 0 }", "test error here" ])).unwrap();
+        let expect = Value::from_json(mc, json!([ "IndexOutOfBounds { index: 543548.0, len: 0 }", "test error here" ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "exception res");
     });
 }
