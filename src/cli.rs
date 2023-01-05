@@ -40,6 +40,7 @@ use crate::bytecode::*;
 use crate::runtime::*;
 use crate::project::*;
 
+const DEFAULT_BASE_URL: &'static str = "https://editor.netsblox.org";
 const STEPS_PER_IO_ITER: usize = 64;
 const MAX_REQUEST_SIZE_BYTES: usize = 1024 * 1024 * 1024;
 const YIELDS_BEFORE_IDLE_SLEEP: usize = 256;
@@ -114,7 +115,7 @@ pub enum Mode {
         role: Option<String>,
 
         /// Address of the NetsBlox server (default: `https://editor.netsblox.org`)
-        #[clap(long, default_value_t = String::from("https://editor.netsblox.org"))]
+        #[clap(long, default_value_t = String::from(DEFAULT_BASE_URL))]
         server: String,
     },
     /// Compiles a single project file and dumps its disassembly to stdout
@@ -128,7 +129,7 @@ pub enum Mode {
     /// Starts an execution server which you can connect to from the browser
     Start {
         /// Address of the NetsBlox server (default: `https://editor.netsblox.org`)
-        #[clap(long, default_value_t = String::from("https://editor.netsblox.org"))]
+        #[clap(long, default_value_t = String::from(DEFAULT_BASE_URL))]
         server: String,
 
         /// The address of this machine, which others use to send HTTP requests (default 127.0.0.1)

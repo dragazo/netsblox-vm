@@ -41,7 +41,7 @@ fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdS
 
 #[test]
 fn test_proj_counting() {
-    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/counting.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
@@ -58,7 +58,7 @@ fn test_proj_counting() {
 
 #[test]
 fn test_proj_broadcast() {
-    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/broadcast.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
@@ -81,7 +81,7 @@ fn test_proj_broadcast() {
 
 #[test]
 fn test_proj_loop_yields() {
-    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/loop-yields.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
@@ -99,7 +99,7 @@ fn test_proj_loop_yields() {
 
 #[test]
 fn test_proj_parallel_rpcs() {
-    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
@@ -141,7 +141,7 @@ fn test_proj_parallel_rpcs() {
 
 #[test]
 fn test_proj_wait_until() {
-    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/wait-until.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();

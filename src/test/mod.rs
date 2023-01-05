@@ -10,6 +10,8 @@ use crate::gc::*;
 mod process;
 mod project;
 
+const BASE_URL: &'static str = "https://editor.netsblox.org";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NativeType {}
 
