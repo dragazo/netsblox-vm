@@ -424,25 +424,6 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
 
-            Instruction::MakeList { len } => {
-                let mut vals = VecDeque::with_capacity(len);
-                for _ in 0..len {
-                    vals.push_front(self.value_stack.pop().unwrap());
-                }
-                self.value_stack.push(GcCell::allocate(mc, vals).into());
-                self.pos = aft_pos;
-            }
-            Instruction::MakeListConcat { len } => {
-                let mut vals = VecDeque::new();
-                for _ in 0..len {
-                    for &val in self.value_stack.pop().unwrap().as_list()?.read().iter().rev() {
-                        vals.push_front(val);
-                    }
-                }
-                self.value_stack.push(GcCell::allocate(mc, vals).into());
-                self.pos = aft_pos;
-            }
-
             Instruction::ListCons => {
                 let mut res = self.value_stack.pop().unwrap().as_list()?.read().clone();
                 res.push_front(self.value_stack.pop().unwrap());
@@ -671,7 +652,17 @@ impl<'gc, S: System> Process<'gc, S> {
                         for item in values {
                             acc.push_str(item.to_string()?.as_ref());
                         }
-                        Ok(Value::String(Gc::allocate(mc, acc)))
+                        Ok(Gc::allocate(mc, acc).into())
+                    },
+                    VariadicOp::MakeList => |mc, _, values| {
+                        Ok(GcCell::allocate(mc, values.collect::<VecDeque<_>>()).into())
+                    },
+                    VariadicOp::ListCat => |mc, _, values| {
+                        let mut acc = VecDeque::new();
+                        for item in values {
+                            acc.extend(item.as_list()?.read().iter().copied());
+                        }
+                        Ok(GcCell::allocate(mc, acc).into())
                     },
                 };
 
@@ -689,16 +680,16 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.value_stack.push(res);
                 self.pos = aft_pos;
             }
-            Instruction::Eq => {
+            Instruction::Eq { negate } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::check_eq(&a, &b).into());
+                self.value_stack.push((ops::check_eq(&a, &b) ^ negate).into());
                 self.pos = aft_pos;
             }
-            Instruction::Neq => {
+            Instruction::RefEq => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push((!ops::check_eq(&a, &b)).into());
+                self.value_stack.push(ops::check_ref_eq(&a, &b).into());
                 self.pos = aft_pos;
             }
             Instruction::UnaryOp { op } => {
@@ -1308,6 +1299,8 @@ mod ops {
                 Some(s) => s == *n,
                 None => **s == n.to_string(),
             }
+            (Value::Number(_), _) | (_, Value::Number(_)) => false,
+            (Value::String(_), _) | (_, Value::String(_)) => false,
 
             (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),
             (Value::Closure(_), _) | (_, Value::Closure(_)) => false,
@@ -1326,10 +1319,32 @@ mod ops {
             (Value::Entity(_), _) | (_, Value::Entity(_)) => false,
 
             (Value::Native(a), Value::Native(b)) => a.as_ptr() == b.as_ptr(),
-            (Value::Native(_), _) | (_, Value::Native(_)) => false,
         }
     }
-    pub(super) fn check_eq<'gc, 'a, S: System>(a: &'a Value<'gc, S>, b: &'a Value<'gc, S>) -> bool {
+    pub(super) fn check_eq<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>) -> bool {
         check_eq_impl(a, b, &mut Default::default())
+    }
+    pub(super) fn check_ref_eq<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>) -> bool {
+        match (a, b) {
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Bool(_), _) | (_, Value::Bool(_)) => false,
+
+            (Value::Number(a), Value::Number(b)) => a == b,
+            (Value::Number(_), _) | (_, Value::Number(_)) => false,
+
+            (Value::String(a), Value::String(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::String(_), _) | (_, Value::String(_)) => false,
+
+            (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Closure(_), _) | (_, Value::Closure(_)) => false,
+
+            (Value::List(a), Value::List(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::List(_), _) | (_, Value::List(_)) => false,
+
+            (Value::Entity(a), Value::Entity(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Entity(_), _) | (_, Value::Entity(_)) => false,
+
+            (Value::Native(a), Value::Native(b)) => a.as_ptr() == b.as_ptr(),
+        }
     }
 }
