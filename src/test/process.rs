@@ -1177,7 +1177,35 @@ fn test_proc_identical_to() {
             [false, false, true, true, true],
             [false, false, false, true],
         ])).unwrap();
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "binary make range");
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "identical to");
+    });
+}
+
+#[test]
+fn test_proc_variadic_list_ctors() {
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/variadic-list-ctors.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            [],
+            ["1","2","3"],
+            ["1","5","3","8"],
+            [],
+            ["1","2","3","5","4","2","1","8"],
+            ["2","1","9","5","4","6","5","1"],
+            [false, false, false, false],
+            [true, true, true, true],
+            [true, false],
+            [true, false],
+            [true, false],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic list ctors");
     });
 }
 
