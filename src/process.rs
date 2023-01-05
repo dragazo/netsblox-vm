@@ -668,19 +668,6 @@ impl<'gc, S: System> Process<'gc, S> {
                 None => self.pos = goto,
             }
 
-            Instruction::StrCat { args } => {
-                let mut values = Vec::with_capacity(args);
-                for _ in 0..args {
-                    values.push(self.value_stack.pop().unwrap());
-                }
-                let mut res = String::new();
-                for value in values.iter().rev() {
-                    res += value.to_string()?.as_ref();
-                }
-                self.value_stack.push(Gc::allocate(mc, res).into());
-                self.pos = aft_pos;
-            }
-
             Instruction::BinaryOp { op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
@@ -688,27 +675,40 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::VariadicOp { op, len } => {
-                let (mut value, bin_op) = match op {
-                    VariadicOp::Add => (Value::Number(Number::new(0.0)?), BinaryOp::Add),
-                    VariadicOp::Mul => (Value::Number(Number::new(1.0)?), BinaryOp::Mul),
-                    VariadicOp::Min => (Value::Number(Number::infinity()?), BinaryOp::Min),
-                    VariadicOp::Max => (Value::Number(Number::neg_infinity()?), BinaryOp::Max),
+                fn combine_as_binary<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, mut acc: Value<'gc, S>, values: &mut dyn Iterator<Item = Value<'gc, S>>, op: BinaryOp) -> Result<Value<'gc, S>, ErrorCause<S>> {
+                    for item in values {
+                        acc = ops::binary_op(mc, system, &acc, &item, op)?;
+                    }
+                    Ok(acc)
+                }
+
+                type Combine<'gc, S, I> = fn(MutationContext<'gc, '_>, &S, I) -> Result<Value<'gc, S>, ErrorCause<S>>;
+                let combine: Combine<'gc, S, &mut dyn Iterator<Item = Value<'gc, S>>> = match op {
+                    VariadicOp::Add => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(0.0)?), values, BinaryOp::Add),
+                    VariadicOp::Mul => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(1.0)?), values, BinaryOp::Mul),
+                    VariadicOp::Min => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::infinity()?), values, BinaryOp::Min),
+                    VariadicOp::Max => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::neg_infinity()?), values, BinaryOp::Max),
+                    VariadicOp::StrCat => |mc, _, values| {
+                        let mut acc = String::new();
+                        for item in values {
+                            acc.push_str(item.to_string()?.as_ref());
+                        }
+                        Ok(Value::String(Gc::allocate(mc, acc)))
+                    },
                 };
-                match len {
+
+                let res = match len {
                     VariadicLen::Fixed(len) => {
                         let stack_size = self.value_stack.len();
-                        for item in self.value_stack.drain(stack_size - len..) {
-                            value = ops::binary_op(mc, &*self.system, &value, &item, bin_op)?;
-                        }
+                        combine(mc, &*self.system, &mut self.value_stack.drain(stack_size - len..))?
                     }
                     VariadicLen::Dynamic => {
                         let src = self.value_stack.pop().unwrap().as_list()?;
-                        for item in src.read().iter() {
-                            value = ops::binary_op(mc, &*self.system, &value, item, bin_op)?;
-                        }
+                        let src = src.read();
+                        combine(mc, &*self.system, &mut src.iter().copied())?
                     }
-                }
-                self.value_stack.push(value);
+                };
+                self.value_stack.push(res);
                 self.pos = aft_pos;
             }
             Instruction::Eq => {

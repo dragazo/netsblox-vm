@@ -1105,6 +1105,27 @@ fn test_proc_string_index() {
 }
 
 #[test]
+fn test_proc_variadic_strcat() {
+    let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/variadic-strcat.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            "hello world test13",
+            "this is a test15",
+            "",
+            "",
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic strcat");
+    });
+}
+
+#[test]
 fn test_proc_list_rev() {
     let system = Rc::new(StdSystem::new("https://editor.netsblox.org".to_owned(), None, Config::default()));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
