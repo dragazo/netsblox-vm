@@ -18,6 +18,12 @@ const BYTES_PER_LINE: usize = 10;
 /// Max number of shrinking cycles to apply to variable width encoded values in an output binary
 const SHRINK_CYCLES: usize = 3;
 
+#[derive(Debug)]
+pub enum CompileError<'a> {
+    UnsupportedStmt { kind: &'a ast::StmtKind },
+    UnsupportedExpr { kind: &'a ast::ExprKind },
+}
+
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
 pub(crate) enum BinaryOp {
@@ -851,41 +857,42 @@ struct ByteCodeBuilder<'a> {
     ins_locations: BTreeMap<usize, &'a str>,
 }
 impl<'a> ByteCodeBuilder<'a> {
-    fn append_simple_ins(&mut self, entity: Option<&'a ast::Entity>, values: &[&'a ast::Expr], op: Instruction<'a>) {
+    fn append_simple_ins(&mut self, entity: Option<&'a ast::Entity>, values: &[&'a ast::Expr], op: Instruction<'a>) -> Result<(), CompileError<'a>> {
         for value in values {
-            self.append_expr(value, entity);
+            self.append_expr(value, entity)?;
         }
         self.ins.push(op.into());
+        Ok(())
     }
-    fn append_variadic_op(&mut self, entity: Option<&'a ast::Entity>, varargs: &'a ast::VariadicInput, op: VariadicOp) {
-        match varargs {
+    fn append_variadic_op(&mut self, entity: Option<&'a ast::Entity>, varargs: &'a ast::VariadicInput, op: VariadicOp) -> Result<(), CompileError<'a>> {
+        Ok(match varargs {
             ast::VariadicInput::Fixed(values) => {
                 for value in values {
-                    self.append_expr(value, entity);
+                    self.append_expr(value, entity)?;
                 }
                 self.ins.push(Instruction::VariadicOp { op, len: VariadicLen::Fixed(values.len()) }.into());
             }
             ast::VariadicInput::VarArgs(values) => {
-                self.append_expr(values, entity);
+                self.append_expr(values, entity)?;
                 self.ins.push(Instruction::VariadicOp { op, len: VariadicLen::Dynamic }.into());
             }
-        }
+        })
     }
-    fn append_variadic(&mut self, src: &'a ast::VariadicInput, entity: Option<&'a ast::Entity>) -> VariadicLen {
-        match src {
+    fn append_variadic(&mut self, src: &'a ast::VariadicInput, entity: Option<&'a ast::Entity>) -> Result<VariadicLen, CompileError<'a>> {
+        Ok(match src {
             ast::VariadicInput::Fixed(values) => {
                 for value in values {
-                    self.append_expr(value, entity);
+                    self.append_expr(value, entity)?;
                 }
                 VariadicLen::Fixed(values.len())
             }
             ast::VariadicInput::VarArgs(list) => {
-                self.append_expr(list, entity);
+                self.append_expr(list, entity)?;
                 VariadicLen::Dynamic
             }
-        }
+        })
     }
-    fn append_expr(&mut self, expr: &'a ast::Expr, entity: Option<&'a ast::Entity>) {
+    fn append_expr(&mut self, expr: &'a ast::Expr, entity: Option<&'a ast::Entity>) -> Result<(), CompileError<'a>> {
         match &expr.kind {
             ast::ExprKind::Value(v) => self.ins.push(match v {
                 ast::Value::Number(v) => Instruction::PushNumber { value: *v },
@@ -900,97 +907,98 @@ impl<'a> ByteCodeBuilder<'a> {
                 ast::Value::List(_) => unreachable!(),
             }.into()),
             ast::ExprKind::Variable { var } => self.ins.push(Instruction::PushVariable { var: &var.trans_name }.into()),
-            ast::ExprKind::Atan2 { y, x } => self.append_simple_ins(entity, &[y, x], BinaryOp::Atan2.into()),
-            ast::ExprKind::Sub { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Sub.into()),
-            ast::ExprKind::Div { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Div.into()),
-            ast::ExprKind::Pow { base, power } => self.append_simple_ins(entity, &[base, power], BinaryOp::Pow.into()),
-            ast::ExprKind::Greater { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Greater.into()),
-            ast::ExprKind::GreaterEq { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::GreaterEq.into()),
-            ast::ExprKind::Less { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Less.into()),
-            ast::ExprKind::LessEq { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::LessEq.into()),
-            ast::ExprKind::Mod { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Mod.into()),
-            ast::ExprKind::Log { base, value } => self.append_simple_ins(entity, &[base, value], BinaryOp::Log.into()),
-            ast::ExprKind::Neg { value } => self.append_simple_ins(entity, &[value], UnaryOp::Neg.into()),
-            ast::ExprKind::Abs { value } => self.append_simple_ins(entity, &[value], UnaryOp::Abs.into()),
-            ast::ExprKind::Sqrt { value } => self.append_simple_ins(entity, &[value], UnaryOp::Sqrt.into()),
-            ast::ExprKind::Sin { value } => self.append_simple_ins(entity, &[value], UnaryOp::Sin.into()),
-            ast::ExprKind::Cos { value } => self.append_simple_ins(entity, &[value], UnaryOp::Cos.into()),
-            ast::ExprKind::Tan { value } => self.append_simple_ins(entity, &[value], UnaryOp::Tan.into()),
-            ast::ExprKind::Asin { value } => self.append_simple_ins(entity, &[value], UnaryOp::Asin.into()),
-            ast::ExprKind::Acos { value } => self.append_simple_ins(entity, &[value], UnaryOp::Acos.into()),
-            ast::ExprKind::Atan { value } => self.append_simple_ins(entity, &[value], UnaryOp::Atan.into()),
-            ast::ExprKind::Round { value } => self.append_simple_ins(entity, &[value], UnaryOp::Round.into()),
-            ast::ExprKind::Floor { value } => self.append_simple_ins(entity, &[value], UnaryOp::Floor.into()),
-            ast::ExprKind::Ceil { value } => self.append_simple_ins(entity, &[value], UnaryOp::Ceil.into()),
-            ast::ExprKind::Not { value } => self.append_simple_ins(entity, &[value], UnaryOp::Not.into()),
-            ast::ExprKind::Strlen { value } => self.append_simple_ins(entity, &[value], UnaryOp::StrLen.into()),
-            ast::ExprKind::UnicodeToChar { value } => self.append_simple_ins(entity, &[value], UnaryOp::UnicodeToChar.into()),
-            ast::ExprKind::CharToUnicode { value } => self.append_simple_ins(entity, &[value], UnaryOp::CharToUnicode.into()),
-            ast::ExprKind::Eq { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::Eq { negate: false }),
-            ast::ExprKind::Neq { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::Eq { negate: true }),
-            ast::ExprKind::Identical { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::RefEq),
-            ast::ExprKind::ListGet { list, index } => self.append_simple_ins(entity, &[index, list], Instruction::ListGet),
-            ast::ExprKind::ListGetLast { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetLast),
-            ast::ExprKind::ListGetRandom { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetRandom),
-            ast::ExprKind::ListLength { value } => self.append_simple_ins(entity, &[value], Instruction::ListLength),
-            ast::ExprKind::ListDims { value } => self.append_simple_ins(entity, &[value], Instruction::ListDims),
-            ast::ExprKind::ListRank { value } => self.append_simple_ins(entity, &[value], Instruction::ListRank),
-            ast::ExprKind::ListRev { value } => self.append_simple_ins(entity, &[value], Instruction::ListRev),
-            ast::ExprKind::ListFlatten { value } => self.append_simple_ins(entity, &[value], Instruction::ListFlatten),
-            ast::ExprKind::ListIsEmpty { value } => self.append_simple_ins(entity, &[value], Instruction::ListIsEmpty),
-            ast::ExprKind::ListCons { item, list } => self.append_simple_ins(entity, &[item, list], Instruction::ListCons),
-            ast::ExprKind::ListCdr { value } => self.append_simple_ins(entity, &[value], Instruction::ListCdr),
-            ast::ExprKind::ListFind { list, value } => self.append_simple_ins(entity, &[value, list], Instruction::ListFind),
-            ast::ExprKind::ListContains { list, value } => self.append_simple_ins(entity, &[list, value], Instruction::ListContains),
-            ast::ExprKind::MakeListRange { start, stop } => self.append_simple_ins(entity, &[start, stop], BinaryOp::Range.into()),
-            ast::ExprKind::Random { a, b } => self.append_simple_ins(entity, &[a, b], BinaryOp::Random.into()),
-            ast::ExprKind::ListJson { value } => self.append_simple_ins(entity, &[value], Instruction::ListJson),
-            ast::ExprKind::StrGet { string, index } => self.append_simple_ins(entity, &[index, string], BinaryOp::StrGet.into()),
-            ast::ExprKind::StrGetLast { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetLast.into()),
-            ast::ExprKind::StrGetRandom { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetRandom.into()),
+            ast::ExprKind::Atan2 { y, x } => self.append_simple_ins(entity, &[y, x], BinaryOp::Atan2.into())?,
+            ast::ExprKind::Sub { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Sub.into())?,
+            ast::ExprKind::Div { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Div.into())?,
+            ast::ExprKind::Pow { base, power } => self.append_simple_ins(entity, &[base, power], BinaryOp::Pow.into())?,
+            ast::ExprKind::Greater { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Greater.into())?,
+            ast::ExprKind::GreaterEq { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::GreaterEq.into())?,
+            ast::ExprKind::Less { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Less.into())?,
+            ast::ExprKind::LessEq { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::LessEq.into())?,
+            ast::ExprKind::Mod { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Mod.into())?,
+            ast::ExprKind::Log { base, value } => self.append_simple_ins(entity, &[base, value], BinaryOp::Log.into())?,
+            ast::ExprKind::Neg { value } => self.append_simple_ins(entity, &[value], UnaryOp::Neg.into())?,
+            ast::ExprKind::Abs { value } => self.append_simple_ins(entity, &[value], UnaryOp::Abs.into())?,
+            ast::ExprKind::Sqrt { value } => self.append_simple_ins(entity, &[value], UnaryOp::Sqrt.into())?,
+            ast::ExprKind::Sin { value } => self.append_simple_ins(entity, &[value], UnaryOp::Sin.into())?,
+            ast::ExprKind::Cos { value } => self.append_simple_ins(entity, &[value], UnaryOp::Cos.into())?,
+            ast::ExprKind::Tan { value } => self.append_simple_ins(entity, &[value], UnaryOp::Tan.into())?,
+            ast::ExprKind::Asin { value } => self.append_simple_ins(entity, &[value], UnaryOp::Asin.into())?,
+            ast::ExprKind::Acos { value } => self.append_simple_ins(entity, &[value], UnaryOp::Acos.into())?,
+            ast::ExprKind::Atan { value } => self.append_simple_ins(entity, &[value], UnaryOp::Atan.into())?,
+            ast::ExprKind::Round { value } => self.append_simple_ins(entity, &[value], UnaryOp::Round.into())?,
+            ast::ExprKind::Floor { value } => self.append_simple_ins(entity, &[value], UnaryOp::Floor.into())?,
+            ast::ExprKind::Ceil { value } => self.append_simple_ins(entity, &[value], UnaryOp::Ceil.into())?,
+            ast::ExprKind::Not { value } => self.append_simple_ins(entity, &[value], UnaryOp::Not.into())?,
+            ast::ExprKind::Strlen { value } => self.append_simple_ins(entity, &[value], UnaryOp::StrLen.into())?,
+            ast::ExprKind::UnicodeToChar { value } => self.append_simple_ins(entity, &[value], UnaryOp::UnicodeToChar.into())?,
+            ast::ExprKind::CharToUnicode { value } => self.append_simple_ins(entity, &[value], UnaryOp::CharToUnicode.into())?,
+            ast::ExprKind::Eq { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::Eq { negate: false })?,
+            ast::ExprKind::Neq { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::Eq { negate: true })?,
+            ast::ExprKind::Identical { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::RefEq)?,
+            ast::ExprKind::ListGet { list, index } => self.append_simple_ins(entity, &[index, list], Instruction::ListGet)?,
+            ast::ExprKind::ListGetLast { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetLast)?,
+            ast::ExprKind::ListGetRandom { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetRandom)?,
+            ast::ExprKind::ListLength { value } => self.append_simple_ins(entity, &[value], Instruction::ListLength)?,
+            ast::ExprKind::ListDims { value } => self.append_simple_ins(entity, &[value], Instruction::ListDims)?,
+            ast::ExprKind::ListRank { value } => self.append_simple_ins(entity, &[value], Instruction::ListRank)?,
+            ast::ExprKind::ListRev { value } => self.append_simple_ins(entity, &[value], Instruction::ListRev)?,
+            ast::ExprKind::ListFlatten { value } => self.append_simple_ins(entity, &[value], Instruction::ListFlatten)?,
+            ast::ExprKind::ListIsEmpty { value } => self.append_simple_ins(entity, &[value], Instruction::ListIsEmpty)?,
+            ast::ExprKind::ListCons { item, list } => self.append_simple_ins(entity, &[item, list], Instruction::ListCons)?,
+            ast::ExprKind::ListCdr { value } => self.append_simple_ins(entity, &[value], Instruction::ListCdr)?,
+            ast::ExprKind::ListFind { list, value } => self.append_simple_ins(entity, &[value, list], Instruction::ListFind)?,
+            ast::ExprKind::ListContains { list, value } => self.append_simple_ins(entity, &[list, value], Instruction::ListContains)?,
+            ast::ExprKind::MakeListRange { start, stop } => self.append_simple_ins(entity, &[start, stop], BinaryOp::Range.into())?,
+            ast::ExprKind::Random { a, b } => self.append_simple_ins(entity, &[a, b], BinaryOp::Random.into())?,
+            ast::ExprKind::ListJson { value } => self.append_simple_ins(entity, &[value], Instruction::ListJson)?,
+            ast::ExprKind::StrGet { string, index } => self.append_simple_ins(entity, &[index, string], BinaryOp::StrGet.into())?,
+            ast::ExprKind::StrGetLast { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetLast.into())?,
+            ast::ExprKind::StrGetRandom { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetRandom.into())?,
+            ast::ExprKind::SyscallError => self.append_simple_ins(entity, &[], Instruction::PushSyscallError)?,
             ast::ExprKind::RpcError => self.ins.push(Instruction::PushRpcError.into()),
             ast::ExprKind::Answer => self.ins.push(Instruction::PushAnswer.into()),
             ast::ExprKind::Timer => self.ins.push(Instruction::PushTimer.into()),
             ast::ExprKind::Heading => self.ins.push(Instruction::PushHeading.into()),
-            ast::ExprKind::Add { values } => self.append_variadic_op(entity, values, VariadicOp::Add),
-            ast::ExprKind::Mul { values } => self.append_variadic_op(entity, values, VariadicOp::Mul),
-            ast::ExprKind::Min { values } => self.append_variadic_op(entity, values, VariadicOp::Min),
-            ast::ExprKind::Max { values } => self.append_variadic_op(entity, values, VariadicOp::Max),
-            ast::ExprKind::Strcat { values } => self.append_variadic_op(entity, values, VariadicOp::StrCat),
-            ast::ExprKind::MakeList { values } => self.append_variadic_op(entity, values, VariadicOp::MakeList),
-            ast::ExprKind::MakeListConcat { lists } => self.append_variadic_op(entity, lists, VariadicOp::ListCat),
+            ast::ExprKind::Add { values } => self.append_variadic_op(entity, values, VariadicOp::Add)?,
+            ast::ExprKind::Mul { values } => self.append_variadic_op(entity, values, VariadicOp::Mul)?,
+            ast::ExprKind::Min { values } => self.append_variadic_op(entity, values, VariadicOp::Min)?,
+            ast::ExprKind::Max { values } => self.append_variadic_op(entity, values, VariadicOp::Max)?,
+            ast::ExprKind::Strcat { values } => self.append_variadic_op(entity, values, VariadicOp::StrCat)?,
+            ast::ExprKind::MakeList { values } => self.append_variadic_op(entity, values, VariadicOp::MakeList)?,
+            ast::ExprKind::MakeListConcat { lists } => self.append_variadic_op(entity, lists, VariadicOp::ListCat)?,
             ast::ExprKind::ListReshape { value, dims } => {
-                self.append_expr(value, entity);
-                let len = self.append_variadic(dims, entity);
+                self.append_expr(value, entity)?;
+                let len = self.append_variadic(dims, entity)?;
                 self.ins.push(Instruction::ListReshape { len }.into());
             }
             ast::ExprKind::ListCombinations { sources } => {
-                let len = self.append_variadic(sources, entity);
+                let len = self.append_variadic(sources, entity)?;
                 self.ins.push(Instruction::ListCartesianProduct { len }.into());
             }
             ast::ExprKind::Conditional { condition, then, otherwise } => {
-                self.append_expr(condition, entity);
+                self.append_expr(condition, entity)?;
                 let test_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
 
-                self.append_expr(then, entity);
+                self.append_expr(then, entity)?;
                 let jump_aft_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
 
                 let test_false_pos = self.ins.len();
-                self.append_expr(otherwise, entity);
+                self.append_expr(otherwise, entity)?;
                 let aft_pos = self.ins.len();
 
                 self.ins[test_pos] = Instruction::ConditionalJump { to: test_false_pos, when: false }.into();
                 self.ins[jump_aft_pos] = Instruction::Jump { to: aft_pos }.into();
             }
             ast::ExprKind::Or { left, right } => {
-                self.append_expr(left, entity);
+                self.append_expr(left, entity)?;
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
                 let check_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
                 self.ins.push(Instruction::PopValue.into());
-                self.append_expr(right, entity);
+                self.append_expr(right, entity)?;
                 let aft = self.ins.len();
 
                 self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: true }.into();
@@ -998,12 +1006,12 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::ToBool.into());
             }
             ast::ExprKind::And { left, right } => {
-                self.append_expr(left, entity);
+                self.append_expr(left, entity)?;
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
                 let check_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
                 self.ins.push(Instruction::PopValue.into());
-                self.append_expr(right, entity);
+                self.append_expr(right, entity)?;
                 let aft = self.ins.len();
 
                 self.ins[check_pos] = Instruction::ConditionalJump { to: aft, when: false }.into();
@@ -1012,7 +1020,7 @@ impl<'a> ByteCodeBuilder<'a> {
             }
             ast::ExprKind::CallFn { function, args } => {
                 for arg in args {
-                    self.append_expr(arg, entity);
+                    self.append_expr(arg, entity)?;
                 }
                 let call_hole_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
@@ -1021,30 +1029,29 @@ impl<'a> ByteCodeBuilder<'a> {
             }
             ast::ExprKind::CallClosure { closure, args } => {
                 for arg in args {
-                    self.append_expr(arg, entity);
+                    self.append_expr(arg, entity)?;
                 }
-                self.append_expr(closure, entity);
+                self.append_expr(closure, entity)?;
                 self.ins.push(Instruction::CallClosure { args: args.len() }.into());
             }
             ast::ExprKind::CallRpc { service, rpc, args } => {
                 for (arg_name, arg) in args {
                     self.ins.push(Instruction::MetaPush { value: arg_name }.into());
-                    self.append_expr(arg, entity);
+                    self.append_expr(arg, entity)?;
                 }
                 self.ins.push(Instruction::CallRpc { service, rpc, args: args.len() }.into());
             }
             ast::ExprKind::Syscall { name, args } => {
-                self.append_expr(name, entity);
-                let len = self.append_variadic(args, entity);
+                self.append_expr(name, entity)?;
+                let len = self.append_variadic(args, entity)?;
                 self.ins.push(Instruction::Syscall { len }.into());
             }
-            ast::ExprKind::SyscallError => self.append_simple_ins(entity, &[], Instruction::PushSyscallError),
             ast::ExprKind::NetworkMessageReply { target, msg_type, values } => {
                 for (field, value) in values {
-                    self.append_expr(value, entity);
+                    self.append_expr(value, entity)?;
                     self.ins.push(Instruction::MetaPush { value: field }.into());
                 }
-                self.append_expr(target, entity);
+                self.append_expr(target, entity)?;
                 self.ins.push(Instruction::SendNetworkMessage { msg_type, values: values.len(), expect_reply: true }.into());
             }
             ast::ExprKind::Closure { params, captures, stmts } => {
@@ -1053,7 +1060,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.closure_holes.push_back((closure_hole_pos, params, captures, stmts, entity));
             }
             ast::ExprKind::TextSplit { text, mode } => {
-                self.append_expr(text, entity);
+                self.append_expr(text, entity)?;
                 let ins: Instruction = match mode {
                     ast::TextSplitMode::Letter => UnaryOp::SplitLetter.into(),
                     ast::TextSplitMode::Word => UnaryOp::SplitWord.into(),
@@ -1063,15 +1070,15 @@ impl<'a> ByteCodeBuilder<'a> {
                     ast::TextSplitMode::Csv => UnaryOp::SplitCsv.into(),
                     ast::TextSplitMode::Json => UnaryOp::SplitJson.into(),
                     ast::TextSplitMode::Custom(pattern) => {
-                        self.append_expr(pattern, entity);
+                        self.append_expr(pattern, entity)?;
                         BinaryOp::SplitBy.into()
                     }
                 };
                 self.ins.push(ins.into());
             }
             ast::ExprKind::Map { f, list } => {
-                self.append_expr(f, entity);
-                self.append_expr(list, entity);
+                self.append_expr(f, entity)?;
+                self.append_expr(list, entity)?;
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Dynamic }.into()); // shallow copy the input list
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Fixed(0) }.into()); // push an empty list
 
@@ -1094,8 +1101,8 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::ExprKind::Keep { f, list } => {
-                self.append_expr(f, entity);
-                self.append_expr(list, entity);
+                self.append_expr(f, entity)?;
+                self.append_expr(list, entity)?;
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Dynamic }.into()); // shallow copy the input list
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Fixed(0) }.into()); // push an empty list
 
@@ -1128,8 +1135,8 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::ExprKind::FindFirst { f, list } => {
-                self.append_expr(f, entity);
-                self.append_expr(list, entity);
+                self.append_expr(f, entity)?;
+                self.append_expr(list, entity)?;
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Dynamic }.into()); // shallow copy the input list
 
                 let top = self.ins.len();
@@ -1156,9 +1163,9 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins[skip_jump_pos] = Instruction::ConditionalJump { to: ret, when: true }.into();
             }
             ast::ExprKind::Combine { f, list } => {
-                self.append_expr(list, entity);
+                self.append_expr(list, entity)?;
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Dynamic }.into()); // shallow copy the input list
-                self.append_expr(f, entity);
+                self.append_expr(f, entity)?;
 
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 let first_check_pos = self.ins.len();
@@ -1193,36 +1200,38 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::PushPosition.into());
                 self.ins.push(Instruction::ListGet.into());
             }
-            x => unimplemented!("{:?}", x),
+            kind => return Err(CompileError::UnsupportedExpr { kind }),
         }
 
         if let Some(location) = expr.info.location.as_deref() {
             self.ins_locations.insert(self.ins.len(), location);
         }
+
+        Ok(())
     }
-    fn append_stmt(&mut self, stmt: &'a ast::Stmt, entity: Option<&'a ast::Entity>) {
+    fn append_stmt(&mut self, stmt: &'a ast::Stmt, entity: Option<&'a ast::Entity>) -> Result<(), CompileError<'a>> {
         match &stmt.kind {
-            ast::StmtKind::Assign { var, value } => self.append_simple_ins(entity, &[value], Instruction::Assign { var: &var.trans_name }),
-            ast::StmtKind::AddAssign { var, value } => self.append_simple_ins(entity, &[value], Instruction::BinaryOpAssign { var: &var.trans_name, op: BinaryOp::Add }),
-            ast::StmtKind::ListInsert { list, value, index } => self.append_simple_ins(entity, &[value, index, list], Instruction::ListInsert),
-            ast::StmtKind::ListInsertLast { list, value } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertLast),
-            ast::StmtKind::ListInsertRandom { list, value } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertRandom),
-            ast::StmtKind::ListRemove { list, index } => self.append_simple_ins(entity, &[index, list], Instruction::ListRemove),
-            ast::StmtKind::ListRemoveLast { list } => self.append_simple_ins(entity, &[list], Instruction::ListRemoveLast),
-            ast::StmtKind::ListRemoveAll { list } => self.append_simple_ins(entity, &[list], Instruction::ListRemoveAll),
-            ast::StmtKind::ListAssign { list, index, value } => self.append_simple_ins(entity, &[index, list, value], Instruction::ListAssign),
-            ast::StmtKind::ListAssignLast { list, value } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignLast),
-            ast::StmtKind::ListAssignRandom { list, value } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignRandom),
-            ast::StmtKind::Return { value } => self.append_simple_ins(entity, &[value], Instruction::Return),
-            ast::StmtKind::Throw { error } => self.append_simple_ins(entity, &[error], Instruction::Throw),
-            ast::StmtKind::Ask { prompt } => self.append_simple_ins(entity, &[prompt], Instruction::Ask),
-            ast::StmtKind::Sleep { seconds } => self.append_simple_ins(entity, &[seconds], Instruction::Sleep),
+            ast::StmtKind::Assign { var, value } => self.append_simple_ins(entity, &[value], Instruction::Assign { var: &var.trans_name })?,
+            ast::StmtKind::AddAssign { var, value } => self.append_simple_ins(entity, &[value], Instruction::BinaryOpAssign { var: &var.trans_name, op: BinaryOp::Add })?,
+            ast::StmtKind::ListInsert { list, value, index } => self.append_simple_ins(entity, &[value, index, list], Instruction::ListInsert)?,
+            ast::StmtKind::ListInsertLast { list, value } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertLast)?,
+            ast::StmtKind::ListInsertRandom { list, value } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertRandom)?,
+            ast::StmtKind::ListRemove { list, index } => self.append_simple_ins(entity, &[index, list], Instruction::ListRemove)?,
+            ast::StmtKind::ListRemoveLast { list } => self.append_simple_ins(entity, &[list], Instruction::ListRemoveLast)?,
+            ast::StmtKind::ListRemoveAll { list } => self.append_simple_ins(entity, &[list], Instruction::ListRemoveAll)?,
+            ast::StmtKind::ListAssign { list, index, value } => self.append_simple_ins(entity, &[index, list, value], Instruction::ListAssign)?,
+            ast::StmtKind::ListAssignLast { list, value } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignLast)?,
+            ast::StmtKind::ListAssignRandom { list, value } => self.append_simple_ins(entity, &[list, value], Instruction::ListAssignRandom)?,
+            ast::StmtKind::Return { value } => self.append_simple_ins(entity, &[value], Instruction::Return)?,
+            ast::StmtKind::Throw { error } => self.append_simple_ins(entity, &[error], Instruction::Throw)?,
+            ast::StmtKind::Ask { prompt } => self.append_simple_ins(entity, &[prompt], Instruction::Ask)?,
+            ast::StmtKind::Sleep { seconds } => self.append_simple_ins(entity, &[seconds], Instruction::Sleep)?,
             ast::StmtKind::ResetTimer => self.ins.push(Instruction::ResetTimer.into()),
-            ast::StmtKind::SendNetworkReply { value } => self.append_simple_ins(entity, &[value], Instruction::SendNetworkReply),
+            ast::StmtKind::SendNetworkReply { value } => self.append_simple_ins(entity, &[value], Instruction::SendNetworkReply)?,
             ast::StmtKind::Say { content, duration } | ast::StmtKind::Think { content, duration } => {
-                self.append_simple_ins(entity, &[content], Instruction::Print);
+                self.append_simple_ins(entity, &[content], Instruction::Print)?;
                 if let Some(t) = duration {
-                    self.append_simple_ins(entity, &[t], Instruction::Sleep);
+                    self.append_simple_ins(entity, &[t], Instruction::Sleep)?;
                     self.ins.push(Instruction::PushString { value: "" }.into());
                     self.ins.push(Instruction::Print.into());
                 }
@@ -1234,7 +1243,7 @@ impl<'a> ByteCodeBuilder<'a> {
             }
             ast::StmtKind::RunFn { function, args } => {
                 for arg in args {
-                    self.append_expr(arg, entity);
+                    self.append_expr(arg, entity)?;
                 }
                 let call_hole_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
@@ -1244,30 +1253,30 @@ impl<'a> ByteCodeBuilder<'a> {
             }
             ast::StmtKind::RunClosure { closure, args } => {
                 for arg in args {
-                    self.append_expr(arg, entity);
+                    self.append_expr(arg, entity)?;
                 }
-                self.append_expr(closure, entity);
+                self.append_expr(closure, entity)?;
                 self.ins.push(Instruction::CallClosure { args: args.len() }.into());
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::StmtKind::Warp { stmts } => {
                 self.ins.push(Instruction::WarpStart.into());
                 for stmt in stmts {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
                 self.ins.push(Instruction::WarpStop.into());
             }
             ast::StmtKind::InfLoop { stmts } => {
                 let top = self.ins.len();
                 for stmt in stmts {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
                 self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
             }
             ast::StmtKind::WaitUntil { condition } => {
                 let top = self.ins.len();
-                self.append_expr(condition, entity);
+                self.append_expr(condition, entity)?;
                 let jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
                 self.ins.push(Instruction::Yield.into());
@@ -1278,12 +1287,12 @@ impl<'a> ByteCodeBuilder<'a> {
             }
             ast::StmtKind::UntilLoop { condition, stmts } => {
                 let top = self.ins.len();
-                self.append_expr(condition, entity);
+                self.append_expr(condition, entity)?;
                 let exit_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
 
                 for stmt in stmts {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
                 self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
@@ -1292,7 +1301,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins[exit_jump_pos] = Instruction::ConditionalJump { to: aft, when: true }.into();
             }
             ast::StmtKind::Repeat { times, stmts } => {
-                self.append_expr(times, entity);
+                self.append_expr(times, entity)?;
 
                 let top = self.ins.len();
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
@@ -1302,7 +1311,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(InternalInstruction::Illegal);
 
                 for stmt in stmts {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
 
                 self.ins.push(Instruction::PushInt { value: 1 }.into());
@@ -1316,9 +1325,9 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::StmtKind::ForLoop { var, start, stop, stmts } => {
-                self.append_expr(start, entity);
+                self.append_expr(start, entity)?;
                 self.ins.push(Instruction::ToNumber.into());
-                self.append_expr(stop, entity);
+                self.append_expr(stop, entity)?;
                 self.ins.push(Instruction::ToNumber.into());
 
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
@@ -1353,7 +1362,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 self.ins.push(Instruction::Assign { var: &var.trans_name }.into());
                 for stmt in stmts {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
 
                 self.ins.push(Instruction::PushInt { value: 1 }.into());
@@ -1374,7 +1383,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
             }
             ast::StmtKind::ForeachLoop { var, items, stmts } => {
-                self.append_expr(items, entity);
+                self.append_expr(items, entity)?;
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Dynamic }.into()); // shallow copy the input list
 
                 let top = self.ins.len();
@@ -1383,7 +1392,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(InternalInstruction::Illegal);
                 self.ins.push(Instruction::Assign { var: &var.trans_name }.into());
                 for stmt in stmts {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
                 self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
@@ -1394,28 +1403,28 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::StmtKind::If { condition, then } => {
-                self.append_expr(condition, entity);
+                self.append_expr(condition, entity)?;
                 let patch_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
                 for stmt in then {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
                 let else_pos = self.ins.len();
 
                 self.ins[patch_pos] = Instruction::ConditionalJump { to: else_pos, when: false }.into();
             }
             ast::StmtKind::IfElse { condition, then, otherwise } => {
-                self.append_expr(condition, entity);
+                self.append_expr(condition, entity)?;
                 let check_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
                 for stmt in then {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
                 let jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
                 let else_pos = self.ins.len();
                 for stmt in otherwise {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
                 let aft = self.ins.len();
 
@@ -1427,7 +1436,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(InternalInstruction::Illegal);
 
                 for stmt in code {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
                 self.ins.push(Instruction::PopHandler.into());
                 let success_end_pos = self.ins.len();
@@ -1436,7 +1445,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 let error_handler_pos = self.ins.len();
                 self.ins.push(Instruction::PopHandler.into());
                 for stmt in handler {
-                    self.append_stmt(stmt, entity);
+                    self.append_stmt(stmt, entity)?;
                 }
                 let aft = self.ins.len();
 
@@ -1446,57 +1455,60 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::StmtKind::SendLocalMessage { target, msg_type, wait } => match target {
                 Some(_) => unimplemented!(),
                 None => {
-                    self.append_expr(msg_type, entity);
+                    self.append_expr(msg_type, entity)?;
                     self.ins.push(Instruction::Broadcast { wait: *wait }.into());
                 }
             }
             ast::StmtKind::RunRpc { service, rpc, args } => {
                 for (arg_name, arg) in args {
                     self.ins.push(Instruction::MetaPush { value: arg_name }.into());
-                    self.append_expr(arg, entity);
+                    self.append_expr(arg, entity)?;
                 }
                 self.ins.push(Instruction::CallRpc { service, rpc, args: args.len() }.into());
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::StmtKind::SendNetworkMessage { target, msg_type, values } => {
                 for (field, value) in values {
-                    self.append_expr(value, entity);
+                    self.append_expr(value, entity)?;
                     self.ins.push(Instruction::MetaPush { value: field }.into());
                 }
-                self.append_expr(target, entity);
+                self.append_expr(target, entity)?;
                 self.ins.push(Instruction::SendNetworkMessage { msg_type, values: values.len(), expect_reply: false }.into());
             }
             ast::StmtKind::Syscall { name, args } => {
-                self.append_expr(name, entity);
-                let len = self.append_variadic(args, entity);
+                self.append_expr(name, entity)?;
+                let len = self.append_variadic(args, entity)?;
                 self.ins.push(Instruction::Syscall { len }.into());
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::StmtKind::Forward { distance } => {
-                self.append_expr(distance, entity);
+                self.append_expr(distance, entity)?;
                 self.ins.push(Instruction::Forward.into());
             }
             ast::StmtKind::TurnRight { angle } => {
-                self.append_expr(angle, entity);
+                self.append_expr(angle, entity)?;
                 self.ins.push(Instruction::Turn { right: true }.into());
             }
             ast::StmtKind::TurnLeft { angle } => {
-                self.append_expr(angle, entity);
+                self.append_expr(angle, entity)?;
                 self.ins.push(Instruction::Turn { right: false }.into());
             }
-            x => unimplemented!("{:?}", x),
+            kind => return Err(CompileError::UnsupportedStmt { kind }),
         }
 
         if let Some(location) = stmt.info.location.as_deref() {
             self.ins_locations.insert(self.ins.len(), location);
         }
+
+        Ok(())
     }
-    fn append_stmts_ret(&mut self, stmts: &'a [ast::Stmt], entity: Option<&'a ast::Entity>) {
+    fn append_stmts_ret(&mut self, stmts: &'a [ast::Stmt], entity: Option<&'a ast::Entity>) -> Result<(), CompileError<'a>> {
         for stmt in stmts {
-            self.append_stmt(stmt, entity);
+            self.append_stmt(stmt, entity)?;
         }
         self.ins.push(Instruction::PushString { value: "" }.into());
         self.ins.push(Instruction::Return.into());
+        Ok(())
     }
     fn link(mut self, funcs: Vec<(&'a ast::Function, usize)>, entities: Vec<(&'a ast::Entity, EntityLocations<'a>)>) -> (ByteCode, Locations<'a>) {
         assert!(self.closure_holes.is_empty());
@@ -1662,13 +1674,13 @@ impl ByteCode {
     /// (needed to execute a specific segment of code), as well as a lookup table of bytecode index
     /// to code location (e.g., the block `collabId` from project xml), which is needed to
     /// provide human-readable error locations.
-    pub fn compile(role: &ast::Role) -> (ByteCode, Locations) {
+    pub fn compile<'a>(role: &'a ast::Role) -> Result<(ByteCode, Locations<'a>), CompileError<'a>> {
         let mut code = ByteCodeBuilder::default();
 
         let mut funcs = Vec::with_capacity(role.funcs.len());
         for func in role.funcs.iter() {
             funcs.push((func, code.ins.len()));
-            code.append_stmts_ret(&func.stmts, None)
+            code.append_stmts_ret(&func.stmts, None)?;
         }
 
         let mut entities = Vec::with_capacity(role.entities.len());
@@ -1676,13 +1688,13 @@ impl ByteCode {
             let mut funcs = Vec::with_capacity(entity.funcs.len());
             for func in entity.funcs.iter() {
                 funcs.push((func, code.ins.len()));
-                code.append_stmts_ret(&func.stmts, Some(entity));
+                code.append_stmts_ret(&func.stmts, Some(entity))?;
             }
 
             let mut scripts = Vec::with_capacity(entity.scripts.len());
             for script in entity.scripts.iter() {
                 scripts.push((script, code.ins.len()));
-                code.append_stmts_ret(&script.stmts, Some(entity));
+                code.append_stmts_ret(&script.stmts, Some(entity))?;
             }
 
             entities.push((entity, EntityLocations { funcs, scripts }));
@@ -1690,7 +1702,7 @@ impl ByteCode {
 
         while let Some((hole_pos, params, captures, stmts, entity)) = code.closure_holes.pop_front() {
             let pos = code.ins.len();
-            code.append_stmts_ret(stmts, entity);
+            code.append_stmts_ret(stmts, entity)?;
 
             let mut ins_pack = Vec::with_capacity(params.len() + captures.len() + 1);
             for param in params {
@@ -1704,7 +1716,7 @@ impl ByteCode {
             code.ins[hole_pos] = InternalInstruction::Packed(ins_pack);
         }
 
-        code.link(funcs, entities)
+        Ok(code.link(funcs, entities))
     }
     /// Generates a hex dump of the stored code, including instructions and addresses.
     pub fn dump_code(&self, f: &mut dyn Write) -> io::Result<()> {

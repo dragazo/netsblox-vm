@@ -11,6 +11,7 @@ use checked_float::{CheckedFloat, FloatChecker};
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
+use crate::bytecode::*;
 
 /// Error type used by [`NumberChecker`].
 #[derive(Debug)]
@@ -32,12 +33,14 @@ impl FloatChecker<f64> for NumberChecker {
 pub type Number = CheckedFloat<f64, NumberChecker>;
 
 #[derive(Debug)]
-pub enum FromAstError {
+pub enum FromAstError<'a> {
     BadNumber { error: NumberError },
     BadKeycode { key: String },
-    UnsupportedEvent { kind: ast::HatKind },
+    UnsupportedEvent { kind: &'a ast::HatKind },
+    CompileError { error: CompileError<'a> },
 }
-impl From<NumberError> for FromAstError { fn from(error: NumberError) -> Self { Self::BadNumber { error } } }
+impl From<NumberError> for FromAstError<'_> { fn from(error: NumberError) -> Self { Self::BadNumber { error } } }
+impl<'a> From<CompileError<'a>> for FromAstError<'a> { fn from(error: CompileError<'a>) -> Self { Self::CompileError { error } } }
 
 #[derive(Debug)]
 pub enum FromJsonError {
@@ -207,7 +210,7 @@ impl<'gc, S: System> From<GcCell<'gc, Closure<'gc, S>>> for Value<'gc, S> { fn f
 impl<'gc, S: System> From<GcCell<'gc, Entity<'gc, S>>> for Value<'gc, S> { fn from(v: GcCell<'gc, Entity<'gc, S>>) -> Self { Value::Entity(v) } }
 impl<'gc, S: System> Value<'gc, S> {
     /// Creates a new value from an abstract syntax tree.
-    pub fn from_ast(mc: MutationContext<'gc, '_>, value: &ast::Value) -> Result<Self, FromAstError> {
+    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, value: &'a ast::Value) -> Result<Self, FromAstError<'a>> {
         Ok(match value {
             ast::Value::Bool(x) => (*x).into(),
             ast::Value::Number(x) => Number::new(*x)?.into(),
@@ -404,7 +407,7 @@ pub struct SymbolTable<'gc, S: System>(BTreeMap<String, Shared<'gc, Value<'gc, S
 impl<'gc, S: System> Default for SymbolTable<'gc, S> { fn default() -> Self { Self(Default::default()) } }
 impl<'gc, S: System> SymbolTable<'gc, S> {
     /// Creates a symbol table containing all the provided variable definitions.
-    pub fn from_ast(mc: MutationContext<'gc, '_>, vars: &[ast::VariableDef]) -> Result<Self, FromAstError> {
+    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, vars: &'a [ast::VariableDef]) -> Result<Self, FromAstError<'a>> {
         Ok(Self(vars.iter().map(|x| Ok((x.trans_name.clone(), Shared::Unique(Value::from_ast(mc, &x.value)?)))).collect::<Result<_,FromAstError>>()?))
     }
     /// Sets the value of an existing variable (as if by [`Shared::set`]) or defines it if it does not exist.
@@ -479,7 +482,6 @@ pub(crate) struct LookupGroup<'gc, 'a, 'b, S: System>(&'a mut [&'b mut SymbolTab
 impl<'gc, 'a, 'b, S: System> LookupGroup<'gc, 'a, 'b, S> {
     /// Creates a new lookup group.
     /// The first symbol table is intended to be the most-global, and subsequent tables are increasingly more-local.
-    /// Panics if `tables` is empty.
     pub fn new(tables: &'a mut [&'b mut SymbolTable<'gc, S>]) -> Self {
         debug_assert!(!tables.is_empty());
         Self(tables)

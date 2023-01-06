@@ -625,7 +625,7 @@ pub fn run<C: CustomTypes>(mode: Mode, config: Config<C>, syscalls: &[SyscallMen
             let content = read_file(&src).unwrap_or_else(|_| crash!(1: "failed to read file '{src}'"));
             let (_, role) = open_project(&content, role.as_deref()).unwrap_or_else(|e| crash!(2: "{e}"));
 
-            let (bytecode, _) = ByteCode::compile(&role);
+            let (bytecode, _) = ByteCode::compile(&role).unwrap();
             println!("instructions:");
             bytecode.dump_code(&mut std::io::stdout().lock()).unwrap();
             println!("\ndata:");
