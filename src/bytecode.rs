@@ -4,8 +4,10 @@
 
 use std::prelude::v1::*;
 use std::collections::{BTreeMap, VecDeque};
-use std::io::{self, Write};
 use std::mem;
+
+#[cfg(feature = "std")]
+use std::io::{self, Write};
 
 use num_traits::FromPrimitive;
 use bin_pool::BinPool;
@@ -13,6 +15,7 @@ use bin_pool::BinPool;
 use crate::*;
 
 /// Number of bytes to display on each line of a hex dump
+#[cfg(feature = "std")]
 const BYTES_PER_LINE: usize = 10;
 
 /// Max number of shrinking cycles to apply to variable width encoded values in an output binary
@@ -1719,6 +1722,7 @@ impl ByteCode {
         Ok(code.link(funcs, entities))
     }
     /// Generates a hex dump of the stored code, including instructions and addresses.
+    #[cfg(feature = "std")]
     pub fn dump_code(&self, f: &mut dyn Write) -> io::Result<()> {
         let mut pos = 0;
         while pos < self.code.len() {
@@ -1747,6 +1751,7 @@ impl ByteCode {
         Ok(())
     }
     /// Generate a hex dump of the stored program data, including string literals and meta values.
+    #[cfg(feature = "std")]
     pub fn dump_data(&self, f: &mut dyn Write) -> io::Result<()> {
         for (i, bytes) in self.data.chunks(BYTES_PER_LINE).enumerate() {
             write!(f, "{:08}   ", i * BYTES_PER_LINE)?;

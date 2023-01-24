@@ -1126,7 +1126,7 @@ mod ops {
             BinaryOp::Div       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.div(b.to_number()?)?.into())),
             BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.powf(b.to_number()?)?.into())),
             BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(b.to_number()?.log(a.to_number()?)?.into())),
-            BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(Number::new(a.to_number()?.get().atan2(b.to_number()?.get()).to_degrees())?.into())),
+            BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.atan2(b.to_number()?)?.to_degrees()?.into())),
             BinaryOp::Greater   => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? == Ordering::Greater).into())),
             BinaryOp::GreaterEq => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? != Ordering::Less).into())),
             BinaryOp::Less      => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? == Ordering::Less).into())),
