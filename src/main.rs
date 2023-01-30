@@ -3,7 +3,8 @@ use std::io::{BufRead, Write, BufReader, BufWriter};
 use std::rc::Rc;
 use std::fmt;
 
-use netsblox_vm::cli::{run, Mode, SyscallMenu};
+use netsblox_vm::cli::{run, Mode};
+use netsblox_vm::template::SyscallMenu;
 use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, System, Request};
 use netsblox_vm::std_system::{Config, CustomTypes, StdSystem, RequestStatus};
 use netsblox_vm::gc::{GcCell, MutationContext, StaticCollect};
