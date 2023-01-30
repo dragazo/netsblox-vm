@@ -241,7 +241,7 @@ impl<'gc, S: System> Value<'gc, S> {
         fn simplify<'gc, S: System>(value: &Value<'gc, S>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<Json, ToJsonError<S>> {
             Ok(match value {
                 Value::Bool(x) => Json::Bool(*x),
-                Value::Number(x) => Json::Number(serde_json::Number::from_f64(x.get()).ok_or_else(|| ToJsonError::BadNumber(x.get()))?),
+                Value::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).ok_or_else(|| ToJsonError::BadNumber(x.get()))?),
                 Value::String(x) => Json::String(x.as_str().to_owned()),
                 Value::Closure(_) | Value::Entity(_) | Value::Native(_) => return Err(ToJsonError::ComplexType(value.get_type())),
                 Value::List(x) => {

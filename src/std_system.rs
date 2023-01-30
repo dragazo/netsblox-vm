@@ -341,7 +341,7 @@ impl<C: CustomTypes> StdSystem<C> {
                             "dstId": targets,
                             "srcId": format!("{}@{}", project_name, client_id),
                             "msgType": msg_type,
-                            "content": values.into_iter().collect::<serde_json::Map<_,_>>(),
+                            "content": values.into_iter().collect::<JsonMap<_,_>>(),
                         }),
                         OutgoingMessage::Blocking { msg_type, values, targets, reply_key } => json!({
                             "type": "message",
@@ -349,7 +349,7 @@ impl<C: CustomTypes> StdSystem<C> {
                             "srcId": format!("{}@{}", project_name, client_id),
                             "msgType": msg_type,
                             "requestId": reply_key.request_id,
-                            "content": values.into_iter().collect::<serde_json::Map<_,_>>(),
+                            "content": values.into_iter().collect::<JsonMap<_,_>>(),
                         }),
                         OutgoingMessage::Reply { value, reply_key } => json!({
                             "type": "message",
