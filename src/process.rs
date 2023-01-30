@@ -1253,7 +1253,7 @@ mod ops {
             }),
             UnaryOp::SplitJson => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 let value = x.to_string()?;
-                match serde_json::from_str::<Json>(&*value) {
+                match parse_json::<Json>(&*value) {
                     Ok(json) => Ok(Value::from_json(mc, json)?),
                     Err(_) => Err(ErrorCause::NotJson { value: value.into_owned() }),
                 }

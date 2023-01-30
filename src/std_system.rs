@@ -227,7 +227,7 @@ async fn call_rpc_async(context: &Context, client: &reqwest::Client, service: &s
             let status = res.status();
             match res.text().await {
                 Ok(text) => match status.is_success() {
-                    true => Ok(serde_json::from_str(&text).unwrap_or(Json::String(text))),
+                    true => Ok(parse_json(&text).unwrap_or(Json::String(text))),
                     false => Err(text),
                 }
                 Err(_) => Err("Failed to read response body".to_owned()),
@@ -292,7 +292,7 @@ impl<C: CustomTypes> StdSystem<C> {
                         let message_replies = message_replies.clone();
                         async move {
                             let mut msg = match packet {
-                                Ok(Message::Text(raw)) => match serde_json::from_str::<BTreeMap<String, Json>>(&raw) {
+                                Ok(Message::Text(raw)) => match parse_json::<BTreeMap<String, Json>>(&raw) {
                                     Ok(x) => x,
                                     Err(_) => return,
                                 }

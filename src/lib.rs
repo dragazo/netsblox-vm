@@ -15,7 +15,7 @@ pub mod gc {
 
 /// Re-exports of relevant items from `serde_json`.
 pub mod json {
-    pub use serde_json::{Value as Json, json};
+    pub use serde_json::{Value as Json, json, from_str as parse_json};
 }
 
 /// The re-exported version of the `netsblox-ast` crate.
