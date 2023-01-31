@@ -166,7 +166,7 @@ fn read_file(src: &str) -> io::Result<String> {
     Ok(s)
 }
 fn open_project<'a>(content: &str, role: Option<&'a str>) -> Result<(String, ast::Role), OpenProjectError<'a>> {
-    let parsed = match ast::ParserBuilder::default().build().unwrap().parse(content) {
+    let parsed = match ast::Parser::default().parse(content) {
         Ok(x) => x,
         Err(error) => return Err(OpenProjectError::ParseError { error }),
     };

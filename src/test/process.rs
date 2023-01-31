@@ -22,7 +22,7 @@ struct Env<'gc> {
 type EnvArena = Arena<Rootable![Env<'gc>]>;
 
 fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>) -> (EnvArena, InsLocations<String>) {
-    let parser = ast::ParserBuilder::default().build().unwrap();
+    let parser = ast::Parser::default();
     let ast = parser.parse(xml).unwrap();
     assert_eq!(ast.roles.len(), 1);
 
