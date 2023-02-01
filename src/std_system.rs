@@ -160,6 +160,12 @@ impl CommandKey {
 
 type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
 
+/// The required interface used by [`CustomTypes::Intermediate`].
+pub trait IntermediateType {
+    fn from_json(json: Json) -> Self;
+    fn from_image(img: Vec<u8>) -> Self;
+}
+
 /// A collection of static settings for using custom native types.
 pub trait CustomTypes: 'static + Sized {
     /// A native type that can be exposed directly to the VM as a value of type [`Value::Native`].
@@ -170,7 +176,7 @@ pub trait CustomTypes: 'static + Sized {
     /// which cannot be extended into the larger lifetime required for async operations.
     /// 
     /// Conversions are automatically performed from this type to [`Value`] via [`CustomTypes::from_intermediate`].
-    type Intermediate: 'static + Send + From<Json>;
+    type Intermediate: 'static + Send + IntermediateType;
 
     /// The type to use for [`System::EntityState`].
     type EntityState: 'static + for<'gc, 'a> From<EntityKind<'gc, 'a, StdSystem<Self>>>;
@@ -216,24 +222,37 @@ impl<C: CustomTypes> Config<C> {
     }
 }
 
-async fn call_rpc_async(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<Json, String> {
+async fn call_rpc_async<C: CustomTypes>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<C::Intermediate, String> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
     let url = format!("{base_url}/services/{service}/{rpc}?uuid={client_id}&projectId={project_id}&roleId={role_id}&t={time}",
         base_url = context.base_url, client_id = context.client_id, project_id = context.project_id, role_id = context.role_id);
     let args: BTreeMap<&str, &Json> = args.iter().copied().collect();
 
-    match client.post(url).json(&args).send().await {
-        Ok(res) => {
-            let status = res.status();
-            match res.text().await {
-                Ok(text) => match status.is_success() {
-                    true => Ok(parse_json(&text).unwrap_or(Json::String(text))),
-                    false => Err(text),
-                }
-                Err(_) => Err("Failed to read response body".to_owned()),
-            }
-        }
-        Err(_) => Err(format!("Failed to reach {}", context.base_url)),
+    let res = match client.post(url).json(&args).send().await {
+        Ok(x) => x,
+        Err(_) => return Err(format!("Failed to reach {}", context.base_url)),
+    };
+
+    let content_type = res.headers().get("Content-Type").and_then(|x| String::from_utf8(x.as_bytes().to_owned()).ok()).map(|x| x.to_lowercase()).unwrap_or_else(|| "unknown".into());
+    let status = res.status();
+
+    let res = match res.bytes().await {
+        Ok(res) => (&*res).to_owned(),
+        Err(_) => return Err("Failed to read response body".to_owned()),
+    };
+
+    if !status.is_success() {
+        return Err(String::from_utf8(res).ok().unwrap_or_else(|| "Received ill-formed error message".into()));
+    }
+
+    if content_type.contains("image/") {
+        Ok(C::Intermediate::from_image(res))
+    } else if let Ok(x) = parse_json_slice::<Json>(&res) {
+        Ok(C::Intermediate::from_json(x))
+    } else if let Ok(x) = String::from_utf8(res) {
+        Ok(C::Intermediate::from_json(Json::String(x)))
+    } else {
+        Err("Received ill-formed success value".into())
     }
 }
 
@@ -392,8 +411,8 @@ impl<C: CustomTypes> StdSystem<C> {
                 while let Ok(request) = receiver.recv() {
                     let (client, context) = (client.clone(), context.clone());
                     tokio::spawn(async move {
-                        let res = call_rpc_async(&context, &client, &request.service, &request.rpc, &request.args.iter().map(|x| (x.0.as_str(), &x.1)).collect::<Vec<_>>()).await;
-                        request.key.complete(res.map(Into::into));
+                        let res = call_rpc_async::<C>(&context, &client, &request.service, &request.rpc, &request.args.iter().map(|x| (x.0.as_str(), &x.1)).collect::<Vec<_>>()).await;
+                        request.key.complete(res);
                     });
                 }
             }
@@ -416,8 +435,8 @@ impl<C: CustomTypes> StdSystem<C> {
 
     /// Asynchronously calls an RPC and returns the result.
     /// This function directly makes requests to NetsBlox, bypassing any RPC hook defined by [`Config`].
-    pub async fn call_rpc_async(&self, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<Json, String> {
-        call_rpc_async(&self.context, &self.client, service, rpc, args).await
+    pub async fn call_rpc_async(&self, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<C::Intermediate, String> {
+        call_rpc_async::<C>(&self.context, &self.client, service, rpc, args).await
     }
 
     /// Gets the public id of the running system that can be used to send messages to this client.

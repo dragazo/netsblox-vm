@@ -1302,6 +1302,9 @@ mod ops {
             (Value::Number(_), _) | (_, Value::Number(_)) => false,
             (Value::String(_), _) | (_, Value::String(_)) => false,
 
+            (Value::Image(a), Value::Image(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Image(_), _) | (_, Value::Image(_)) => false,
+
             (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),
             (Value::Closure(_), _) | (_, Value::Closure(_)) => false,
 
@@ -1334,6 +1337,9 @@ mod ops {
 
             (Value::String(a), Value::String(b)) => a.as_ptr() == b.as_ptr(),
             (Value::String(_), _) | (_, Value::String(_)) => false,
+
+            (Value::Image(a), Value::Image(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Image(_), _) | (_, Value::Image(_)) => false,
 
             (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),
             (Value::Closure(_), _) | (_, Value::Closure(_)) => false,

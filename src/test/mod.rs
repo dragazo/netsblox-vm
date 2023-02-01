@@ -31,15 +31,31 @@ impl<S: System> From<EntityKind<'_, '_, S>> for EntityState {
     }
 }
 
+enum Intermediate {
+    Json(Json),
+    Image(Vec<u8>),
+}
+impl IntermediateType for Intermediate {
+    fn from_json(json: Json) -> Self {
+        Self::Json(json)
+    }
+    fn from_image(img: Vec<u8>) -> Self {
+        Self::Image(img)
+    }
+}
+
 struct C;
 impl CustomTypes for C {
     type NativeValue = NativeValue;
-    type Intermediate = Json;
+    type Intermediate = Intermediate;
 
     type EntityState = EntityState;
 
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
-        Ok(Value::from_json(mc, value)?)
+        Ok(match value {
+            Intermediate::Json(x) => Value::from_json(mc, x)?,
+            Intermediate::Image(x) => Value::Image(Gc::allocate(mc, x)),
+        })
     }
 }
 

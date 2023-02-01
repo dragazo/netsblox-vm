@@ -6,8 +6,8 @@ use std::fmt;
 use netsblox_vm::cli::{run, Mode};
 use netsblox_vm::template::SyscallMenu;
 use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, System, Request};
-use netsblox_vm::std_system::{Config, CustomTypes, StdSystem, RequestStatus};
-use netsblox_vm::gc::{GcCell, MutationContext, StaticCollect};
+use netsblox_vm::std_system::{Config, CustomTypes, StdSystem, RequestStatus, IntermediateType};
+use netsblox_vm::gc::{Gc, GcCell, MutationContext, StaticCollect};
 use netsblox_vm::json::{Json, json};
 use clap::Parser;
 
@@ -48,11 +48,15 @@ impl<S: System> From<EntityKind<'_, '_, S>> for EntityState {
 
 enum Intermediate {
     Json(Json),
+    Image(Vec<u8>),
     Native(NativeValue),
 }
-impl From<Json> for Intermediate {
-    fn from(value: Json) -> Self {
-        Intermediate::Json(value)
+impl IntermediateType for Intermediate {
+    fn from_json(json: Json) -> Self {
+        Self::Json(json)
+    }
+    fn from_image(img: Vec<u8>) -> Self {
+        Self::Image(img)
     }
 }
 
@@ -66,6 +70,7 @@ impl CustomTypes for C {
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
         Ok(match value {
             Intermediate::Json(x) => Value::from_json(mc, x)?,
+            Intermediate::Image(x) => Value::Image(Gc::allocate(mc, x)),
             Intermediate::Native(x) => Value::Native(GcCell::allocate(mc, StaticCollect(x))),
         })
     }
@@ -125,7 +130,7 @@ fn main() {
                                 NativeValue::InputFile { handle } => *handle = None,
                                 NativeValue::OutputFile { handle } => *handle = None,
                             }
-                            key.complete(Ok(json!("OK").into()));
+                            key.complete(Ok(Intermediate::from_json(json!("OK").into())));
                             return RequestStatus::Handled;
                         }
                         _ => {
@@ -149,7 +154,7 @@ fn main() {
                                         return RequestStatus::Handled;
                                     }
 
-                                    key.complete(Ok(json!(res).into()));
+                                    key.complete(Ok(Intermediate::from_json(json!(res).into())));
                                     return RequestStatus::Handled;
                                 }
                                 None => {

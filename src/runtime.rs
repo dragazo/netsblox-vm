@@ -62,7 +62,7 @@ pub enum ToJsonError<S: System> {
 #[derive(Educe)]
 #[educe(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type<S: System> {
-    Bool, Number, String, List, Closure, Entity, Native(<S::NativeValue as GetType>::Output),
+    Bool, Number, String, Image, List, Closure, Entity, Native(<S::NativeValue as GetType>::Output),
 }
 
 /// A type conversion error on a [`Value`].
@@ -141,6 +141,8 @@ pub enum Value<'gc, S: System> {
     /// Although [`Rc`] would be sufficient for this purpose, using [`Gc`] instead makes the arena automatically
     /// include strings in its calculation of the total memory footprint (and allows [`Value`] to be [`Copy`]).
     String(Gc<'gc, String>),
+    /// An image stored as a binary buffer.
+    Image(Gc<'gc, Vec<u8>>),
     /// A primitive list type, which is a mutable reference type.
     List(GcCell<'gc, VecDeque<Value<'gc, S>>>),
     /// A closure/lambda function. This contains information about the closure's bytecode location, parameters, and captures from the parent scope.
@@ -160,6 +162,7 @@ impl<'gc, S: System> GetType for Value<'gc, S> {
             Value::Bool(_) => Type::Bool,
             Value::Number(_) => Type::Number,
             Value::String(_) => Type::String,
+            Value::Image(_) => Type::Image,
             Value::List(_) => Type::List,
             Value::Closure(_) => Type::Closure,
             Value::Entity(_) => Type::Entity,
@@ -178,6 +181,7 @@ impl<S: System> fmt::Debug for Value<'_, S> {
                 Value::Closure(x) => write!(f, "{:?}", &*x.read()),
                 Value::Entity(x) => write!(f, "{:?}", &*x.read()),
                 Value::Native(x) => write!(f, "{:?}", x.read().0),
+                Value::Image(x) => write!(f, "[Image {:?}]", x.as_ref() as *const [u8]),
                 Value::List(x) => {
                     let identity = value.identity();
                     if !cache.insert(identity) { return write!(f, "[...]") }
@@ -243,7 +247,7 @@ impl<'gc, S: System> Value<'gc, S> {
                 Value::Bool(x) => Json::Bool(*x),
                 Value::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).ok_or_else(|| ToJsonError::BadNumber(x.get()))?),
                 Value::String(x) => Json::String(x.as_str().to_owned()),
-                Value::Closure(_) | Value::Entity(_) | Value::Native(_) => return Err(ToJsonError::ComplexType(value.get_type())),
+                Value::Image(_) | Value::Closure(_) | Value::Entity(_) | Value::Native(_) => return Err(ToJsonError::ComplexType(value.get_type())),
                 Value::List(x) => {
                     let identity = value.identity();
                     if !cache.insert(identity) { return Err(ToJsonError::Cyclic) }
@@ -267,6 +271,7 @@ impl<'gc, S: System> Value<'gc, S> {
             Value::Bool(x) => Identity(x as *const bool as *const (), PhantomData),
             Value::Number(x) => Identity(x as *const Number as *const (), PhantomData),
             Value::String(x) => Identity(x.as_ptr() as *const String as *const (), PhantomData),
+            Value::Image(x) => Identity(x.as_ptr() as *const Vec<u8> as *const (), PhantomData),
             Value::List(x) => Identity(x.as_ptr() as *const Vec<Value<'gc, S>> as *const (), PhantomData),
             Value::Closure(x) => Identity(x.as_ptr() as *const Closure<'gc, S> as *const (), PhantomData),
             Value::Entity(x) => Identity(x.as_ptr() as *const Entity<'gc, S> as *const (), PhantomData),

@@ -604,7 +604,7 @@ fn test_proc_syscall() {
                         for value in args {
                             buffer.push_str(value.to_string().unwrap().as_ref());
                         }
-                        key.complete(Ok(json!(buffer.len() as f64)));
+                        key.complete(Ok(Intermediate::from_json(json!(buffer.len() as f64))));
                         RequestStatus::Handled
                     }
                     true => {
@@ -614,7 +614,7 @@ fn test_proc_syscall() {
                 }
                 "foo" => {
                     let content = buffer_cpy.borrow().clone();
-                    key.complete(Ok(json!(content)));
+                    key.complete(Ok(Intermediate::from_json(json!(content))));
                     RequestStatus::Handled
                 }
                 _ => RequestStatus::UseDefault { key, request },
@@ -1389,11 +1389,11 @@ fn test_proc_basic_motion() {
                 match request {
                     Request::Position => {
                         sequence.borrow_mut().push(Action::Position);
-                        key.complete(Ok(json!([13, 54])));
+                        key.complete(Ok(Intermediate::from_json(json!([13, 54]))));
                     }
                     Request::Heading => {
                         sequence.borrow_mut().push(Action::Heading);
-                        key.complete(Ok(json!(39)));
+                        key.complete(Ok(Intermediate::from_json(json!(39))));
                     }
                     _ => return RequestStatus::UseDefault { key, request },
                 }

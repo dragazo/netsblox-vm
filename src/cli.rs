@@ -260,7 +260,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
                     }
                     RawKeyCode::Backspace => if in_input_mode() && input_value.pop().is_some() { update_flag.set(true) }
                     RawKeyCode::Enter => if let Some((_, res_key)) = input_queries.borrow_mut().pop_front() {
-                        res_key.complete(Ok(C::Intermediate::from(Json::String(mem::take(&mut input_value)))));
+                        res_key.complete(Ok(C::Intermediate::from_json(Json::String(mem::take(&mut input_value)))));
                         update_flag.set(true);
                     }
                     RawKeyCode::Up => if !in_input_mode() { input_sequence.push(Input::KeyDown(KeyCode::Up)) }
