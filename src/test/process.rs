@@ -21,12 +21,12 @@ struct Env<'gc> {
 }
 type EnvArena = Arena<Rootable![Env<'gc>]>;
 
-fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>) -> (EnvArena, InsLocations<String>) {
+fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>) -> (EnvArena, Locations<String>) {
     let parser = ast::Parser::default();
     let ast = parser.parse(xml).unwrap();
     assert_eq!(ast.roles.len(), 1);
 
-    let (code, locs) = ByteCode::compile(&ast.roles[0]).unwrap();
+    let (code, locs, ins_locs) = ByteCode::compile(&ast.roles[0]).unwrap();
     let main = locs.funcs.iter().find(|x| x.0.trans_name.trim() == "main").expect("no main function at global scope");
 
     (EnvArena::new(Default::default(), |mc| {
@@ -46,7 +46,7 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
         assert!(proc.is_running());
 
         Env { glob, proc: GcCell::allocate(mc, proc) }
-    }), locs.instructions.transform(ToOwned::to_owned))
+    }), ins_locs.transform(ToOwned::to_owned))
 }
 
 fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc, StdSystem<C>>>, usize), ExecError<StdSystem<C>>>) {

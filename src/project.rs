@@ -160,7 +160,7 @@ pub struct Project<'gc, S: System> {
     scripts: Vec<Script<'gc, S>>,
 }
 impl<'gc, S: System> Project<'gc, S> {
-    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, role: &'a ast::Role, settings: Settings, system: Rc<S>) -> Result<(Self, InsLocations<&'a str>), FromAstError<'a>> {
+    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, role: &'a ast::Role, settings: Settings, system: Rc<S>) -> Result<(Self, Locations<&'a str>), FromAstError<'a>> {
         let global_context = GcCell::allocate(mc, GlobalContext {
             proj_name: role.name.clone(),
             globals: SymbolTable::from_ast(mc, &role.globals)?,
@@ -168,7 +168,7 @@ impl<'gc, S: System> Project<'gc, S> {
         });
         let mut proj = Project::new(global_context, settings, system);
 
-        let (code, locs) = ByteCode::compile(role)?;
+        let (code, locs, ins_locs) = ByteCode::compile(role)?;
         let code = Rc::new(code);
 
         for (i, (ast_entity, entity_locs)) in locs.entities.iter().enumerate() {
@@ -185,7 +185,7 @@ impl<'gc, S: System> Project<'gc, S> {
             }
         }
 
-        Ok((proj, locs.instructions))
+        Ok((proj, ins_locs))
     }
     pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, S>>, settings: Settings, system: Rc<S>) -> Self {
         Self {

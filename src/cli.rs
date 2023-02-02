@@ -92,7 +92,7 @@ impl<F: FnOnce()> Drop for AtExit<F> {
 #[collect(no_drop, bound = "")]
 struct Env<'gc, S: System> {
                                proj: GcCell<'gc, Project<'gc, S>>,
-    #[collect(require_static)] locs: InsLocations<String>,
+    #[collect(require_static)] locs: Locations<String>,
 }
 type EnvArena<S> = Arena<Rootable![Env<'gc, S>]>;
 
@@ -588,7 +588,7 @@ pub fn run<C: CustomTypes>(mode: Mode, config: Config<C>, syscalls: &[SyscallMen
             let content = read_file(&src).unwrap_or_else(|_| crash!(1: "failed to read file '{src}'"));
             let (_, role) = open_project(&content, role.as_deref()).unwrap_or_else(|e| crash!(2: "{e}"));
 
-            let (bytecode, _) = ByteCode::compile(&role).unwrap();
+            let (bytecode, _, _) = ByteCode::compile(&role).unwrap();
             println!("instructions:");
             bytecode.dump_code(&mut std::io::stdout().lock()).unwrap();
             println!("\ndata:");

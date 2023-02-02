@@ -21,7 +21,7 @@ use crate::bytecode::*;
 /// An execution error from a [`Process`] (see [`Process::step`]).
 ///
 /// This consists of an [`ErrorCause`] value describing the cause, as well as the bytecode location of the error.
-/// By using the [`InsLocations`] information from [`ByteCode::compile`], it is possible to determine
+/// By using the [`Locations`] information from [`ByteCode::compile`], it is possible to determine
 /// a human-readable error location in the original program.
 #[derive(Educe)]
 #[educe(Debug)]
