@@ -70,3 +70,6 @@ serde = { version = "1.0", default-features = false, features = ["derive"], opti
 crossterm = { version = "0.26.0", default-features = false, optional = true }
 actix-web = { version = "4.3.0", default-features = false, features = ["macros"], optional = true }
 actix-cors = { version = "0.6.4", default-features = false, optional = true }
+
+[build-dependencies]
+md5 = "0.7.0"

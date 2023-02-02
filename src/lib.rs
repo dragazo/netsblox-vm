@@ -27,6 +27,7 @@ pub mod runtime;
 pub mod process;
 pub mod project;
 pub mod template;
+mod meta;
 
 #[cfg(any(test, feature = "std"))] pub mod std_system;
 #[cfg(feature = "cli")] pub mod cli;
