@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
-use crate::runtime::*;
+use crate::bytecode::*;
 use crate::project::*;
 use crate::std_system::*;
 
@@ -23,7 +23,9 @@ fn get_running_project(xml: &str, system: Rc<StdSystem<C>>) -> EnvArena {
         let ast = parser.parse(xml).unwrap();
         assert_eq!(ast.roles.len(), 1);
 
-        let (mut proj, _) = Project::from_ast(mc, &ast.roles[0], Settings::default(), system).unwrap();
+        let (bytecode, init_info, _, _) = ByteCode::compile(&ast.roles[0]).unwrap();
+
+        let mut proj = Project::from_init(mc, &init_info, Rc::new(bytecode), Settings::default(), system);
         proj.input(Input::Start);
         Env { proj: GcCell::allocate(mc, proj) }
     })

@@ -8,7 +8,6 @@
 
 use std::prelude::v1::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
-use std::rc::Rc;
 use std::iter::{self, Cycle};
 use std::cmp::Ordering;
 
@@ -47,37 +46,6 @@ pub enum ProcessStep<'gc, S: System> {
     Terminate { result: Option<Value<'gc, S>> },
     /// The process has requested to broadcast a message to all entities, which may trigger other code to execute.
     Broadcast { msg_type: String, barrier: Option<Barrier> },
-}
-
-/// The error promotion paradigm to use for certain types of runtime errors.
-#[derive(Clone, Copy)]
-pub enum ErrorScheme {
-    /// Emit errors as soft errors. This causes the error message to be returned as a [`Value::String`] object,
-    /// as well as being stored in a corresponding last-error process-local variable.
-    Soft,
-    /// Emit errors as hard errors. This treats certain classes of typically soft errors as hard errors that
-    /// must be caught or else terminate the [`Process`] (not the entire VM).
-    Hard,
-}
-
-/// Settings to use for a [`Process`].
-#[derive(Clone, Copy)]
-pub struct Settings {
-    /// The maximum depth of the call stack (default `1024`).
-    pub max_call_depth: usize,
-    /// The error pattern to use for rpc errors (default [`ErrorScheme::Hard`]).
-    pub rpc_error_scheme: ErrorScheme,
-    /// The error pattern to use for syscall errors (default [`ErrorScheme::Hard`]).
-    pub syscall_error_scheme: ErrorScheme,
-}
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            max_call_depth: 1024,
-            rpc_error_scheme: ErrorScheme::Hard,
-            syscall_error_scheme: ErrorScheme::Hard,
-        }
-    }
 }
 
 /// An entry in the call stack of a [`Process`].
@@ -121,11 +89,9 @@ enum RequestAction {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Process<'gc, S: System> {
-    #[collect(require_static)] bytecode: Rc<ByteCode>,
-    #[collect(require_static)] start_pos: usize,
                                global_context: GcCell<'gc, GlobalContext<'gc, S>>,
                                entity: GcCell<'gc, Entity<'gc, S>>,
-    #[collect(require_static)] settings: Settings,
+    #[collect(require_static)] start_pos: usize,
     #[collect(require_static)] pos: usize,
     #[collect(require_static)] running: bool,
     #[collect(require_static)] barrier: Option<Barrier>,
@@ -139,14 +105,13 @@ pub struct Process<'gc, S: System> {
                                last_syscall_error: Option<Value<'gc, S>>,
                                last_rpc_error: Option<Value<'gc, S>>,
                                last_answer: Option<Value<'gc, S>>,
-    #[collect(require_static)] system: Rc<S>,
 }
 impl<'gc, S: System> Process<'gc, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity` and `system`.
     /// The created process is initialized to an idle (non-running) state; use [`Process::initialize`] to begin execution.
-    pub fn new(bytecode: Rc<ByteCode>, start_pos: usize, global_context: GcCell<'gc, GlobalContext<'gc, S>>, entity: GcCell<'gc, Entity<'gc, S>>, settings: Settings, system: Rc<S>) -> Self {
+    pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, S>>, entity: GcCell<'gc, Entity<'gc, S>>, start_pos: usize) -> Self {
         Self {
-            bytecode, start_pos, global_context, entity, settings,
+            global_context, entity, start_pos,
             running: false,
             barrier: None,
             reply_key: None,
@@ -160,7 +125,6 @@ impl<'gc, S: System> Process<'gc, S> {
             last_syscall_error: None,
             last_rpc_error: None,
             last_answer: None,
-            system,
         }
     }
     /// Checks if the process is currently running.
@@ -243,6 +207,9 @@ impl<'gc, S: System> Process<'gc, S> {
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
     fn step_impl(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, S>, ErrorCause<S>> {
+        let mut global_context = self.global_context.write(mc);
+        let mut global_context = &mut *global_context;
+
         fn process_result<'gc, S: System, T: Copy>(mc: MutationContext<'gc, '_>, result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, S>>>, last_ok: Option<&mut Option<Value<'gc, S>>>, last_err: Option<&mut Option<Value<'gc, S>>>, to_value: fn(T) -> Option<Value<'gc, S>>) -> Result<(), ErrorCause<S>> {
             match result {
                 Ok(x) => match to_value(x) {
@@ -275,8 +242,8 @@ impl<'gc, S: System> Process<'gc, S> {
         macro_rules! process_request {
             ($res:ident, $action:expr, $aft_pos:expr) => {{
                 match $action {
-                    RequestAction::Syscall => process_result(mc, $res, self.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_syscall_error), Some)?,
-                    RequestAction::Rpc => process_result(mc, $res, self.settings.rpc_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?,
+                    RequestAction::Syscall => process_result(mc, $res, global_context.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_syscall_error), Some)?,
+                    RequestAction::Rpc => process_result(mc, $res, global_context.settings.rpc_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?,
                     RequestAction::Input => process_result(mc, $res, ErrorScheme::Hard, None, Some(&mut self.last_answer), None, Some)?,
                     RequestAction::Push => process_result(mc, $res, ErrorScheme::Hard, Some(&mut self.value_stack), None, None, Some)?,
                 }
@@ -286,21 +253,21 @@ impl<'gc, S: System> Process<'gc, S> {
 
         match &self.defer {
             None => (),
-            Some(Defer::Request { key, aft_pos, action }) => match self.system.poll_request(mc, key, &*self.entity.read())? {
+            Some(Defer::Request { key, aft_pos, action }) => match global_context.system.poll_request(mc, key, &*self.entity.read())? {
                 AsyncPoll::Completed(x) => {
                     process_request!(x, action, *aft_pos);
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
             }
-            Some(Defer::Command { key, aft_pos }) => match self.system.poll_command(mc, key, &*self.entity.read())? {
+            Some(Defer::Command { key, aft_pos }) => match global_context.system.poll_command(mc, key, &*self.entity.read())? {
                 AsyncPoll::Completed(x) => {
                     process_command!(x, *aft_pos);
                     self.defer = None;
                 }
                 AsyncPoll::Pending => return Ok(ProcessStep::Yield),
             }
-            Some(Defer::MessageReply { key, aft_pos }) => match self.system.poll_reply(key) {
+            Some(Defer::MessageReply { key, aft_pos }) => match global_context.system.poll_reply(key) {
                 AsyncPoll::Completed(x) => {
                     let value = match x {
                         Some(x) => Value::from_json(mc, x)?,
@@ -319,7 +286,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 }
                 false => return Ok(ProcessStep::Yield),
             }
-            Some(Defer::Sleep { until, aft_pos }) => match self.system.time_ms()? >= *until {
+            Some(Defer::Sleep { until, aft_pos }) => match global_context.system.time_ms()? >= *until {
                 true => {
                     self.pos = *aft_pos;
                     self.defer = None;
@@ -329,7 +296,6 @@ impl<'gc, S: System> Process<'gc, S> {
         }
 
         let mut entity = self.entity.write(mc);
-        let mut global_context = self.global_context.write(mc);
         let mut context = [&mut global_context.globals, &mut entity.fields, &mut self.call_stack.last_mut().unwrap().locals];
         let mut context = LookupGroup::new(&mut context);
 
@@ -347,7 +313,7 @@ impl<'gc, S: System> Process<'gc, S> {
 
         macro_rules! perform_command {
             ($command:expr, $aft_pos:expr) => {{
-                match self.system.perform_command(mc, $command, &*entity)? {
+                match global_context.system.perform_command(mc, $command, &*entity)? {
                     MaybeAsync::Async(key) => self.defer = Some(Defer::Command { key, aft_pos: $aft_pos }),
                     MaybeAsync::Sync(res) => process_command!(res, $aft_pos),
                 }
@@ -355,14 +321,14 @@ impl<'gc, S: System> Process<'gc, S> {
         }
         macro_rules! perform_request {
             ($request:expr, $action:expr, $aft_pos:expr) => {{
-                match self.system.perform_request(mc, $request, &*entity)? {
+                match global_context.system.perform_request(mc, $request, &*entity)? {
                     MaybeAsync::Async(key) => self.defer = Some(Defer::Request { key, aft_pos: $aft_pos, action: $action }),
                     MaybeAsync::Sync(res) => process_request!(res, $action, $aft_pos),
                 }
             }}
         }
 
-        let (ins, aft_pos) = Instruction::read(&self.bytecode.code, &self.bytecode.data, self.pos);
+        let (ins, aft_pos) = Instruction::read(&global_context.bytecode.code, &global_context.bytecode.data, self.pos);
         match ins {
             Instruction::Yield => {
                 self.pos = aft_pos;
@@ -544,7 +510,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let val = self.value_stack.pop().unwrap();
                 let mut list = list.write(mc);
 
-                let index = ops::prep_rand_index(&*self.system, list.len() + 1)?;
+                let index = ops::prep_rand_index(&*global_context.system, list.len() + 1)?;
                 list.insert(index, val);
                 self.pos = aft_pos;
             }
@@ -552,7 +518,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::ListGet => {
                 let list = self.value_stack.pop().unwrap();
                 let index = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::index_list(mc, &*self.system, &list, &index)?);
+                self.value_stack.push(ops::index_list(mc, &*global_context.system, &list, &index)?);
                 self.pos = aft_pos;
             }
             Instruction::ListGetLast => {
@@ -566,7 +532,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::ListGetRandom => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let list = list.read();
-                let index = ops::prep_rand_index(&*self.system, list.len())?;
+                let index = ops::prep_rand_index(&*global_context.system, list.len())?;
                 self.value_stack.push(list[index]);
                 self.pos = aft_pos;
             }
@@ -594,7 +560,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let mut list = list.write(mc);
 
-                let index = ops::prep_rand_index(&*self.system, list.len())?;
+                let index = ops::prep_rand_index(&*global_context.system, list.len())?;
                 list[index] = value;
                 self.pos = aft_pos;
             }
@@ -630,7 +596,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::BinaryOp { op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::binary_op(mc, &*self.system, &a, &b, op)?);
+                self.value_stack.push(ops::binary_op(mc, &*global_context.system, &a, &b, op)?);
                 self.pos = aft_pos;
             }
             Instruction::VariadicOp { op, len } => {
@@ -669,12 +635,12 @@ impl<'gc, S: System> Process<'gc, S> {
                 let res = match len {
                     VariadicLen::Fixed(len) => {
                         let stack_size = self.value_stack.len();
-                        combine(mc, &*self.system, &mut self.value_stack.drain(stack_size - len..))?
+                        combine(mc, &*global_context.system, &mut self.value_stack.drain(stack_size - len..))?
                     }
                     VariadicLen::Dynamic => {
                         let src = self.value_stack.pop().unwrap().as_list()?;
                         let src = src.read();
-                        combine(mc, &*self.system, &mut src.iter().copied())?
+                        combine(mc, &*global_context.system, &mut src.iter().copied())?
                     }
                 };
                 self.value_stack.push(res);
@@ -694,7 +660,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::UnaryOp { op } => {
                 let x = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::unary_op(mc, &*self.system, &x, op)?);
+                self.value_stack.push(ops::unary_op(mc, &*global_context.system, &x, op)?);
                 self.pos = aft_pos;
             }
 
@@ -710,7 +676,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = lookup_var!(var).get();
-                context.set_or_define(mc, var, ops::binary_op(mc, &*self.system, &a, &b, op)?);
+                context.set_or_define(mc, var, ops::binary_op(mc, &*global_context.system, &a, &b, op)?);
                 self.pos = aft_pos;
             }
 
@@ -726,8 +692,8 @@ impl<'gc, S: System> Process<'gc, S> {
             }
 
             Instruction::Call { pos, params } => {
-                if self.call_stack.len() >= self.settings.max_call_depth {
-                    return Err(ErrorCause::CallDepthLimit { limit: self.settings.max_call_depth });
+                if self.call_stack.len() >= global_context.settings.max_call_depth {
+                    return Err(ErrorCause::CallDepthLimit { limit: global_context.settings.max_call_depth });
                 }
 
                 debug_assert_eq!(self.meta_stack.len(), params);
@@ -884,11 +850,11 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::ResetTimer => {
-                global_context.timer_start = self.system.time_ms()?;
+                global_context.timer_start = global_context.system.time_ms()?;
                 self.pos = aft_pos;
             }
             Instruction::PushTimer => {
-                self.value_stack.push(Number::new(self.system.time_ms()?.saturating_sub(global_context.timer_start) as f64 / 1000.0)?.into());
+                self.value_stack.push(Number::new(global_context.system.time_ms()?.saturating_sub(global_context.timer_start) as f64 / 1000.0)?.into());
                 self.pos = aft_pos;
             }
             Instruction::Sleep => {
@@ -897,7 +863,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     self.pos = aft_pos;
                     return Ok(ProcessStep::Yield);
                 }
-                self.defer = Some(Defer::Sleep { until: self.system.time_ms()? + ms as u64, aft_pos });
+                self.defer = Some(Defer::Sleep { until: global_context.system.time_ms()? + ms as u64, aft_pos });
             }
             Instruction::SendNetworkMessage { msg_type, values, expect_reply } => {
                 let targets = match self.value_stack.pop().unwrap() {
@@ -924,7 +890,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     }
                     res
                 };
-                match self.system.send_message(msg_type.into(), values, targets, expect_reply)? {
+                match global_context.system.send_message(msg_type.into(), values, targets, expect_reply)? {
                     Some(key) => self.defer = Some(Defer::MessageReply { key, aft_pos }),
                     None => self.pos = aft_pos,
                 }
@@ -932,7 +898,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::SendNetworkReply => {
                 let value = self.value_stack.pop().unwrap().to_json()?;
                 if let Some(key) = self.reply_key.take() {
-                    self.system.send_reply(key, value)?;
+                    global_context.system.send_reply(key, value)?;
                 }
                 self.pos = aft_pos;
             }

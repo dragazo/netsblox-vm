@@ -33,8 +33,8 @@ fn main() {
         context.consume(path.as_bytes());
         context.consume(&buf);
     }
-    let hash = context.compute().0;
+    let hash = u128::from_be_bytes(context.compute().0);
 
     let mut f = BufWriter::new(File::create("src/meta.rs").unwrap());
-    writeln!(f, "pub const FINGERPRINT: [u8; 16] = {hash:?};").unwrap();
+    writeln!(f, "pub const FINGERPRINT: u128 = 0x{hash:0>32x}u128;").unwrap();
 }

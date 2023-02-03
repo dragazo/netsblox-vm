@@ -97,10 +97,11 @@ struct Env<'gc, S: System> {
 type EnvArena<S> = Arena<Rootable![Env<'gc, S>]>;
 
 fn get_env<S: System>(role: &ast::Role, system: Rc<S>) -> Result<EnvArena<S>, FromAstError> {
-    EnvArena::try_new(Default::default(), |mc| {
-        let (proj, locs) = Project::from_ast(mc, role, Default::default(), system)?;
-        Ok(Env { proj: GcCell::allocate(mc, proj), locs: locs.transform(ToOwned::to_owned) })
-    })
+    let (bytecode, init_info, _, locations) = ByteCode::compile(role).unwrap();
+    Ok(EnvArena::new(Default::default(), |mc| {
+        let proj = Project::from_init(mc, &init_info, Rc::new(bytecode), Settings::default(), system);
+        Env { proj: GcCell::allocate(mc, proj), locs: locations.transform(ToOwned::to_owned) }
+    }))
 }
 
 /// Standard NetsBlox VM project actions that can be performed
@@ -588,7 +589,7 @@ pub fn run<C: CustomTypes>(mode: Mode, config: Config<C>, syscalls: &[SyscallMen
             let content = read_file(&src).unwrap_or_else(|_| crash!(1: "failed to read file '{src}'"));
             let (_, role) = open_project(&content, role.as_deref()).unwrap_or_else(|e| crash!(2: "{e}"));
 
-            let (bytecode, _, _) = ByteCode::compile(&role).unwrap();
+            let (bytecode, _, _, _) = ByteCode::compile(&role).unwrap();
             println!("instructions:");
             bytecode.dump_code(&mut std::io::stdout().lock()).unwrap();
             println!("\ndata:");

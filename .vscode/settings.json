@@ -30,6 +30,7 @@
         "Condvar",
         "getrandom",
         "Listcat",
+        "monostate",
         "powf",
         "Rootable",
         "Seedable",

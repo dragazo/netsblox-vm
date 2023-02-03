@@ -50,40 +50,6 @@ pub enum ProjectStep<'gc, S: System> {
     Error { error: ExecError<S>, proc: Process<'gc, S> },
 }
 
-pub enum Event {
-    OnFlag,
-    LocalMessage { msg_type: String },
-    NetworkMessage { msg_type: String, fields: Vec<String> },
-    /// Fire an hat when a key is pressed. [`None`] is used to denote any key press.
-    OnKey { key: Option<KeyCode> },
-}
-impl Event {
-    pub fn from_ast(hat: &ast::HatKind) -> Result<Self, FromAstError> {
-        Ok(match hat {
-            ast::HatKind::OnFlag => Event::OnFlag,
-            ast::HatKind::LocalMessage { msg_type } => Event::LocalMessage { msg_type: msg_type.clone() },
-            ast::HatKind::NetworkMessage { msg_type, fields } => Event::NetworkMessage { msg_type: msg_type.clone(), fields: fields.iter().map(|x| x.trans_name.clone()).collect() },
-            ast::HatKind::OnKey { key } => Event::OnKey {
-                key: match key.as_str() {
-                    "any key" => None,
-                    "up arrow" => Some(KeyCode::Up),
-                    "down arrow" => Some(KeyCode::Down),
-                    "left arrow" => Some(KeyCode::Left),
-                    "right arrow" => Some(KeyCode::Right),
-                    "space" => Some(KeyCode::Char(' ')),
-                    _ => {
-                        let mut chars = key.chars();
-                        let res = chars.next().map(|x| KeyCode::Char(x.to_ascii_lowercase())).ok_or_else(|| FromAstError::BadKeycode { key: key.clone() })?;
-                        if chars.next().is_some() { return Err(FromAstError::BadKeycode { key: key.clone() }); }
-                        Some(res)
-                    }
-                }
-            },
-            _ => return Err(FromAstError::UnsupportedEvent { kind: hat }),
-        })
-    }
-}
-
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 struct ContextEntry<'gc, S: System> {
@@ -96,7 +62,6 @@ struct ContextEntry<'gc, S: System> {
 #[collect(no_drop, bound = "")]
 struct Script<'gc, S: System> {
     #[collect(require_static)] event: Event,
-    #[collect(require_static)] code: Rc<ByteCode>,
     #[collect(require_static)] start_pos: usize,
                                entity: GcCell<'gc, Entity<'gc, S>>,
     #[collect(require_static)] process: Option<ProcessKey>,
@@ -121,7 +86,7 @@ impl<'gc, S: System> Script<'gc, S> {
                 state.process_queue.push_back(key);
             }
             None => {
-                let mut process = Process::new(self.code.clone(), self.start_pos, state.global_context, self.entity, state.settings, state.system.clone());
+                let mut process = Process::new(state.global_context, self.entity, self.start_pos);
                 process.initialize(locals, barrier, reply_key);
                 let key = state.processes.insert(process);
                 state.process_queue.push_back(key);
@@ -147,11 +112,9 @@ impl<'gc, S: System> Script<'gc, S> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 struct State<'gc, S: System> {
-    #[collect(require_static)] settings: Settings,
                                global_context: GcCell<'gc, GlobalContext<'gc, S>>,
                                processes: SlotMap<ProcessKey, Process<'gc, S>>,
     #[collect(require_static)] process_queue: VecDeque<ProcessKey>,
-    #[collect(require_static)] system: Rc<S>,
 }
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
@@ -160,52 +123,38 @@ pub struct Project<'gc, S: System> {
     scripts: Vec<Script<'gc, S>>,
 }
 impl<'gc, S: System> Project<'gc, S> {
-    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, role: &'a ast::Role, settings: Settings, system: Rc<S>) -> Result<(Self, Locations<&'a str>), FromAstError<'a>> {
-        let global_context = GcCell::allocate(mc, GlobalContext {
-            proj_name: role.name.clone(),
-            globals: SymbolTable::from_ast(mc, &role.globals)?,
-            timer_start: system.time_ms().unwrap(),
-        });
-        let mut proj = Project::new(global_context, settings, system);
+    pub fn from_init<'a>(mc: MutationContext<'gc, '_>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
+        let global_context = GlobalContext::from_init(mc, init_info, bytecode, settings, system);
+        let mut project = Self::new(GcCell::allocate(mc, global_context));
 
-        let (code, locs, ins_locs) = ByteCode::compile(role)?;
-        let code = Rc::new(code);
-
-        for (i, (ast_entity, entity_locs)) in locs.entities.iter().enumerate() {
-            let kind = if i == 0 { EntityKind::Stage } else { EntityKind::Sprite };
-            let entity = GcCell::allocate(mc, Entity {
-                name: ast_entity.trans_name.clone(),
-                fields: SymbolTable::from_ast(mc, &ast_entity.fields)?,
-                state: kind.into(),
-            });
-            for (script, script_pos) in entity_locs.scripts.iter() {
-                if let Some(hat) = &script.hat {
-                    proj.add_script(code.clone(), *script_pos, entity, Some(Event::from_ast(&hat.kind)?));
-                }
+        for entity_info in init_info.entities.iter() {
+            let entity = *project.state.global_context.read().entities.get(&entity_info.name).unwrap();
+            for (event, pos) in entity_info.scripts.iter() {
+                project.add_script(*pos, entity, Some(event.clone()));
             }
         }
 
-        Ok((proj, ins_locs))
+        project
     }
-    pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, S>>, settings: Settings, system: Rc<S>) -> Self {
+    pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, S>>) -> Self {
         Self {
             state: State {
-                global_context, settings, system,
+                global_context,
                 processes: Default::default(),
                 process_queue: Default::default(),
             },
             scripts: Default::default(),
         }
     }
-    pub fn add_script(&mut self, code: Rc<ByteCode>, start_pos: usize, entity: GcCell<'gc, Entity<'gc, S>>, event: Option<Event>) {
+    pub fn add_script(&mut self, start_pos: usize, entity: GcCell<'gc, Entity<'gc, S>>, event: Option<Event>) {
         match event {
             Some(event) => self.scripts.push(Script {
-                code, start_pos, event, entity,
+                start_pos, event, entity,
                 process: None,
                 context_queue: Default::default(),
             }),
             None => {
-                let process = Process::new(code, start_pos, self.state.global_context, entity, self.state.settings, self.state.system.clone());
+                let process = Process::new(self.state.global_context, entity, start_pos);
                 let key = self.state.processes.insert(process);
                 self.state.process_queue.push_back(key);
             }
@@ -227,8 +176,8 @@ impl<'gc, S: System> Project<'gc, S> {
             }
             Input::KeyDown(input_key) => {
                 for script in self.scripts.iter_mut() {
-                    if let Event::OnKey { key } = &script.event {
-                        if key.map(|x| x == input_key).unwrap_or(true) {
+                    if let Event::OnKey { key_filter } = &script.event {
+                        if key_filter.map(|x| x == input_key).unwrap_or(true) {
                             script.schedule(&mut self.state, Default::default(), None, None, 0);
                         }
                     }
@@ -238,7 +187,8 @@ impl<'gc, S: System> Project<'gc, S> {
         }
     }
     pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> ProjectStep<'gc, S> {
-        if let Some((msg_type, values, reply_key)) = self.state.system.receive_message() {
+        let msg = self.state.global_context.read().system.receive_message();
+        if let Some((msg_type, values, reply_key)) = msg {
             let values: BTreeMap<_,_> = values.into_iter().collect();
             for script in self.scripts.iter_mut() {
                 if let Event::NetworkMessage { msg_type: script_msg_type, fields } = &script.event {

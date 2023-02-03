@@ -26,21 +26,15 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
     let ast = parser.parse(xml).unwrap();
     assert_eq!(ast.roles.len(), 1);
 
-    let (code, locs, ins_locs) = ByteCode::compile(&ast.roles[0]).unwrap();
+    let (code, init_info, locs, ins_locs) = ByteCode::compile(&ast.roles[0]).unwrap();
     let main = locs.funcs.iter().find(|x| x.0.trans_name.trim() == "main").expect("no main function at global scope");
 
     (EnvArena::new(Default::default(), |mc| {
-        let glob = GcCell::allocate(mc, GlobalContext {
-            proj_name: "test proj".into(),
-            globals: SymbolTable::from_ast(mc, &ast.roles[0].globals).unwrap(),
-            timer_start: system.time_ms().unwrap(),
-        });
-        let entity = GcCell::allocate(mc, Entity {
-            name: "test entity".into(),
-            fields: SymbolTable::from_ast(mc, &ast.roles[0].entities[0].fields).unwrap(),
-            state: EntityKind::<StdSystem<C>>::Sprite.into()
-        });
-        let mut proc = Process::new(Rc::new(code), main.1, glob, entity, settings, system);
+        let glob = GlobalContext::from_init(mc, &init_info, Rc::new(code), settings, system);
+        let entity = *glob.entities.iter().next().unwrap().1;
+        let glob = GcCell::allocate(mc, glob);
+
+        let mut proc = Process::new(glob, entity, main.1);
         assert!(!proc.is_running());
         proc.initialize(Default::default(), None, None);
         assert!(proc.is_running());

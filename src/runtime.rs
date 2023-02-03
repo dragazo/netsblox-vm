@@ -3,34 +3,14 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::borrow::Cow;
-use std::fmt;
+use std::{iter, fmt};
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
-use checked_float::{CheckedFloat, FloatChecker};
 
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
 use crate::bytecode::*;
-
-/// Error type used by [`NumberChecker`].
-#[derive(Debug)]
-pub enum NumberError {
-    Nan,
-}
-
-/// [`FloatChecker`] type used for validating a [`Number`].
-pub struct NumberChecker;
-impl FloatChecker<f64> for NumberChecker {
-    type Error = NumberError;
-    fn check(value: f64) -> Result<(), Self::Error> {
-        if value.is_nan() { return Err(NumberError::Nan); }
-        Ok(())
-    }
-}
-
-/// The type used to represent numbers in the runtime.
-pub type Number = CheckedFloat<f64, NumberChecker>;
 
 #[derive(Debug)]
 pub enum FromAstError<'a> {
@@ -213,17 +193,6 @@ impl<'gc, S: System> From<GcCell<'gc, VecDeque<Value<'gc, S>>>> for Value<'gc, S
 impl<'gc, S: System> From<GcCell<'gc, Closure<'gc, S>>> for Value<'gc, S> { fn from(v: GcCell<'gc, Closure<'gc, S>>) -> Self { Value::Closure(v) } }
 impl<'gc, S: System> From<GcCell<'gc, Entity<'gc, S>>> for Value<'gc, S> { fn from(v: GcCell<'gc, Entity<'gc, S>>) -> Self { Value::Entity(v) } }
 impl<'gc, S: System> Value<'gc, S> {
-    /// Creates a new value from an abstract syntax tree.
-    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, value: &'a ast::Value) -> Result<Self, FromAstError<'a>> {
-        Ok(match value {
-            ast::Value::Bool(x) => (*x).into(),
-            ast::Value::Number(x) => Number::new(*x)?.into(),
-            ast::Value::Constant(ast::Constant::E) => Number::new(std::f64::consts::E).unwrap().into(),
-            ast::Value::Constant(ast::Constant::Pi) => Number::new(std::f64::consts::PI).unwrap().into(),
-            ast::Value::String(x) => Gc::allocate(mc, x.clone()).into(),
-            ast::Value::List(x) => GcCell::allocate(mc, x.iter().map(|x| Value::from_ast(mc, x)).collect::<Result<VecDeque<_>,_>>()?).into(),
-        })
-    }
     /// Create a new [`Value`] from a [`Json`] value.
     pub fn from_json(mc: MutationContext<'gc, '_>, value: Json) -> Result<Self, FromJsonError> {
         Ok(match value {
@@ -411,10 +380,6 @@ impl<'gc, T: Collect + Copy> From<T> for Shared<'gc, T> { fn from(value: T) -> S
 pub struct SymbolTable<'gc, S: System>(BTreeMap<String, Shared<'gc, Value<'gc, S>>>);
 impl<'gc, S: System> Default for SymbolTable<'gc, S> { fn default() -> Self { Self(Default::default()) } }
 impl<'gc, S: System> SymbolTable<'gc, S> {
-    /// Creates a symbol table containing all the provided variable definitions.
-    pub fn from_ast<'a>(mc: MutationContext<'gc, '_>, vars: &'a [ast::VariableDef]) -> Result<Self, FromAstError<'a>> {
-        Ok(Self(vars.iter().map(|x| Ok((x.trans_name.clone(), Shared::Unique(Value::from_ast(mc, &x.value)?)))).collect::<Result<_,FromAstError>>()?))
-    }
     /// Sets the value of an existing variable (as if by [`Shared::set`]) or defines it if it does not exist.
     /// If the variable does not exist, creates a [`Shared::Unique`] instance for the new `value`.
     /// If you would prefer to always create a new, non-aliased value, consider using [`SymbolTable::redefine_or_define`] instead.
@@ -526,13 +491,104 @@ impl<'gc, 'a, 'b, S: System> LookupGroup<'gc, 'a, 'b, S> {
     }
 }
 
+/// The error promotion paradigm to use for certain types of runtime errors.
+#[derive(Clone, Copy)]
+pub enum ErrorScheme {
+    /// Emit errors as soft errors. This causes the error message to be returned as a [`Value::String`] object,
+    /// as well as being stored in a corresponding last-error process-local variable.
+    Soft,
+    /// Emit errors as hard errors. This treats certain classes of typically soft errors as hard errors that
+    /// must be caught or else terminate the [`Process`] (not the entire VM).
+    Hard,
+}
+
+/// Settings to use for a [`Process`].
+#[derive(Clone, Copy)]
+pub struct Settings {
+    /// The maximum depth of the call stack (default `1024`).
+    pub max_call_depth: usize,
+    /// The error pattern to use for rpc errors (default [`ErrorScheme::Hard`]).
+    pub rpc_error_scheme: ErrorScheme,
+    /// The error pattern to use for syscall errors (default [`ErrorScheme::Hard`]).
+    pub syscall_error_scheme: ErrorScheme,
+}
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            max_call_depth: 1024,
+            rpc_error_scheme: ErrorScheme::Hard,
+            syscall_error_scheme: ErrorScheme::Hard,
+        }
+    }
+}
+
 /// Global information about the execution state of an entire project.
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct GlobalContext<'gc, S: System> {
+    #[collect(require_static)] pub bytecode: Rc<ByteCode>,
+    #[collect(require_static)] pub settings: Settings,
+    #[collect(require_static)] pub system: Rc<S>,
+    #[collect(require_static)] pub timer_start: u64,
     #[collect(require_static)] pub proj_name: String,
                                pub globals: SymbolTable<'gc, S>,
-    #[collect(require_static)] pub timer_start: u64,
+                               pub entities: BTreeMap<String, GcCell<'gc, Entity<'gc, S>>>,
+}
+impl<'gc, S: System> GlobalContext<'gc, S> {
+    pub fn from_init(mc: MutationContext<'gc, '_>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
+        let allocated_refs = init_info.ref_values.iter().map(|ref_value| match ref_value {
+            RefValue::String(value) => Value::String(Gc::allocate(mc, value.clone())),
+            RefValue::List(_) => Value::List(GcCell::allocate(mc, Default::default())),
+        }).collect::<Vec<_>>();
+
+        fn get_value<'gc, S: System>(value: &InitValue, allocated_refs: &Vec<Value<'gc, S>>) -> Value<'gc, S> {
+            match value {
+                InitValue::Bool(x) => Value::Bool(*x),
+                InitValue::Number(x) => Value::Number(*x),
+                InitValue::Ref(x) => allocated_refs[*x],
+            }
+        }
+
+        for (allocated_ref, ref_value) in iter::zip(&allocated_refs, &init_info.ref_values) {
+            match ref_value {
+                RefValue::String(_) => continue,
+                RefValue::List(values) => {
+                    let allocated_ref = match allocated_ref {
+                        Value::List(x) => x,
+                        _ => unreachable!(),
+                    };
+                    let mut allocated_ref = allocated_ref.write(mc);
+                    for value in values {
+                        allocated_ref.push_back(get_value(value, &allocated_refs));
+                    }
+                }
+            }
+        }
+
+        let mut globals = SymbolTable::default();
+        for (global, value) in init_info.globals.iter() {
+            globals.redefine_or_define(global, Shared::Unique(get_value(value, &allocated_refs)));
+        }
+
+        let mut entities = BTreeMap::new();
+        for (i, entity_info) in init_info.entities.iter().enumerate() {
+            let kind = if i == 0 { EntityKind::Stage } else { EntityKind::Sprite };
+            let name = entity_info.name.clone();
+            let state = kind.into();
+
+            let mut fields = SymbolTable::default();
+            for (field, value) in entity_info.fields.iter() {
+                fields.redefine_or_define(field, Shared::Unique(get_value(value, &allocated_refs)));
+            }
+
+            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, state }));
+        }
+
+        let proj_name = init_info.proj_name.clone();
+        let timer_start = system.time_ms().unwrap_or(0);
+
+        Self { proj_name, globals, entities, timer_start, system, settings, bytecode }
+    }
 }
 
 /// A blocking handle for a [`BarrierCondition`].
@@ -575,21 +631,6 @@ pub enum AsyncPoll<T> {
     Completed(T),
     /// The async operation is still pending and has not completed.
     Pending,
-}
-
-/// A key from the keyboard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyCode {
-    /// A normal character key, such as a letter, number, or special symbol.
-    Char(char),
-    /// The up arrow key.
-    Up,
-    /// The down arrow key.
-    Down,
-    /// The left arrow key.
-    Left,
-    /// The right arrow key.
-    Right,
 }
 
 /// Types of [`System`] resources, grouped into feature categories.
