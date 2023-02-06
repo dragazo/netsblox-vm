@@ -357,6 +357,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
     let extension = ExtensionArgs {
         server: &format!("http://{addr}:{port}"),
         syscalls,
+        omitted_elements: &["thumbnail", "pentrails", "history", "replay"],
     }.render();
 
     enum ServerCommand {

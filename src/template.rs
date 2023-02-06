@@ -45,8 +45,12 @@ impl SyscallMenu<'_> {
 
 /// Arguments used to construct a templated extension.
 pub struct ExtensionArgs<'a> {
+    /// The NetsBlox VM server to connect to.
     pub server: &'a str,
+    /// The syscall menu structure to generate for syscall blocks.
     pub syscalls: &'a [SyscallMenu<'a>],
+    /// A list of XML element names to omit from the XML sent to the VM server.
+    pub omitted_elements: &'a [&'a str],
 }
 impl ExtensionArgs<'_> {
     /// Renders the provided arguments into an extension.
@@ -54,6 +58,7 @@ impl ExtensionArgs<'_> {
         format!(include_str!("assets/extension.js"),
             server = self.server,
             syscalls = SyscallMenu::format(self.syscalls),
+            omitted_elements = self.omitted_elements,
         )
     }
 }

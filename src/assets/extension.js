@@ -19,6 +19,17 @@
         req.send(info.body);
     }}
 
+    function cleanXML(xml) {{
+        const omittedElements = {omitted_elements:?};
+        if (omittedElements.length === 0) return xml;
+
+        xml = $(xml);
+        for (const elem of omittedElements) {{
+            xml.find(elem).remove();
+        }}
+        return $('<x></x>').append(xml).html();
+    }}
+
     function TerminalMorph(ext) {{
         this.init();
         this.ext = ext;
@@ -82,7 +93,7 @@
             method: 'POST',
             url: `${{SERVER}}/set-project`,
             onErr: alert,
-            body: this.ext.ide.getSerializedRole(),
+            body: cleanXML(this.ext.ide.getSerializedRole()),
         }}), 'Upload'));
 
         this.leftTools.add(makeSpacer(10));
@@ -363,6 +374,16 @@
                 )),
             ];
         }}
+    }}
+
+    const libs = [
+        'https://code.jquery.com/jquery-3.6.3.min.js',
+    ];
+    for (const lib of libs) {{
+        const script = document.createElement('script');
+        script.src = lib;
+        script.async = false;
+        document.body.appendChild(script);
     }}
 
     NetsBloxExtensions.register(NativeExtension);
