@@ -29,7 +29,7 @@ pub mod project;
 pub mod template;
 mod meta;
 
-#[cfg(any(test, feature = "std"))] pub mod std_system;
+#[cfg(feature = "std")] pub mod std_system;
 #[cfg(feature = "cli")] pub mod cli;
 
 #[cfg(test)] mod test;
