@@ -54,6 +54,7 @@ checked-float = { version = "0.1.3", default-features = false, features = ["serd
 educe = { version = "0.4.20", default-features = false, features = ["Debug", "Clone", "Copy", "PartialOrd", "Ord", "PartialEq", "Eq", "Default"] }
 libm = { version = "0.2.6", default-features = false }
 monostate = { version = "0.1.2", default-features = false }
+take_mut = { version = "0.2.2", default-features = false }
 
 # std deps
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"], optional = true }

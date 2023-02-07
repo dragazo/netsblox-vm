@@ -4,6 +4,8 @@ use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::borrow::Cow;
 use std::{iter, fmt};
+use std::ops::Deref;
+use std::cell::Ref;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
 
@@ -110,7 +112,8 @@ pub trait GetType {
 }
 
 /// Any primitive value.
-#[derive(Collect)]
+#[derive(Educe, Collect)]
+#[educe(Clone)]
 #[collect(no_drop, bound = "")]
 pub enum Value<'gc, S: System> {
     /// A primitive boolean value.
@@ -118,22 +121,18 @@ pub enum Value<'gc, S: System> {
     /// A primitive numeric value. Snap! and NetsBlox use 64-bit floating point values for all numbers.
     Number(#[collect(require_static)] Number),
     /// A primitive string value, which is an immutable reference type.
-    /// Although [`Rc`] would be sufficient for this purpose, using [`Gc`] instead makes the arena automatically
-    /// include strings in its calculation of the total memory footprint (and allows [`Value`] to be [`Copy`]).
-    String(Gc<'gc, String>),
+    String(#[collect(require_static)] Rc<String>),
     /// An image stored as a binary buffer.
-    Image(Gc<'gc, Vec<u8>>),
+    Image(#[collect(require_static)] Rc<Vec<u8>>),
+    /// A reference to a native object handle produced by [`System`].
+    Native(#[collect(require_static)] Rc<S::NativeValue>),
     /// A primitive list type, which is a mutable reference type.
     List(GcCell<'gc, VecDeque<Value<'gc, S>>>),
     /// A closure/lambda function. This contains information about the closure's bytecode location, parameters, and captures from the parent scope.
     Closure(GcCell<'gc, Closure<'gc, S>>),
     /// A reference to an [`Entity`] in the environment.
     Entity(GcCell<'gc, Entity<'gc, S>>),
-    /// A reference to a native object handle produced by [`System`].
-    Native(GcCell<'gc, StaticCollect<S::NativeValue>>),
 }
-impl<'gc, S: System> Copy for Value<'gc, S> {}
-impl<'gc, S: System> Clone for Value<'gc, S> { fn clone(&self) -> Self { *self } }
 
 impl<'gc, S: System> GetType for Value<'gc, S> {
     type Output = Type<S>;
@@ -146,7 +145,7 @@ impl<'gc, S: System> GetType for Value<'gc, S> {
             Value::List(_) => Type::List,
             Value::Closure(_) => Type::Closure,
             Value::Entity(_) => Type::Entity,
-            Value::Native(x) => Type::Native(x.read().0.get_type()),
+            Value::Native(x) => Type::Native(x.get_type()),
         }
     }
 }
@@ -160,8 +159,8 @@ impl<S: System> fmt::Debug for Value<'_, S> {
                 Value::String(x) => write!(f, "{:?}", x.as_str()),
                 Value::Closure(x) => write!(f, "{:?}", &*x.read()),
                 Value::Entity(x) => write!(f, "{:?}", &*x.read()),
-                Value::Native(x) => write!(f, "{:?}", x.read().0),
-                Value::Image(x) => write!(f, "[Image {:?}]", x.as_ref() as *const [u8]),
+                Value::Native(x) => write!(f, "{:?}", &**x),
+                Value::Image(x) => write!(f, "[Image {:?}]", Rc::as_ptr(x)),
                 Value::List(x) => {
                     let identity = value.identity();
                     if !cache.insert(identity) { return write!(f, "[...]") }
@@ -188,7 +187,7 @@ impl<S: System> fmt::Debug for Value<'_, S> {
 }
 impl<'gc, S: System> From<bool> for Value<'gc, S> { fn from(v: bool) -> Self { Value::Bool(v) } }
 impl<'gc, S: System> From<Number> for Value<'gc, S> { fn from(v: Number) -> Self { Value::Number(v) } }
-impl<'gc, S: System> From<Gc<'gc, String>> for Value<'gc, S> { fn from(v: Gc<'gc, String>) -> Self { Value::String(v) } }
+impl<'gc, S: System> From<Rc<String>> for Value<'gc, S> { fn from(v: Rc<String>) -> Self { Value::String(v) } }
 impl<'gc, S: System> From<GcCell<'gc, VecDeque<Value<'gc, S>>>> for Value<'gc, S> { fn from(v: GcCell<'gc, VecDeque<Value<'gc, S>>>) -> Self { Value::List(v) } }
 impl<'gc, S: System> From<GcCell<'gc, Closure<'gc, S>>> for Value<'gc, S> { fn from(v: GcCell<'gc, Closure<'gc, S>>) -> Self { Value::Closure(v) } }
 impl<'gc, S: System> From<GcCell<'gc, Entity<'gc, S>>> for Value<'gc, S> { fn from(v: GcCell<'gc, Entity<'gc, S>>) -> Self { Value::Entity(v) } }
@@ -199,11 +198,11 @@ impl<'gc, S: System> Value<'gc, S> {
             Json::Null => return Err(FromJsonError::HadNull),
             Json::Bool(x) => Value::Bool(x),
             Json::Number(x) => Value::Number(x.as_f64().and_then(|x| Number::new(x).ok()).ok_or(FromJsonError::HadBadNumber)?),
-            Json::String(x) => Value::String(Gc::allocate(mc, x)),
+            Json::String(x) => Value::String(Rc::new(x)),
             Json::Array(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|x| Value::from_json(mc, x)).collect::<Result<_,_>>()?)),
             Json::Object(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|(k, v)| {
                 let mut entry = VecDeque::with_capacity(2);
-                entry.push_back(Value::String(Gc::allocate(mc, k)));
+                entry.push_back(Value::String(Rc::new(k)));
                 entry.push_back(Value::from_json(mc, v)?);
                 Ok(Value::List(GcCell::allocate(mc, entry)))
             }).collect::<Result<_,_>>()?)),
@@ -239,12 +238,12 @@ impl<'gc, S: System> Value<'gc, S> {
         match self {
             Value::Bool(x) => Identity(x as *const bool as *const (), PhantomData),
             Value::Number(x) => Identity(x as *const Number as *const (), PhantomData),
-            Value::String(x) => Identity(x.as_ptr() as *const String as *const (), PhantomData),
-            Value::Image(x) => Identity(x.as_ptr() as *const Vec<u8> as *const (), PhantomData),
+            Value::String(x) => Identity(Rc::as_ptr(x) as *const String as *const (), PhantomData),
+            Value::Image(x) => Identity(Rc::as_ptr(x) as *const Vec<u8> as *const (), PhantomData),
             Value::List(x) => Identity(x.as_ptr() as *const Vec<Value<'gc, S>> as *const (), PhantomData),
             Value::Closure(x) => Identity(x.as_ptr() as *const Closure<'gc, S> as *const (), PhantomData),
             Value::Entity(x) => Identity(x.as_ptr() as *const Entity<'gc, S> as *const (), PhantomData),
-            Value::Native(x) => Identity(x.as_ptr() as *const StaticCollect<S::NativeValue> as *const (), PhantomData),
+            Value::Native(x) => Identity(Rc::as_ptr(x) as *const StaticCollect<S::NativeValue> as *const (), PhantomData),
         }
     }
     /// Attempts to interpret this value as a bool.
@@ -334,13 +333,13 @@ impl<S: System> fmt::Debug for Entity<'_, S> {
 /// for the [`Shared::Unique`] case, which is assumed to be significantly more likely than [`Shared::Aliased`].
 #[derive(Collect)]
 #[collect(no_drop)]
-pub enum Shared<'gc, T: 'gc + Collect + Copy> {
+pub enum Shared<'gc, T: 'gc + Collect> {
     /// A shared resource which has only (this) single unique handle.
     Unique(T),
     /// One of several handles to a single shared resource.
     Aliased(GcCell<'gc, T>),
 }
-impl<'gc, T: 'gc + Collect + Copy> Shared<'gc, T> {
+impl<'gc, T: 'gc + Collect> Shared<'gc, T> {
     /// Sets the value of the shared resource.
     pub fn set(&mut self, mc: MutationContext<'gc, '_>, value: T) {
         match self {
@@ -348,28 +347,45 @@ impl<'gc, T: 'gc + Collect + Copy> Shared<'gc, T> {
             Shared::Aliased(x) => *x.write(mc) = value,
         }
     }
-    /// Gets a copy of the shared resource's currently stored value.
-    pub fn get(&self) -> T {
+    /// Gets a reference to the shared resource's currently stored value.
+    pub fn get(&self) -> SharedRef<T> {
         match self {
-            Shared::Unique(x) => *x,
-            Shared::Aliased(x) => *x.read(),
+            Shared::Unique(x) => SharedRef::Unique(x),
+            Shared::Aliased(x) => SharedRef::Aliased(x.read()),
         }
     }
     /// Creates an aliasing instance of [`Shared`] to the same resource as this one.
     /// If this instance is the [`Shared::Unique`] variant, transitions to [`Shared::Aliased`] and returns a second handle.
     /// Otherwise, this simple returns an additional handle to the aliased shared resource.
     pub fn alias(&mut self, mc: MutationContext<'gc, '_>) -> Self {
-        match self {
-            Shared::Unique(x) => {
-                let res = GcCell::allocate(mc, *x);
-                *self = Shared::Aliased(res);
-                Shared::Aliased(res)
+        take_mut::take(self, |myself| {
+            match myself {
+                Shared::Unique(x) => Shared::Aliased(GcCell::allocate(mc, x)),
+                Shared::Aliased(_) => myself,
             }
+        });
+
+        match self {
+            Shared::Unique(_) => unreachable!(),
             Shared::Aliased(x) => Shared::Aliased(*x),
         }
     }
 }
-impl<'gc, T: Collect + Copy> From<T> for Shared<'gc, T> { fn from(value: T) -> Self { Shared::Unique(value) } }
+impl<'gc, T: Collect> From<T> for Shared<'gc, T> { fn from(value: T) -> Self { Shared::Unique(value) } }
+
+pub enum SharedRef<'a, T> {
+    Unique(&'a T),
+    Aliased(Ref<'a, T>)
+}
+impl<'a, T> Deref for SharedRef<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            SharedRef::Unique(x) => x,
+            SharedRef::Aliased(x) => &**x,
+        }
+    }
+}
 
 /// Holds a collection of variables in an execution context.
 /// 
@@ -537,7 +553,7 @@ pub struct GlobalContext<'gc, S: System> {
 impl<'gc, S: System> GlobalContext<'gc, S> {
     pub fn from_init(mc: MutationContext<'gc, '_>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
         let allocated_refs = init_info.ref_values.iter().map(|ref_value| match ref_value {
-            RefValue::String(value) => Value::String(Gc::allocate(mc, value.clone())),
+            RefValue::String(value) => Value::String(Rc::new(value.clone())),
             RefValue::List(_) => Value::List(GcCell::allocate(mc, Default::default())),
         }).collect::<Vec<_>>();
 
@@ -545,7 +561,7 @@ impl<'gc, S: System> GlobalContext<'gc, S> {
             match value {
                 InitValue::Bool(x) => Value::Bool(*x),
                 InitValue::Number(x) => Value::Number(*x),
-                InitValue::Ref(x) => allocated_refs[*x],
+                InitValue::Ref(x) => allocated_refs[*x].clone(),
             }
         }
 

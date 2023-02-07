@@ -1,5 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, Write, BufReader, BufWriter};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::fmt;
 
@@ -7,7 +8,7 @@ use netsblox_vm::cli::{run, Mode};
 use netsblox_vm::template::SyscallMenu;
 use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, System, Request};
 use netsblox_vm::std_system::{Config, CustomTypes, StdSystem, RequestStatus, IntermediateType};
-use netsblox_vm::gc::{Gc, GcCell, MutationContext, StaticCollect};
+use netsblox_vm::gc::MutationContext;
 use netsblox_vm::json::{Json, json};
 use clap::Parser;
 
@@ -18,8 +19,8 @@ enum NativeType {
 }
 
 enum NativeValue {
-    InputFile { handle: Option<BufReader<File>> },
-    OutputFile { handle: Option<BufWriter<File>> },
+    InputFile { handle: RefCell<Option<BufReader<File>>> },
+    OutputFile { handle: RefCell<Option<BufWriter<File>>> },
 }
 impl fmt::Debug for NativeValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -70,15 +71,15 @@ impl CustomTypes for C {
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
         Ok(match value {
             Intermediate::Json(x) => Value::from_json(mc, x)?,
-            Intermediate::Image(x) => Value::Image(Gc::allocate(mc, x)),
-            Intermediate::Native(x) => Value::Native(GcCell::allocate(mc, StaticCollect(x))),
+            Intermediate::Image(x) => Value::Image(Rc::new(x)),
+            Intermediate::Native(x) => Value::Native(Rc::new(x)),
         })
     }
 }
 
 fn main() {
     let config = Config {
-        request: Some(Rc::new(move |_, mc, key, request, _| match &request {
+        request: Some(Rc::new(move |_, _, key, request, _| match &request {
             Request::Syscall { name, args } => match name.as_str() {
                 "open" => {
                     let (path, mode) = match args.as_slice() {
@@ -115,8 +116,8 @@ fn main() {
                     };
 
                     let res = match mode.as_ref() {
-                        "r" => NativeValue::InputFile { handle: Some(BufReader::new(file)) },
-                        "w" | "a" => NativeValue::OutputFile { handle: Some(BufWriter::new(file)) },
+                        "r" => NativeValue::InputFile { handle: RefCell::new(Some(BufReader::new(file))) },
+                        "w" | "a" => NativeValue::OutputFile { handle: RefCell::new(Some(BufWriter::new(file))) },
                         _ => unreachable!(),
                     };
 
@@ -126,9 +127,9 @@ fn main() {
                 "close" => match args.as_slice() {
                     [file] => match file {
                         Value::Native(x) => {
-                            match &mut x.write(mc).0 {
-                                NativeValue::InputFile { handle } => *handle = None,
-                                NativeValue::OutputFile { handle } => *handle = None,
+                            match &**x {
+                                NativeValue::InputFile { handle } => *handle.borrow_mut() = None,
+                                NativeValue::OutputFile { handle } => *handle.borrow_mut() = None,
                             }
                             key.complete(Ok(Intermediate::from_json(json!("OK").into())));
                             return RequestStatus::Handled;
@@ -145,8 +146,8 @@ fn main() {
                 }
                 "readLine" => match args.as_slice() {
                     [file] => match file {
-                        Value::Native(x) => match &mut x.write(mc).0 {
-                            NativeValue::InputFile { handle } => match handle.as_mut() {
+                        Value::Native(x) => match &**x {
+                            NativeValue::InputFile { handle } => match handle.borrow_mut().as_mut() {
                                 Some(handle) => {
                                     let mut res = String::new();
                                     if let Err(e) = handle.read_line(&mut res) {
@@ -179,8 +180,8 @@ fn main() {
                 }
                 "writeLine" => match args.as_slice() {
                     [file, content] => match (file, content.to_string()) {
-                        (Value::Native(x), Ok(content)) => match &mut x.write(mc).0 {
-                            NativeValue::OutputFile { handle } => match handle.as_mut() {
+                        (Value::Native(x), Ok(content)) => match &**x {
+                            NativeValue::OutputFile { handle } => match handle.borrow_mut().as_mut() {
                                 Some(handle) => match writeln!(*handle, "{content}") {
                                     Ok(_) => {
                                         key.complete(Ok(Intermediate::Json(json!("OK"))));

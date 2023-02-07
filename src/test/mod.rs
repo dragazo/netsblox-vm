@@ -1,4 +1,5 @@
 use std::prelude::v1::*;
+use std::rc::Rc;
 use std::iter;
 
 use crate::runtime::*;
@@ -54,7 +55,7 @@ impl CustomTypes for C {
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
         Ok(match value {
             Intermediate::Json(x) => Value::from_json(mc, x)?,
-            Intermediate::Image(x) => Value::Image(Gc::allocate(mc, x)),
+            Intermediate::Image(x) => Value::Image(Rc::new(x)),
         })
     }
 }

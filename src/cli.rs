@@ -548,7 +548,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
                         fn summarize_symbols<C: CustomTypes>(symbols: &SymbolTable<'_, StdSystem<C>>) -> Vec<VarEntry> {
                             let mut res = Vec::with_capacity(symbols.len());
                             for (k, v) in symbols {
-                                res.push(VarEntry { name: k.clone(), value: format!("{:?}", v.get()) });
+                                res.push(VarEntry { name: k.clone(), value: format!("{:?}", &*v.get()) });
                             }
                             res
                         }

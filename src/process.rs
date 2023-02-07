@@ -10,12 +10,27 @@ use std::prelude::v1::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
 use std::iter::{self, Cycle};
 use std::cmp::Ordering;
+use std::rc::Rc;
 
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
 use crate::runtime::*;
 use crate::bytecode::*;
+
+fn empty_string() -> Rc<String> {
+    #[cfg(feature = "std")]
+    {
+        std::thread_local! {
+            static VALUE: Rc<String> = Rc::new(String::new());
+        }
+        VALUE.with(|x| x.clone())
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        Rc::new(String::new())
+    }
+}
 
 /// An execution error from a [`Process`] (see [`Process::step`]).
 ///
@@ -193,7 +208,7 @@ impl<'gc, S: System> Process<'gc, S> {
                     ErrorCause::Custom { msg } => msg.clone(),
                     _ => format!("{err:?}"),
                 };
-                self.call_stack.last_mut().unwrap().locals.redefine_or_define(var, Shared::Unique(Value::String(Gc::allocate(mc, msg))));
+                self.call_stack.last_mut().unwrap().locals.redefine_or_define(var, Shared::Unique(Value::String(Rc::new(msg))));
                 self.pos = *pos;
                 res = Ok(ProcessStep::Normal);
             }
@@ -210,22 +225,37 @@ impl<'gc, S: System> Process<'gc, S> {
         let mut global_context = self.global_context.write(mc);
         let mut global_context = &mut *global_context;
 
-        fn process_result<'gc, S: System, T: Copy>(mc: MutationContext<'gc, '_>, result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, S>>>, last_ok: Option<&mut Option<Value<'gc, S>>>, last_err: Option<&mut Option<Value<'gc, S>>>, to_value: fn(T) -> Option<Value<'gc, S>>) -> Result<(), ErrorCause<S>> {
+        fn process_result<'gc, S: System, T>(result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, S>>>, last_ok: Option<&mut Option<Value<'gc, S>>>, last_err: Option<&mut Option<Value<'gc, S>>>, to_value: fn(T) -> Option<Value<'gc, S>>) -> Result<(), ErrorCause<S>> {
             match result {
                 Ok(x) => match to_value(x) {
                     Some(x) => {
-                        if let Some(last_ok) = last_ok { *last_ok = Some(x) }
                         if let Some(last_err) = last_err { *last_err = None }
-                        if let Some(stack) = stack { stack.push(x) }
+                        match (last_ok, stack) {
+                            (Some(last_ok), Some(stack)) => {
+                                *last_ok = Some(x.clone());
+                                stack.push(x);
+                            }
+                            (Some(last_ok), None) => *last_ok = Some(x),
+                            (None, Some(stack)) => stack.push(x),
+                            (None, None) => (),
+                        }
                     }
                     None => assert!(last_ok.is_none() && stack.is_none()),
                 }
                 Err(x) => match error_scheme {
                     ErrorScheme::Soft => {
-                        let x = Value::String(Gc::allocate(mc, x));
+                        let x = Value::String(Rc::new(x));
+
                         if let Some(last_ok) = last_ok { *last_ok = None }
-                        if let Some(last_err) = last_err { *last_err = Some(x) }
-                        if let Some(stack) = stack { stack.push(x) }
+                        match (last_err, stack) {
+                            (Some(last_err), Some(stack)) => {
+                                *last_err = Some(x.clone());
+                                stack.push(x);
+                            }
+                            (Some(last_err), None) => *last_err = Some(x),
+                            (None, Some(stack)) => stack.push(x),
+                            (None, None) => (),
+                        }
                     }
                     ErrorScheme::Hard => return Err(ErrorCause::Promoted { error: x }),
                 }
@@ -235,17 +265,17 @@ impl<'gc, S: System> Process<'gc, S> {
 
         macro_rules! process_command {
             ($res:ident, $aft_pos:expr) => {{
-                process_result(mc, $res, ErrorScheme::Hard, None, None, None, |_: ()| None)?;
+                process_result($res, ErrorScheme::Hard, None, None, None, |_: ()| None)?;
                 self.pos = $aft_pos;
             }}
         }
         macro_rules! process_request {
             ($res:ident, $action:expr, $aft_pos:expr) => {{
                 match $action {
-                    RequestAction::Syscall => process_result(mc, $res, global_context.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_syscall_error), Some)?,
-                    RequestAction::Rpc => process_result(mc, $res, global_context.settings.rpc_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?,
-                    RequestAction::Input => process_result(mc, $res, ErrorScheme::Hard, None, Some(&mut self.last_answer), None, Some)?,
-                    RequestAction::Push => process_result(mc, $res, ErrorScheme::Hard, Some(&mut self.value_stack), None, None, Some)?,
+                    RequestAction::Syscall => process_result($res, global_context.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_syscall_error), Some)?,
+                    RequestAction::Rpc => process_result($res, global_context.settings.rpc_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?,
+                    RequestAction::Input => process_result($res, ErrorScheme::Hard, None, Some(&mut self.last_answer), None, Some)?,
+                    RequestAction::Push => process_result($res, ErrorScheme::Hard, Some(&mut self.value_stack), None, None, Some)?,
                 }
                 self.pos = $aft_pos;
             }}
@@ -271,7 +301,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 AsyncPoll::Completed(x) => {
                     let value = match x {
                         Some(x) => Value::from_json(mc, x)?,
-                        None => Gc::allocate(mc, String::new()).into(),
+                        None => empty_string().into(),
                     };
                     self.value_stack.push(value);
                     self.pos = *aft_pos;
@@ -356,11 +386,11 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::PushString { value } => {
-                self.value_stack.push(Value::String(Gc::allocate(mc, value.to_owned())));
+                self.value_stack.push(Value::String(Rc::new(value.to_owned())));
                 self.pos = aft_pos;
             }
             Instruction::PushVariable { var } => {
-                self.value_stack.push(lookup_var!(var).get());
+                self.value_stack.push(lookup_var!(var).get().clone());
                 self.pos = aft_pos;
             }
             Instruction::PopValue => {
@@ -369,7 +399,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
 
             Instruction::DupeValue { top_index } => {
-                let val = self.value_stack[self.value_stack.len() - 1 - top_index as usize];
+                let val = self.value_stack[self.value_stack.len() - 1 - top_index as usize].clone();
                 self.value_stack.push(val);
                 self.pos = aft_pos;
             }
@@ -441,7 +471,7 @@ impl<'gc, S: System> Process<'gc, S> {
 
             Instruction::ListRev => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                self.value_stack.push(GcCell::allocate(mc, list.read().iter().rev().copied().collect::<VecDeque<_>>()).into());
+                self.value_stack.push(GcCell::allocate(mc, list.read().iter().rev().cloned().collect::<VecDeque<_>>()).into());
                 self.pos = aft_pos;
             }
             Instruction::ListFlatten => {
@@ -455,7 +485,7 @@ impl<'gc, S: System> Process<'gc, S> {
                         let stack_size = self.value_stack.len();
                         self.value_stack.drain(stack_size - len..).collect()
                     }
-                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().copied().collect(),
+                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().cloned().collect(),
                 };
                 let src = self.value_stack.pop().unwrap();
 
@@ -485,7 +515,7 @@ impl<'gc, S: System> Process<'gc, S> {
 
             Instruction::ListJson => {
                 let value = self.value_stack.pop().unwrap().to_json()?;
-                self.value_stack.push(Gc::allocate(mc, value.to_string()).into());
+                self.value_stack.push(Rc::new(value.to_string()).into());
                 self.pos = aft_pos;
             }
 
@@ -524,7 +554,7 @@ impl<'gc, S: System> Process<'gc, S> {
             Instruction::ListGetLast => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 self.value_stack.push(match list.read().back() {
-                    Some(x) => *x,
+                    Some(x) => x.clone(),
                     None => return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }),
                 });
                 self.pos = aft_pos;
@@ -533,7 +563,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let list = list.read();
                 let index = ops::prep_rand_index(&*global_context.system, list.len())?;
-                self.value_stack.push(list[index]);
+                self.value_stack.push(list[index].clone());
                 self.pos = aft_pos;
             }
 
@@ -600,33 +630,33 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::VariadicOp { op, len } => {
-                fn combine_as_binary<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, mut acc: Value<'gc, S>, values: &mut dyn Iterator<Item = Value<'gc, S>>, op: BinaryOp) -> Result<Value<'gc, S>, ErrorCause<S>> {
+                fn combine_as_binary<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, mut acc: Value<'gc, S>, values: &mut dyn Iterator<Item = &Value<'gc, S>>, op: BinaryOp) -> Result<Value<'gc, S>, ErrorCause<S>> {
                     for item in values {
-                        acc = ops::binary_op(mc, system, &acc, &item, op)?;
+                        acc = ops::binary_op(mc, system, &acc, item, op)?;
                     }
                     Ok(acc)
                 }
 
                 type Combine<'gc, S, I> = fn(MutationContext<'gc, '_>, &S, I) -> Result<Value<'gc, S>, ErrorCause<S>>;
-                let combine: Combine<'gc, S, &mut dyn Iterator<Item = Value<'gc, S>>> = match op {
+                let combine: Combine<'gc, S, &mut dyn Iterator<Item = &Value<'gc, S>>> = match op {
                     VariadicOp::Add => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(0.0)?), values, BinaryOp::Add),
                     VariadicOp::Mul => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(1.0)?), values, BinaryOp::Mul),
                     VariadicOp::Min => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::infinity()?), values, BinaryOp::Min),
                     VariadicOp::Max => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::neg_infinity()?), values, BinaryOp::Max),
-                    VariadicOp::StrCat => |mc, _, values| {
+                    VariadicOp::StrCat => |_, _, values| {
                         let mut acc = String::new();
                         for item in values {
                             acc.push_str(item.to_string()?.as_ref());
                         }
-                        Ok(Gc::allocate(mc, acc).into())
+                        Ok(Rc::new(acc).into())
                     },
                     VariadicOp::MakeList => |mc, _, values| {
-                        Ok(GcCell::allocate(mc, values.collect::<VecDeque<_>>()).into())
+                        Ok(GcCell::allocate(mc, values.cloned().collect::<VecDeque<_>>()).into())
                     },
                     VariadicOp::ListCat => |mc, _, values| {
                         let mut acc = VecDeque::new();
                         for item in values {
-                            acc.extend(item.as_list()?.read().iter().copied());
+                            acc.extend(item.as_list()?.read().iter().cloned());
                         }
                         Ok(GcCell::allocate(mc, acc).into())
                     },
@@ -635,12 +665,14 @@ impl<'gc, S: System> Process<'gc, S> {
                 let res = match len {
                     VariadicLen::Fixed(len) => {
                         let stack_size = self.value_stack.len();
-                        combine(mc, &*global_context.system, &mut self.value_stack.drain(stack_size - len..))?
+                        let res = combine(mc, &*global_context.system, &mut self.value_stack[stack_size - len..].iter())?;
+                        self.value_stack.drain(stack_size - len..);
+                        res
                     }
                     VariadicLen::Dynamic => {
                         let src = self.value_stack.pop().unwrap().as_list()?;
                         let src = src.read();
-                        combine(mc, &*global_context.system, &mut src.iter().copied())?
+                        combine(mc, &*global_context.system, &mut src.iter())?
                     }
                 };
                 self.value_stack.push(res);
@@ -675,7 +707,7 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
-                let a = lookup_var!(var).get();
+                let a = lookup_var!(var).get().clone();
                 context.set_or_define(mc, var, ops::binary_op(mc, &*global_context.system, &a, &b, op)?);
                 self.pos = aft_pos;
             }
@@ -802,7 +834,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 perform_request!(Request::Rpc { service: service.to_owned(), rpc: rpc.to_owned(), args: args_vec}, RequestAction::Rpc, aft_pos);
             }
             Instruction::PushRpcError => {
-                self.value_stack.push(self.last_rpc_error.unwrap_or_else(|| Gc::allocate(mc, String::new()).into()));
+                self.value_stack.push(self.last_rpc_error.clone().unwrap_or_else(|| empty_string().into()));
                 self.pos = aft_pos;
             }
             Instruction::Syscall { len } => {
@@ -811,13 +843,13 @@ impl<'gc, S: System> Process<'gc, S> {
                         let stack_size = self.value_stack.len();
                         self.value_stack.drain(stack_size - len..).collect()
                     }
-                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().copied().collect(),
+                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().cloned().collect(),
                 };
                 let name = self.value_stack.pop().unwrap().to_string()?.into_owned();
                 perform_request!(Request::Syscall { name, args }, RequestAction::Syscall, aft_pos);
             }
             Instruction::PushSyscallError => {
-                self.value_stack.push(self.last_syscall_error.unwrap_or_else(|| Gc::allocate(mc, String::new()).into()));
+                self.value_stack.push(self.last_syscall_error.clone().unwrap_or_else(|| empty_string().into()));
                 self.pos = aft_pos;
             }
             Instruction::Broadcast { wait } => {
@@ -837,16 +869,16 @@ impl<'gc, S: System> Process<'gc, S> {
             }
             Instruction::Print => {
                 let value = self.value_stack.pop().unwrap();
-                let is_empty = match value { Value::String(x) => x.is_empty(), _ => false };
+                let is_empty = match &value { Value::String(x) => x.is_empty(), _ => false };
                 perform_command!(Command::Print { value: if is_empty { None } else { Some(value) } }, aft_pos);
             }
             Instruction::Ask => {
                 let prompt = self.value_stack.pop().unwrap();
-                let is_empty = match prompt { Value::String(x) => x.is_empty(), _ => false };
+                let is_empty = match &prompt { Value::String(x) => x.is_empty(), _ => false };
                 perform_request!(Request::Input { prompt: if is_empty { None } else { Some(prompt) } }, RequestAction::Input, aft_pos);
             }
             Instruction::PushAnswer => {
-                self.value_stack.push(self.last_answer.unwrap_or_else(|| Gc::allocate(mc, String::new()).into()));
+                self.value_stack.push(self.last_answer.clone().unwrap_or_else(|| empty_string().into()));
                 self.pos = aft_pos;
             }
             Instruction::ResetTimer => {
@@ -960,7 +992,7 @@ mod ops {
                     }
                     cache.remove(&key);
                 }
-                _ => dest.push_back(*value),
+                _ => dest.push_back(value.clone()),
             }
             Ok(())
         }
@@ -997,16 +1029,18 @@ mod ops {
         Ok(res)
     }
     pub(super) fn reshape<'gc, S: System>(mc: MutationContext<'gc, '_>, src: &Value<'gc, S>, dims: &[usize]) -> Result<Value<'gc, S>, ErrorCause<S>> {
-        if dims.iter().any(|&x| x == 0) { return Ok(GcCell::allocate(mc, VecDeque::default()).into()) }
+        if dims.iter().any(|&x| x == 0) {
+            return Ok(GcCell::allocate(mc, VecDeque::default()).into())
+        }
 
         let mut src = ops::flatten(src)?;
         if src.is_empty() {
-            src.push_back(Gc::allocate(mc, String::new()).into());
+            src.push_back(empty_string().into());
         }
 
         fn reshape_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, src: &mut Cycle<VecDequeIter<Value<'gc, S>>>, dims: &[usize]) -> Value<'gc, S> {
             match dims {
-                [] => *src.next().unwrap(),
+                [] => src.next().unwrap().clone(),
                 [first, rest @ ..] => GcCell::allocate(mc, (0..*first).map(|_| reshape_impl(mc, src, rest)).collect::<VecDeque<_>>()).into(),
             }
         }
@@ -1019,7 +1053,7 @@ mod ops {
             match sources {
                 [] => res.push_back(GcCell::allocate(mc, partial.clone()).into()),
                 [first, rest @ ..] => for item in first.read().iter() {
-                    partial.push_back(*item);
+                    partial.push_back(item.clone());
                     cartesian_product_impl(mc, res, partial, rest);
                     partial.pop_back();
                 }
@@ -1041,14 +1075,14 @@ mod ops {
     fn binary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc, S>, b: &Value<'gc, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, S>, Identity<'gc, S>, bool), Value<'gc, S>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc, S>, &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>>) -> Result<Value<'gc, S>, ErrorCause<S>> {
         let cache_key = (a.identity(), b.identity(), matrix_mode);
         Ok(match cache.get(&cache_key) {
-            Some(x) => *x,
+            Some(x) => x.clone(),
             None => {
                 let checker = if matrix_mode { as_matrix } else { as_list };
                 match (checker(a), checker(b)) {
                     (Some(a), Some(b)) => {
                         let (a, b) = (a.read(), b.read());
-                        let real_res = GcCell::allocate(mc, VecDeque::with_capacity(a.len().min(b.len()))).into();
-                        cache.insert(cache_key, real_res);
+                        let real_res: Value<S> = GcCell::allocate(mc, VecDeque::with_capacity(a.len().min(b.len()))).into();
+                        cache.insert(cache_key, real_res.clone());
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
                         for (a, b) in iter::zip(&*a, &*b) {
@@ -1058,8 +1092,8 @@ mod ops {
                     }
                     (Some(a), None) => {
                         let a = a.read();
-                        let real_res = GcCell::allocate(mc, VecDeque::with_capacity(a.len())).into();
-                        cache.insert(cache_key, real_res);
+                        let real_res: Value<S> = GcCell::allocate(mc, VecDeque::with_capacity(a.len())).into();
+                        cache.insert(cache_key, real_res.clone());
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
                         for a in &*a {
@@ -1069,8 +1103,8 @@ mod ops {
                     }
                     (None, Some(b)) => {
                         let b = b.read();
-                        let real_res = GcCell::allocate(mc, VecDeque::with_capacity(b.len())).into();
-                        cache.insert(cache_key, real_res);
+                        let real_res: Value<S> = GcCell::allocate(mc, VecDeque::with_capacity(b.len())).into();
+                        cache.insert(cache_key, real_res.clone());
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
                         for b in &*b {
@@ -1100,10 +1134,10 @@ mod ops {
             BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.min(b.to_number()?).into())),
             BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.max(b.to_number()?).into())),
 
-            BinaryOp::StrGet => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
+            BinaryOp::StrGet => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
                 let string = b.to_string()?;
                 let index = prep_index(a, string.chars().count())?;
-                Ok(Gc::allocate(mc, string.chars().nth(index).unwrap().to_string()).into())
+                Ok(Rc::new(string.chars().nth(index).unwrap().to_string()).into())
             }),
 
             BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
@@ -1112,7 +1146,7 @@ mod ops {
             }),
             BinaryOp::SplitBy => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
                 let (text, pattern) = (a.to_string()?, b.to_string()?);
-                Ok(GcCell::allocate(mc, text.split(pattern.as_ref()).map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, text.split(pattern.as_ref()).map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
 
             BinaryOp::Range => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
@@ -1150,12 +1184,12 @@ mod ops {
     fn unary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, x: &Value<'gc, S>, cache: &mut BTreeMap<Identity<'gc, S>, Value<'gc, S>>, scalar_op: &dyn Fn(MutationContext<'gc, '_>, &S, &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>>) -> Result<Value<'gc, S>, ErrorCause<S>> {
         let cache_key = x.identity();
         Ok(match cache.get(&cache_key) {
-            Some(x) => *x,
+            Some(x) => x.clone(),
             None => match as_list(x) {
                 Some(x) => {
                     let x = x.read();
-                    let real_res = GcCell::allocate(mc, VecDeque::with_capacity(x.len())).into();
-                    cache.insert(cache_key, real_res);
+                    let real_res: Value<S> = GcCell::allocate(mc, VecDeque::with_capacity(x.len())).into();
+                    cache.insert(cache_key, real_res.clone());
                     let res = as_list(&real_res).unwrap();
                     let mut res = res.write(mc);
                     for x in &*x {
@@ -1185,33 +1219,33 @@ mod ops {
             UnaryOp::Atan   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::atan(x.to_number()?.get()).to_degrees())?.into())),
             UnaryOp::StrLen => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(x.to_string()?.chars().count() as f64)?.into())),
 
-            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| match x.to_string()?.chars().rev().next() {
-                Some(ch) => Ok(Gc::allocate(mc, ch.to_string()).into()),
+            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| match x.to_string()?.chars().rev().next() {
+                Some(ch) => Ok(Rc::new(ch.to_string()).into()),
                 None => return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }),
             }),
-            UnaryOp::StrGetRandom => unary_op_impl(mc, system, x, &mut cache, &|mc, system, x| {
+            UnaryOp::StrGetRandom => unary_op_impl(mc, system, x, &mut cache, &|_, system, x| {
                 let x = x.to_string()?;
                 let i = prep_rand_index(system, x.chars().count())?;
-                Ok(Gc::allocate(mc, x.chars().nth(i).unwrap().to_string()).into())
+                Ok(Rc::new(x.chars().nth(i).unwrap().to_string()).into())
             }),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(GcCell::allocate(mc, x.to_string()?.chars().map(|x| Gc::allocate(mc, x.to_string()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string()?.chars().map(|x| Rc::new(x.to_string()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitWord => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(GcCell::allocate(mc, x.to_string()?.split_whitespace().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string()?.split_whitespace().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitTab => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(GcCell::allocate(mc, x.to_string()?.split('\t').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string()?.split('\t').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitCR => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(GcCell::allocate(mc, x.to_string()?.split('\r').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string()?.split('\r').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitLF => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(GcCell::allocate(mc, x.to_string()?.lines().map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(GcCell::allocate(mc, x.to_string()?.lines().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into())
             }),
             UnaryOp::SplitCsv => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                let lines = x.to_string()?.lines().map(|line| GcCell::allocate(mc, line.split(',').map(|x| Gc::allocate(mc, x.to_owned()).into()).collect::<VecDeque<_>>()).into()).collect::<VecDeque<_>>();
+                let lines = x.to_string()?.lines().map(|line| GcCell::allocate(mc, line.split(',').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into()).collect::<VecDeque<_>>();
                 Ok(match lines.len() {
                     1 => lines.into_iter().next().unwrap(),
                     _ => GcCell::allocate(mc, lines).into(),
@@ -1225,13 +1259,13 @@ mod ops {
                 }
             }),
 
-            UnaryOp::UnicodeToChar => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
+            UnaryOp::UnicodeToChar => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| {
                 let fnum = x.to_number()?.get();
                 if fnum < 0.0 || fnum > u32::MAX as f64 { return Err(ErrorCause::InvalidUnicode { value: fnum }) }
                 let num = fnum as u32;
                 if num as f64 != fnum { return Err(ErrorCause::InvalidUnicode { value: fnum }) }
                 match char::from_u32(num) {
-                    Some(ch) => Ok(Gc::allocate(mc, ch.to_string()).into()),
+                    Some(ch) => Ok(Rc::new(ch.to_string()).into()),
                     None => Err(ErrorCause::InvalidUnicode { value: fnum }),
                 }
             }),
@@ -1248,7 +1282,7 @@ mod ops {
     pub(super) fn index_list<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, list: &Value<'gc, S>, index: &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>> {
         let list = list.as_list()?;
         let list = list.read();
-        unary_op_impl(mc, system, index, &mut Default::default(), &|_, _, x| Ok(list[prep_index(x, list.len())?]))
+        unary_op_impl(mc, system, index, &mut Default::default(), &|_, _, x| Ok(list[prep_index(x, list.len())?].clone()))
     }
 
     fn check_eq_impl<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>, cache: &mut BTreeSet<(Identity<'gc, S>, Identity<'gc, S>)>) -> bool {
@@ -1268,7 +1302,7 @@ mod ops {
             (Value::Number(_), _) | (_, Value::Number(_)) => false,
             (Value::String(_), _) | (_, Value::String(_)) => false,
 
-            (Value::Image(a), Value::Image(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Image(a), Value::Image(b)) => Rc::ptr_eq(a, b),
             (Value::Image(_), _) | (_, Value::Image(_)) => false,
 
             (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),
@@ -1287,7 +1321,7 @@ mod ops {
             (Value::Entity(a), Value::Entity(b)) => a.as_ptr() == b.as_ptr(),
             (Value::Entity(_), _) | (_, Value::Entity(_)) => false,
 
-            (Value::Native(a), Value::Native(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Native(a), Value::Native(b)) => Rc::ptr_eq(a, b),
         }
     }
     pub(super) fn check_eq<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>) -> bool {
@@ -1301,10 +1335,10 @@ mod ops {
             (Value::Number(a), Value::Number(b)) => a == b,
             (Value::Number(_), _) | (_, Value::Number(_)) => false,
 
-            (Value::String(a), Value::String(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::String(a), Value::String(b)) => Rc::ptr_eq(a, b),
             (Value::String(_), _) | (_, Value::String(_)) => false,
 
-            (Value::Image(a), Value::Image(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Image(a), Value::Image(b)) => Rc::ptr_eq(a, b),
             (Value::Image(_), _) | (_, Value::Image(_)) => false,
 
             (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),
@@ -1316,7 +1350,7 @@ mod ops {
             (Value::Entity(a), Value::Entity(b)) => a.as_ptr() == b.as_ptr(),
             (Value::Entity(_), _) | (_, Value::Entity(_)) => false,
 
-            (Value::Native(a), Value::Native(b)) => a.as_ptr() == b.as_ptr(),
+            (Value::Native(a), Value::Native(b)) => Rc::ptr_eq(a, b),
         }
     }
 }

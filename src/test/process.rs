@@ -320,7 +320,7 @@ fn test_proc_all_arithmetic() {
             Value::List(GcCell::allocate(mc, [1.0, 3.3201169227365472, 0.0001363889264820114, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
             Value::List(GcCell::allocate(mc, [1.0, 15.848931924611133, 1.2589254117941663e-9, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
             Value::List(GcCell::allocate(mc, [1.0, 2.2973967099940698, 0.002093307544016197, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [Value::String(Gc::allocate(mc, "0".into())), Value::String(Gc::allocate(mc, "1.2".into())), Value::String(Gc::allocate(mc, "-8.9".into())), Number::new(inf).unwrap().into(), Number::new(-inf).unwrap().into()].into_iter().collect())),
+            Value::List(GcCell::allocate(mc, [Value::String(Rc::new("0".into())), Value::String(Rc::new("1.2".into())), Value::String(Rc::new("-8.9".into())), Number::new(inf).unwrap().into(), Number::new(-inf).unwrap().into()].into_iter().collect())),
         ].into_iter().collect()));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-7, "short circuit test");
     });
@@ -397,7 +397,7 @@ fn test_proc_warp_yields() {
         run_till_term(&mut env, |mc, env, res| {
             let (res, yields) = res.unwrap();
             assert_values_eq(res.as_ref().unwrap(), &Value::from_json(mc, json!("x")).unwrap(), 1e-20, &format!("yield test (mode {mode}) res"));
-            let counter = env.glob.read().globals.lookup("counter").unwrap().get();
+            let counter = env.glob.read().globals.lookup("counter").unwrap().get().clone();
             assert_values_eq(&counter, &Number::new(expected_counter as f64).unwrap().into(), 1e-20, &format!("yield test (mode {mode}) value"));
             if yields != expected_yields { panic!("yield test (mode {}) yields - got {} expected {}", mode, yields, expected_yields) }
         });

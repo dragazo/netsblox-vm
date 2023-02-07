@@ -67,7 +67,7 @@ fn test_proj_broadcast() {
         let global_context = proj.proj.read().get_global_context();
         let global_context = global_context.read();
 
-        assert_values_eq(&global_context.globals.lookup("counter").unwrap().get(), &Number::new(320.0).unwrap().into(), 1e-20, "counter");
+        assert_values_eq(&global_context.globals.lookup("counter").unwrap().get().clone(), &Number::new(320.0).unwrap().into(), 1e-20, "counter");
         let expected = Value::from_json(mc, json!([
             "before 1",
             1, 3, 6, 7, 9, 12, 13, 15, 18, 19, 21, 24, 25, 27, 30, 31, 33, 36, 37, 39, 42, 43, 45, 48, 49, 51, 54, 55, 57, 60,
@@ -77,7 +77,7 @@ fn test_proj_broadcast() {
             "after 2",
             170, 171, 173, 176, 186, 187, 189, 192, 202, 203, 205, 208, 218, 219, 221, 224, 234, 235, 237, 240, 250, 251, 253, 256, 266, 267, 269, 272, 282, 283, 285, 288, 298, 299, 301, 304, 314, 315, 317, 320,
         ])).unwrap();
-        assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-20, "res")
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 1e-20, "res");
     });
 }
 
@@ -90,12 +90,12 @@ fn test_proj_loop_yields() {
         let global_context = proj.proj.read().get_global_context();
         let global_context = global_context.read();
 
-        assert_values_eq(&global_context.globals.lookup("counter").unwrap().get(), &Number::new(150.0).unwrap().into(), 1e-20, "counter");
+        assert_values_eq(&global_context.globals.lookup("counter").unwrap().get().clone(), &Number::new(150.0).unwrap().into(), 1e-20, "counter");
         let expected = Value::from_json(mc, json!([
             1, 3, 6, 10, 15, 16, 18, 21, 25, 30, 31, 33, 36, 40, 45, 46, 48, 51, 55, 60, 61, 63, 66, 70, 75,
             76, 78, 81, 85, 90, 91, 93, 96, 100, 105, 106, 108, 111, 115, 120, 121, 123, 126, 130, 135, 136, 138, 141, 145, 150
         ])).unwrap();
-        assert_values_eq(&global_context.globals.lookup("history").unwrap().get(), &expected, 1e-20, "history")
+        assert_values_eq(&global_context.globals.lookup("history").unwrap().get().clone(), &expected, 1e-20, "history");
     });
 }
 
