@@ -21,7 +21,6 @@ use std::sync::atomic::{AtomicBool, Ordering as MemoryOrder};
 use std::{thread, mem, fmt, iter};
 
 use clap::Parser;
-use serde::Serialize;
 use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
 use actix_cors::Cors;
 
@@ -367,24 +366,6 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
 
     let (proj_sender, proj_receiver) = channel();
 
-    #[derive(Serialize)]
-    struct VarEntry {
-        name: String,
-        value: String,
-    }
-    #[derive(Serialize)]
-    struct TraceEntry {
-        location: String,
-        locals: Vec<VarEntry>,
-    }
-    #[derive(Serialize)]
-    struct Error {
-        cause: String,
-        entity: String,
-        globals: Vec<VarEntry>,
-        fields: Vec<VarEntry>,
-        trace: Vec<TraceEntry>,
-    }
     struct State {
         extension: String,
         running: AtomicBool,
@@ -439,18 +420,11 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
 
         #[post("/pull")]
         async fn pull_status(state: web::Data<State>) -> impl Responder {
-            let mut output = state.output.lock().unwrap();
-            let mut errors = state.errors.lock().unwrap();
+            let running = state.running.load(MemoryOrder::Relaxed);
+            let output = mem::take(&mut *state.output.lock().unwrap());
+            let errors = mem::take(&mut *state.errors.lock().unwrap());
 
-            let res = HttpResponse::Ok().content_type("application/json").body(json!({
-                "running": state.running.load(MemoryOrder::Relaxed),
-                "output": output.as_str(),
-                "errors": errors.as_slice(),
-            }).to_string());
-
-            errors.clear();
-            output.clear();
-            res
+            HttpResponse::Ok().content_type("application/json").body(serde_json::to_string(&Status { running, output, errors }).unwrap())
         }
 
         #[post("/project")]
