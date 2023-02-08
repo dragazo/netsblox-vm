@@ -23,11 +23,13 @@
         const omittedElements = {omitted_elements:?};
         if (omittedElements.length === 0) return xml;
 
-        xml = $(xml);
+        xml = new DOMParser().parseFromString(xml, 'text/xml');
         for (const elem of omittedElements) {{
-            xml.find(elem).remove();
+            for (const match of xml.getElementsByTagName(elem)) {{
+                match.remove();
+            }}
         }}
-        return $('<x></x>').append(xml).html();
+        return new XMLSerializer().serializeToString(xml);
     }}
 
     function TerminalMorph(ext) {{
@@ -91,20 +93,22 @@
 
         this.leftTools.add(this.setProjectButton = new PushButtonMorph(null, () => request({{
             method: 'POST',
-            url: `${{SERVER}}/set-project`,
+            url: `${{SERVER}}/project`,
             onErr: alert,
             body: cleanXML(this.ext.ide.getSerializedRole()),
         }}), 'Upload'));
 
         this.leftTools.add(makeSpacer(10));
 
-        this.leftTools.add(this.clearButton = new PushButtonMorph(null, () => this.setText(''), 'Clear'));
+        this.leftTools.add(this.getProjectButton = new PushButtonMorph(null, () => {{
+            window.open(`${{SERVER}}/project`, '_blank');
+        }}, 'Download'));
 
         // ----------------------------------------------------------------------------------------
 
         this.centerTools.add(this.startButton = new PushButtonMorph(null, () => request({{
             method: 'POST',
-            url: `${{SERVER}}/send-input`,
+            url: `${{SERVER}}/input`,
             onErr: alert,
             body: 'start',
         }}), new SymbolMorph('flag', 12)));
@@ -131,7 +135,7 @@
 
         this.centerTools.add(this.stopButton = new PushButtonMorph(null, () => request({{
             method: 'POST',
-            url: `${{SERVER}}/send-input`,
+            url: `${{SERVER}}/input`,
             onErr: alert,
             body: 'stop',
         }}), new SymbolMorph('octagon', 12)));
@@ -142,6 +146,10 @@
         this.stopButton.label.shadowColor = null;
 
         // ----------------------------------------------------------------------------------------
+
+        this.rightTools.add(this.clearButton = new PushButtonMorph(null, () => this.setText(''), 'Clear'));
+
+        this.rightTools.add(makeSpacer(10));
 
         this.rightTools.add(this.closeButton = new PushButtonMorph(null, () => {{
             this.stopUpdates();
@@ -374,16 +382,6 @@
                 )),
             ];
         }}
-    }}
-
-    const libs = [
-        'https://code.jquery.com/jquery-3.6.3.min.js',
-    ];
-    for (const lib of libs) {{
-        const script = document.createElement('script');
-        script.src = lib;
-        script.async = false;
-        document.body.appendChild(script);
     }}
 
     NetsBloxExtensions.register(NativeExtension);

@@ -388,6 +388,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
     struct State {
         extension: String,
         running: AtomicBool,
+        current_proj: Mutex<String>,
         proj_sender: Mutex<Sender<ServerCommand>>,
         output: Mutex<String>,
         errors: Mutex<Vec<Error>>,
@@ -395,6 +396,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
     let state = web::Data::new(State {
         extension,
         running: AtomicBool::new(true),
+        current_proj: Mutex::new(EMPTY_PROJECT.into()),
         proj_sender: Mutex::new(proj_sender),
         output: Mutex::new(String::with_capacity(1024)),
         errors: Mutex::new(Vec::with_capacity(8)),
@@ -451,18 +453,24 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
             res
         }
 
-        #[post("/set-project")]
+        #[post("/project")]
         async fn set_project(state: web::Data<State>, body: web::Bytes) -> impl Responder {
             match String::from_utf8(body.to_vec()) {
                 Ok(content) => {
                     state.proj_sender.lock().unwrap().send(ServerCommand::SetProject(content)).unwrap();
                     HttpResponse::Ok().content_type("text/plain").body("loaded project")
                 }
-                Err(_) => HttpResponse::BadRequest().content_type("text/plain").body("project was not valid utf8")
+                Err(_) => HttpResponse::BadRequest().content_type("text/plain").body("project was not valid utf8"),
             }
         }
 
-        #[post("/send-input")]
+        #[get("/project")]
+        async fn get_project(state: web::Data<State>) -> impl Responder {
+            let proj = state.current_proj.lock().unwrap().clone();
+            HttpResponse::Ok().content_type("text/xml").append_header(("Content-Disposition", "attachment; filename=\"project.xml\"")).body(proj)
+        }
+
+        #[post("/input")]
         async fn send_input(state: web::Data<State>, input: web::Bytes) -> impl Responder {
             let input = match String::from_utf8(input.to_vec()) {
                 Ok(input) => match input.as_str() {
@@ -490,6 +498,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
                 .service(get_extension)
                 .service(pull_status)
                 .service(set_project)
+                .service(get_project)
                 .service(send_input)
                 .service(toggle_paused)
         })
@@ -510,7 +519,10 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
                         Ok((proj_name, role)) => {
                             tee_println!(weak_state.upgrade() => "\n>>> loaded project '{proj_name}'\n");
                             match get_env(&role, system.clone()) {
-                                Ok(x) => env = x,
+                                Ok(x) => {
+                                    env = x;
+                                    *weak_state.upgrade().unwrap().current_proj.lock().unwrap() = content;
+                                }
                                 Err(e) => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> keeping previous project...\n"),
                             }
                         }
