@@ -19,11 +19,11 @@ new_key! {
 pub struct IdleAction {
     count: usize,
     thresh: usize,
-    action: Box<dyn Fn()>,
+    action: Box<dyn FnMut()>,
 }
 impl IdleAction {
     /// Creates a new [`IdleAction`] that triggers automatically after `max_yields` idle steps.
-    pub fn new(thresh: usize, action: Box<dyn Fn()>) -> Self {
+    pub fn new(thresh: usize, action: Box<dyn FnMut()>) -> Self {
         Self { count: 0, thresh, action }
     }
     /// Consumes a step result and advances the state machine.
@@ -42,7 +42,7 @@ impl IdleAction {
     /// Explicitly triggers the idle action and reset the state machine.
     pub fn trigger(&mut self) {
         self.count = 0;
-        self.action.as_ref()();
+        self.action.as_mut()();
     }
 }
 
