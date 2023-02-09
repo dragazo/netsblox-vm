@@ -878,7 +878,7 @@ impl BinaryWrite for Instruction<'_> {
 /// a wrapper for which is included in the standard `netsblox-vm` [`cli`](crate::cli).
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ByteCode {
-    tag: MustBeU128<FINGERPRINT>,
+    #[allow(dead_code)] tag: MustBeU128<FINGERPRINT>,
 
     pub(crate) code: Box<[u8]>,
     pub(crate) data: Box<[u8]>,
@@ -903,7 +903,7 @@ pub(crate) struct EntityInitInfo {
 }
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct InitInfo {
-    tag: MustBeU128<FINGERPRINT>,
+    #[allow(dead_code)] tag: MustBeU128<FINGERPRINT>,
 
     pub(crate) proj_name: String,
     pub(crate) ref_values: Vec<RefValue>,

@@ -18,7 +18,7 @@ use std::io::{self, Read, Write as IoWrite, stdout};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::sync::atomic::{AtomicBool, Ordering as MemoryOrder};
-use std::{thread, mem, fmt, iter};
+use std::{thread, mem, fmt};
 
 use clap::Parser;
 use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
@@ -36,6 +36,7 @@ use crate::json::*;
 use crate::std_system::*;
 use crate::bytecode::*;
 use crate::runtime::*;
+use crate::process::*;
 use crate::project::*;
 use crate::template::*;
 
@@ -348,7 +349,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
         current_proj: Mutex<String>,
         proj_sender: Mutex<Sender<ServerCommand>>,
         output: Mutex<String>,
-        errors: Mutex<Vec<Error>>,
+        errors: Mutex<Vec<ErrorSummary>>,
     }
     let state = web::Data::new(State {
         extension,
@@ -502,31 +503,11 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
                 let res = proj.step(mc);
                 if let ProjectStep::Error { error, proc } = &res {
                     if let Some(state) = weak_state.upgrade() {
-                        let raw_entity = proc.get_entity();
-                        let entity = raw_entity.read().name.clone();
-                        let cause = format!("{:?}", error.cause);
-                        tee_println!(Some(&state) => "\n>>> runtime error in entity {entity:?}: {cause:?}\n>>> see red error comments...\n");
+                        let summary = ErrorSummary::extract(&error, &proc, &env.locs);
 
-                        fn summarize_symbols<C: CustomTypes>(symbols: &SymbolTable<'_, StdSystem<C>>) -> Vec<VarEntry> {
-                            let mut res = Vec::with_capacity(symbols.len());
-                            for (k, v) in symbols {
-                                res.push(VarEntry { name: k.clone(), value: format!("{:?}", &*v.get()) });
-                            }
-                            res
-                        }
-                        let globals = summarize_symbols(&proc.get_global_context().read().globals);
-                        let fields = summarize_symbols(&raw_entity.read().fields);
+                        tee_println!(Some(&state) => "\n>>> runtime error in entity {:?}: {:?}\n>>> see red error comments...\n", summary.entity, summary.cause);
 
-                        let call_stack = proc.get_call_stack();
-                        let mut trace = Vec::with_capacity(call_stack.len());
-                        for (pos, locals) in iter::zip(call_stack[1..].iter().map(|x| x.called_from).chain(iter::once(error.pos)), call_stack.iter().map(|x| &x.locals)) {
-                            if let Some(loc) = env.locs.lookup(pos) {
-                                trace.push(TraceEntry { location: loc.clone(), locals: summarize_symbols(locals) });
-                            }
-                        }
-                        debug_assert_eq!(trace.len(), call_stack.len());
-
-                        state.errors.lock().unwrap().push(Error { entity, cause, globals, fields, trace });
+                        state.errors.lock().unwrap().push(summary);
                     }
                 }
                 idle_sleeper.consume(&res);

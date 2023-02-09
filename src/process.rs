@@ -12,6 +12,9 @@ use std::iter::{self, Cycle};
 use std::cmp::Ordering;
 use std::rc::Rc;
 
+#[cfg(feature = "serde")]
+use serde::Serialize;
+
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
@@ -29,6 +32,56 @@ fn empty_string() -> Rc<String> {
     #[cfg(not(feature = "std"))]
     {
         Rc::new(String::new())
+    }
+}
+
+/// A variable entry in the structure expected by the standard js extension.
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct VarEntry {
+    pub name: String,
+    pub value: String,
+}
+/// A trace entry in the structure expected by the standard js extension.
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct TraceEntry {
+    pub location: String,
+    pub locals: Vec<VarEntry>,
+}
+/// A error message in the structure expected by the standard js extension.
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct ErrorSummary {
+    pub cause: String,
+    pub entity: String,
+    pub globals: Vec<VarEntry>,
+    pub fields: Vec<VarEntry>,
+    pub trace: Vec<TraceEntry>,
+}
+impl ErrorSummary {
+    pub fn extract<S: System>(error: &ExecError<S>, process: &Process<S>, locations: &Locations<String>) -> Self {
+        let raw_entity = process.get_entity();
+        let entity = raw_entity.read().name.clone();
+        let cause = format!("{:?}", error.cause);
+
+        fn summarize_symbols<S: System>(symbols: &SymbolTable<'_, S>) -> Vec<VarEntry> {
+            let mut res = Vec::with_capacity(symbols.len());
+            for (k, v) in symbols {
+                res.push(VarEntry { name: k.clone(), value: format!("{:?}", &*v.get()) });
+            }
+            res
+        }
+        let globals = summarize_symbols(&process.get_global_context().read().globals);
+        let fields = summarize_symbols(&raw_entity.read().fields);
+
+        let call_stack = process.get_call_stack();
+        let mut trace = Vec::with_capacity(call_stack.len());
+        for (pos, locals) in iter::zip(call_stack[1..].iter().map(|x| x.called_from).chain(iter::once(error.pos)), call_stack.iter().map(|x| &x.locals)) {
+            if let Some(loc) = locations.lookup(pos) {
+                trace.push(TraceEntry { location: loc.clone(), locals: summarize_symbols(locals) });
+            }
+        }
+        debug_assert_eq!(trace.len(), call_stack.len());
+
+        Self { entity, cause, globals, fields, trace }
     }
 }
 

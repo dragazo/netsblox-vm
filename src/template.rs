@@ -6,33 +6,14 @@ use std::fmt::Write;
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
-/// A variable entry in the structure expected by the standard js extension.
-#[cfg_attr(feature = "serde", derive(Serialize))]
-pub struct VarEntry {
-    pub name: String,
-    pub value: String,
-}
-/// A trace entry in the structure expected by the standard js extension.
-#[cfg_attr(feature = "serde", derive(Serialize))]
-pub struct TraceEntry {
-    pub location: String,
-    pub locals: Vec<VarEntry>,
-}
-/// A error message in the structure expected by the standard js extension.
-#[cfg_attr(feature = "serde", derive(Serialize))]
-pub struct Error {
-    pub cause: String,
-    pub entity: String,
-    pub globals: Vec<VarEntry>,
-    pub fields: Vec<VarEntry>,
-    pub trace: Vec<TraceEntry>,
-}
+use crate::process::ErrorSummary;
+
 /// A status update in the structure expected by the standard js extension.
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct Status {
     pub running: bool,
     pub output: String,
-    pub errors: Vec<Error>,
+    pub errors: Vec<ErrorSummary>,
 }
 
 /// An empty project.
