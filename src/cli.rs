@@ -161,7 +161,7 @@ fn open_project<'a>(content: &str, role: Option<&'a str>) -> Result<(String, ast
     Ok((parsed.name, role))
 }
 
-fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C>) {
+fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::Role, overrides: Config<StdSystem<C>>) {
     terminal::enable_raw_mode().unwrap();
     execute!(stdout(), cursor::Hide).unwrap();
     let _tty_mode_guard = AtExit::new(|| {
@@ -288,7 +288,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
 
     execute!(stdout(), terminal::Clear(ClearType::CurrentLine)).unwrap();
 }
-fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C>) {
+fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::Role, overrides: Config<StdSystem<C>>) {
     let config = overrides.fallback(&Config {
         request: None,
         command: Some(Rc::new(move |_, _, key, command, entity| match command {
@@ -327,7 +327,7 @@ fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &a
         });
     }
 }
-fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overrides: Config<C>, syscalls: &[SyscallMenu<'_>]) {
+fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overrides: Config<StdSystem<C>>, syscalls: &[SyscallMenu<'_>]) {
     println!(r#"connect from {nb_server}/?extensions=["http://{addr}:{port}/extension.js"]"#);
 
     let extension = ExtensionArgs {
@@ -517,7 +517,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
 }
 
 /// Runs a CLI client using the given [`Mode`] configuration.
-pub fn run<C: CustomTypes>(mode: Mode, config: Config<C>, syscalls: &[SyscallMenu]) {
+pub fn run<C: CustomTypes>(mode: Mode, config: Config<StdSystem<C>>, syscalls: &[SyscallMenu]) {
     match mode {
         Mode::Run { src, role, server } => {
             let content = read_file(&src).unwrap_or_else(|_| crash!(1: "failed to read file '{src}'"));

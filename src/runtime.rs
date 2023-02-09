@@ -238,12 +238,12 @@ impl<'gc, S: System> Value<'gc, S> {
         match self {
             Value::Bool(x) => Identity(x as *const bool as *const (), PhantomData),
             Value::Number(x) => Identity(x as *const Number as *const (), PhantomData),
-            Value::String(x) => Identity(Rc::as_ptr(x) as *const String as *const (), PhantomData),
-            Value::Image(x) => Identity(Rc::as_ptr(x) as *const Vec<u8> as *const (), PhantomData),
-            Value::List(x) => Identity(x.as_ptr() as *const Vec<Value<'gc, S>> as *const (), PhantomData),
-            Value::Closure(x) => Identity(x.as_ptr() as *const Closure<'gc, S> as *const (), PhantomData),
-            Value::Entity(x) => Identity(x.as_ptr() as *const Entity<'gc, S> as *const (), PhantomData),
-            Value::Native(x) => Identity(Rc::as_ptr(x) as *const StaticCollect<S::NativeValue> as *const (), PhantomData),
+            Value::String(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
+            Value::Image(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
+            Value::List(x) => Identity(x.as_ptr() as *const (), PhantomData),
+            Value::Closure(x) => Identity(x.as_ptr() as *const (), PhantomData),
+            Value::Entity(x) => Identity(x.as_ptr() as *const (), PhantomData),
+            Value::Native(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
         }
     }
     /// Attempts to interpret this value as a bool.
@@ -514,11 +514,11 @@ pub enum ErrorScheme {
     /// as well as being stored in a corresponding last-error process-local variable.
     Soft,
     /// Emit errors as hard errors. This treats certain classes of typically soft errors as hard errors that
-    /// must be caught or else terminate the [`Process`] (not the entire VM).
+    /// must be caught or else terminate the [`Process`](crate::process::Process) (not the entire VM).
     Hard,
 }
 
-/// Settings to use for a [`Process`].
+/// Settings to use for a [`Process`](crate::process::Process).
 #[derive(Clone, Copy)]
 pub struct Settings {
     /// The maximum depth of the call stack (default `1024`).
@@ -718,6 +718,60 @@ impl<'gc, S: System> Command<'gc, S> {
             Command::Print { .. } => Feature::Print,
             Command::Forward { .. } => Feature::Forward,
             Command::Turn { .. } => Feature::Turn,
+        }
+    }
+}
+
+/// The status of a potentially-handled request.
+pub enum RequestStatus<'gc, S: System> {
+    /// The request was handled by the overriding client.
+    Handled,
+    /// The request was not handled by the overriding client,
+    /// and the default system implementation should be used instead.
+    UseDefault { key: S::RequestKey, request: Request<'gc, S> },
+}
+/// The status of a potentially-handled command.
+pub enum CommandStatus<'gc, S: System> {
+    /// The command was handled by the overriding client.
+    Handled,
+    /// The command was not handled by the overriding client,
+    /// and the default system implementation should be used instead.
+    UseDefault { key: S::CommandKey, command: Command<'gc, S> },
+}
+
+/// A collection of implementation options that could be used for implementing a customizable [`System`].
+#[derive(Educe)]
+#[educe(Default, Clone)]
+pub struct Config<S: System> {
+    /// A function used to perform asynchronous requests that yield a value back to the runtime.
+    pub request: Option<Rc<dyn for<'gc> Fn(&S, MutationContext<'gc, '_>, S::RequestKey, Request<'gc, S>, &Entity<'gc, S>) -> RequestStatus<'gc, S>>>,
+    /// A function used to perform asynchronous tasks whose completion is awaited by the runtime.
+    pub command: Option<Rc<dyn for<'gc> Fn(&S, MutationContext<'gc, '_>, S::CommandKey, Command<'gc, S>, &Entity<'gc, S>) -> CommandStatus<'gc, S>>>,
+}
+impl<S: System> Config<S> {
+    /// Composes two [`Config`] objects, prioritizing the implementation of `self`.
+    pub fn fallback(&self, other: &Self) -> Self {
+        Self {
+            request: match (self.request.clone(), other.request.clone()) {
+                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, request, entity| {
+                    match a(system, mc, key, request, entity) {
+                        RequestStatus::Handled => RequestStatus::Handled,
+                        RequestStatus::UseDefault { key, request } => b(system, mc, key, request, entity),
+                    }
+                })),
+                (Some(a), None) | (None, Some(a)) => Some(a),
+                (None, None) => None,
+            },
+            command: match (self.command.clone(), other.command.clone()) {
+                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, command, entity| {
+                    match a(system, mc, key, command, entity) {
+                        CommandStatus::Handled => CommandStatus::Handled,
+                        CommandStatus::UseDefault { key, command } => b(system, mc, key, command, entity),
+                    }
+                })),
+                (Some(a), None) | (None, Some(a)) => Some(a),
+                (None, None) => None,
+            },
         }
     }
 }

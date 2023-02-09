@@ -9,7 +9,6 @@
 
 use std::prelude::v1::*;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::fmt;
 
 extern crate std as real_std;
@@ -86,23 +85,6 @@ struct ReplyEntry {
     value: Option<Json>,
 }
 
-/// The status of a potentially-handled request.
-pub enum RequestStatus<'gc, C: CustomTypes> {
-    /// The request was handled by the overriding client.
-    Handled,
-    /// The request was not handled by the overriding client,
-    /// and the default system implementation should be used instead.
-    UseDefault { key: RequestKey<C>, request: Request<'gc, StdSystem<C>> },
-}
-/// The status of a potentially-handled command.
-pub enum CommandStatus<'gc, C: CustomTypes> {
-    /// The command was handled by the overriding client.
-    Handled,
-    /// The command was not handled by the overriding client,
-    /// and the default system implementation should be used instead.
-    UseDefault { key: CommandKey, command: Command<'gc, StdSystem<C>> },
-}
-
 enum AsyncResult<T> {
     Pending,
     Completed(T),
@@ -142,7 +124,7 @@ impl<C: CustomTypes> RequestKey<C> {
     /// A value of [`Ok`] denotes a successful request, whose value will be returned to the system
     /// after conversion under [`CustomTypes::from_intermediate`].
     /// A value of [`Err`] denotes a failed request, which will be returned as an error to the runtime,
-    /// subject to the caller's [`ErrorScheme`](crate::process::ErrorScheme) setting.
+    /// subject to the caller's [`ErrorScheme`](crate::runtime::ErrorScheme) setting.
     pub fn complete(self, result: Result<C::Intermediate, String>) { self.0.complete(result) }
     pub(crate) fn poll(&self) -> AsyncPoll<Result<C::Intermediate, String>> { self.0.poll() }
 }
@@ -153,7 +135,7 @@ impl CommandKey {
     /// Completes the command.
     /// A value of [`Ok`] denotes a successful command.
     /// A value of [`Err`] denotes a failed command, which will be returned as an error to the runtime,
-    /// subject to the caller's [`ErrorScheme`](crate::process::ErrorScheme) setting.
+    /// subject to the caller's [`ErrorScheme`](crate::runtime::ErrorScheme) setting.
     pub fn complete(self, result: Result<(), String>) { self.0.complete(result) }
     pub(crate) fn poll(&self) -> AsyncPoll<Result<(), String>> { self.0.poll() }
 }
@@ -183,43 +165,6 @@ pub trait CustomTypes: 'static + Sized {
 
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
     fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>>;
-}
-
-/// A collection of implementation options for [`StdSystem`].
-#[derive(Educe)]
-#[educe(Default, Clone)]
-pub struct Config<C: CustomTypes> {
-    /// A function used to perform asynchronous requests that yield a value back to the runtime.
-    pub request: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, RequestKey<C>, Request<'gc, StdSystem<C>>, &Entity<'gc, StdSystem<C>>) -> RequestStatus<'gc, C>>>,
-    /// A function used to perform asynchronous tasks whose completion is awaited by the runtime.
-    pub command: Option<Rc<dyn for<'gc> Fn(&StdSystem<C>, MutationContext<'gc, '_>, CommandKey, Command<'gc, StdSystem<C>>, &Entity<'gc, StdSystem<C>>) -> CommandStatus<'gc, C>>>,
-}
-impl<C: CustomTypes> Config<C> {
-    /// Composes two [`Config`] objects, prioritizing the implementation of `self`.
-    pub fn fallback(&self, other: &Self) -> Self {
-        Self {
-            request: match (self.request.clone(), other.request.clone()) {
-                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, request, entity| {
-                    match a(system, mc, key, request, entity) {
-                        RequestStatus::Handled => RequestStatus::Handled,
-                        RequestStatus::UseDefault { key, request } => b(system, mc, key, request, entity),
-                    }
-                })),
-                (Some(a), None) | (None, Some(a)) => Some(a),
-                (None, None) => None,
-            },
-            command: match (self.command.clone(), other.command.clone()) {
-                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, command, entity| {
-                    match a(system, mc, key, command, entity) {
-                        CommandStatus::Handled => CommandStatus::Handled,
-                        CommandStatus::UseDefault { key, command } => b(system, mc, key, command, entity),
-                    }
-                })),
-                (Some(a), None) | (None, Some(a)) => Some(a),
-                (None, None) => None,
-            },
-        }
-    }
 }
 
 async fn call_rpc_async<C: CustomTypes>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<C::Intermediate, String> {
@@ -258,7 +203,7 @@ async fn call_rpc_async<C: CustomTypes>(context: &Context, client: &reqwest::Cli
 
 /// A type implementing the [`System`] trait which supports all features.
 pub struct StdSystem<C: CustomTypes> {
-    config: Config<C>,
+    config: Config<Self>,
     context: Arc<Context>,
     client: Arc<reqwest::Client>,
     start_time: Instant,
@@ -273,7 +218,7 @@ pub struct StdSystem<C: CustomTypes> {
 impl<C: CustomTypes> StdSystem<C> {
     /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://editor.netsblox.org`).
     #[tokio::main(flavor = "current_thread")]
-    pub async fn new(base_url: String, project_name: Option<&str>, config: Config<C>) -> Self {
+    pub async fn new(base_url: String, project_name: Option<&str>, config: Config<Self>) -> Self {
         let mut context = Context {
             base_url,
             client_id: format!("vm-{}", names::Generator::default().next().unwrap()),

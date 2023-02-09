@@ -562,7 +562,7 @@ fn test_proc_literal_types() {
 fn test_proc_say() {
     let output = Rc::new(RefCell::new(String::new()));
     let output_cpy = output.clone();
-    let config = Config {
+    let config = Config::<StdSystem<_>> {
         request: None,
         command: Some(Rc::new(move |_, _, key, command, _| match command {
             Command::Print { value } => {
@@ -589,7 +589,7 @@ fn test_proc_say() {
 fn test_proc_syscall() {
     let buffer = Rc::new(RefCell::new(String::new()));
     let buffer_cpy = buffer.clone();
-    let config = Config {
+    let config = Config::<StdSystem<_>> {
         request: Some(Rc::new(move |_, _, key, request, _| match &request {
             Request::Syscall { name, args } => match name.as_str() {
                 "bar" => match args.is_empty() {
@@ -1364,7 +1364,7 @@ fn test_proc_basic_motion() {
     }
 
     let sequence = Rc::new(RefCell::new(Vec::with_capacity(16)));
-    let config = Config {
+    let config = Config::<StdSystem<_>> {
         command: {
             let sequence = sequence.clone();
             Some(Rc::new(move |_, _, key, command, _| {

@@ -6,8 +6,8 @@ use std::fmt;
 
 use netsblox_vm::cli::{run, Mode};
 use netsblox_vm::template::SyscallMenu;
-use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, System, Request};
-use netsblox_vm::std_system::{Config, CustomTypes, StdSystem, RequestStatus, IntermediateType};
+use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, System, Request, RequestStatus, Config};
+use netsblox_vm::std_system::{CustomTypes, StdSystem, IntermediateType};
 use netsblox_vm::gc::MutationContext;
 use netsblox_vm::json::{Json, json};
 use clap::Parser;
@@ -78,7 +78,7 @@ impl CustomTypes for C {
 }
 
 fn main() {
-    let config = Config {
+    let config = Config::<StdSystem<_>> {
         request: Some(Rc::new(move |_, _, key, request, _| match &request {
             Request::Syscall { name, args } => match name.as_str() {
                 "open" => {
