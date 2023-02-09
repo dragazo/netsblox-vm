@@ -13,6 +13,39 @@ new_key! {
     struct ProcessKey;
 }
 
+/// A state machine that performs an action during idle periods.
+/// 
+/// This could be used to invoke [`std::thread::sleep`] during idle periods to save CPU time.
+pub struct IdleAction {
+    count: usize,
+    thresh: usize,
+    action: Box<dyn Fn()>,
+}
+impl IdleAction {
+    /// Creates a new [`IdleAction`] that triggers automatically after `max_yields` idle steps.
+    pub fn new(thresh: usize, action: Box<dyn Fn()>) -> Self {
+        Self { count: 0, thresh, action }
+    }
+    /// Consumes a step result and advances the state machine.
+    /// If the step resulting in an idle action, this may trigger the idle action to fire and reset the state machine.
+    pub fn consume<S: System>(&mut self, res: &ProjectStep<'_, S>) {
+        match res {
+            ProjectStep::Idle | ProjectStep::Yield => {
+                self.count += 1;
+                if self.count >= self.thresh {
+                    self.trigger();
+                }
+            }
+            ProjectStep::Normal | ProjectStep::ProcessTerminated { .. } | ProjectStep::Error { .. } => self.count = 0,
+        }
+    }
+    /// Explicitly triggers the idle action and reset the state machine.
+    pub fn trigger(&mut self) {
+        self.count = 0;
+        self.action.as_ref()();
+    }
+}
+
 /// Simulates input from the user.
 #[derive(Debug)]
 pub enum Input {

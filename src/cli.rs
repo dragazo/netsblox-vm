@@ -45,30 +45,6 @@ const MAX_REQUEST_SIZE_BYTES: usize = 1024 * 1024 * 1024;
 const YIELDS_BEFORE_IDLE_SLEEP: usize = 256;
 const IDLE_SLEEP_TIME: Duration = Duration::from_micros(500);
 
-struct IdleSleeper {
-    yield_count: usize,
-}
-impl IdleSleeper {
-    fn new() -> Self {
-        IdleSleeper { yield_count: 0 }
-    }
-    fn consume<S: System>(&mut self, res: &ProjectStep<'_, S>) {
-        match res {
-            ProjectStep::Idle | ProjectStep::Yield => {
-                self.yield_count += 1;
-                if self.yield_count >= YIELDS_BEFORE_IDLE_SLEEP {
-                    self.sleep_now();
-                }
-            }
-            ProjectStep::Normal | ProjectStep::ProcessTerminated { .. } | ProjectStep::Error { .. } => self.yield_count = 0,
-        }
-    }
-    fn sleep_now(&mut self) {
-        self.yield_count = 0;
-        thread::sleep(IDLE_SLEEP_TIME);
-    }
-}
-
 macro_rules! crash {
     ($ret:literal : $($tt:tt)*) => {{
         eprint!($($tt)*);
@@ -233,7 +209,7 @@ fn run_proj_tty<C: CustomTypes>(project_name: &str, server: String, role: &ast::
     });
 
     let system = Rc::new(StdSystem::new(server, Some(project_name), config));
-    let mut idle_sleeper = IdleSleeper::new();
+    let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     print!("public id: {}\r\n", system.get_public_id());
 
     let env = match get_env(role, system) {
@@ -325,7 +301,7 @@ fn run_proj_non_tty<C: CustomTypes>(project_name: &str, server: String, role: &a
     });
 
     let system = Rc::new(StdSystem::new(server, Some(project_name), config));
-    let mut idle_sleeper = IdleSleeper::new();
+    let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     println!(">>> public id: {}\n", system.get_public_id());
 
     let env = match get_env(role, system) {
@@ -408,7 +384,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
         })),
     });
     let system = Rc::new(StdSystem::new(nb_server, Some("native-server"), config));
-    let mut idle_sleeper = IdleSleeper::new();
+    let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     println!("public id: {}", system.get_public_id());
 
     #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
@@ -516,7 +492,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
             }
         }
         if !weak_state.upgrade().map(|state| state.running.load(MemoryOrder::Relaxed)).unwrap_or(true) {
-            idle_sleeper.sleep_now();
+            idle_sleeper.trigger();
             continue;
         }
 
