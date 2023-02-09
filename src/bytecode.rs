@@ -928,7 +928,10 @@ pub struct ScriptInfo<'a> {
 }
 
 /// Location lookup table from bytecode address to original AST location.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Locations {
+    #[allow(dead_code)] tag: MustBeU128<FINGERPRINT>,
+
     prefix: String,
     base_token: usize,
     token_data: Vec<u8>,
@@ -938,6 +941,7 @@ impl Locations {
     fn condense<'a>(orig_locs: BTreeMap<usize, &'a str>) -> Result<Self, CompileError<'a>> {
         if orig_locs.is_empty() {
             return Ok(Self {
+                tag: Default::default(),
                 prefix: String::new(),
                 base_token: 0,
                 token_data: Default::default(),
@@ -977,7 +981,7 @@ impl Locations {
             encode_u64(0, &mut token_data, None); // null terminator
         }
 
-        Ok(Self { prefix, base_token, token_data, locs })
+        Ok(Self { tag: Default::default(), prefix, base_token, token_data, locs })
     }
 
     /// Looks up a bytecode position and returns the most local block location provided by the ast.
