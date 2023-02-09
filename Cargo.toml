@@ -55,6 +55,7 @@ educe = { version = "0.4.20", default-features = false, features = ["Debug", "Cl
 libm = { version = "0.2.6", default-features = false }
 monostate = { version = "0.1.2", default-features = false }
 take_mut = { version = "0.2.2", default-features = false }
+superslice = { version = "1.0", default-features = false }
 
 # std deps
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"], optional = true }

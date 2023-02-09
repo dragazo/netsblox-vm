@@ -35,8 +35,10 @@
         "powf",
         "Rootable",
         "Seedable",
+        "superslice",
         "syscall",
         "syscalls",
+        "toks",
         "tungstenite",
         "varargs"
     ]

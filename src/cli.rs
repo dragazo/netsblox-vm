@@ -68,15 +68,15 @@ impl<F: FnOnce()> Drop for AtExit<F> {
 #[collect(no_drop, bound = "")]
 struct Env<'gc, S: System> {
                                proj: GcCell<'gc, Project<'gc, S>>,
-    #[collect(require_static)] locs: Locations<String>,
+    #[collect(require_static)] locs: Locations,
 }
 type EnvArena<S> = Arena<Rootable![Env<'gc, S>]>;
 
 fn get_env<S: System>(role: &ast::Role, system: Rc<S>) -> Result<EnvArena<S>, FromAstError> {
-    let (bytecode, init_info, _, locations) = ByteCode::compile(role).unwrap();
+    let (bytecode, init_info, _, locs) = ByteCode::compile(role).unwrap();
     Ok(EnvArena::new(Default::default(), |mc| {
         let proj = Project::from_init(mc, &init_info, Rc::new(bytecode), Settings::default(), system);
-        Env { proj: GcCell::allocate(mc, proj), locs: locations.transform(ToOwned::to_owned) }
+        Env { proj: GcCell::allocate(mc, proj), locs }
     }))
 }
 

@@ -12,6 +12,7 @@ use std::io::{self, Write};
 #[cfg(feature = "serde")]
 use serde::{Serialize, Deserialize};
 
+use superslice::Ext;
 use monostate::MustBeU128;
 use num_traits::FromPrimitive;
 use bin_pool::BinPool;
@@ -33,6 +34,7 @@ pub enum CompileError<'a> {
     UnsupportedExpr { kind: &'a ast::ExprKind },
     UnsupportedEvent { kind: &'a ast::HatKind },
     BadKeycode { key: &'a str },
+    InvalidLocation { loc: &'a str },
     BadNumber { error: NumberError },
     UndefinedRef,
 }
@@ -430,20 +432,23 @@ fn encode_u64(mut val: u64, out: &mut Vec<u8>, bytes: Option<usize>) {
     debug_assert!(val <= 0x7f);
     out.push(val as u8);
 }
+fn decode_u64(data: &[u8], start: usize) -> (u64, usize) {
+    let (mut val, mut aft) = (0, start);
+    for &b in &data[start..] {
+        aft += 1;
+        if b & 0x80 == 0 { break }
+    }
+    for &b in data[start..aft].iter().rev() {
+        val = (val << 7) | (b & 0x7f) as u64;
+    }
+    (val, aft)
+}
 
 // encodes values as a sequence of bytes of form [1: next][7: bits] in little-endian order.
 // if `relocate_info` is provided to `append`, expanded mode is used, which encodes the value with the maximum of 10 bytes.
 impl BinaryRead<'_> for u64 {
     fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) {
-        let (mut val, mut aft) = (0, start);
-        for &b in &code[start..] {
-            aft += 1;
-            if b & 0x80 == 0 { break }
-        }
-        for &b in code[start..aft].iter().rev() {
-            val = (val << 7) | (b & 0x7f) as u64;
-        }
-        (val, aft)
+        decode_u64(code, start)
     }
 }
 impl BinaryWrite for u64 {
@@ -923,23 +928,80 @@ pub struct ScriptInfo<'a> {
 }
 
 /// Location lookup table from bytecode address to original AST location.
-pub struct Locations<T> {
-    locs: BTreeMap<usize, T>,
+pub struct Locations {
+    prefix: String,
+    base_token: usize,
+    token_data: Vec<u8>,
+    locs: Vec<(usize, usize)>,
 }
-impl<T> Locations<T> {
+impl Locations {
+    fn condense<'a>(orig_locs: BTreeMap<usize, &'a str>) -> Result<Self, CompileError<'a>> {
+        if orig_locs.is_empty() {
+            return Ok(Self {
+                prefix: String::new(),
+                base_token: 0,
+                token_data: Default::default(),
+                locs: Default::default(),
+            });
+        }
+
+        let prefix = {
+            let loc = *orig_locs.values().next().unwrap();
+            match loc.find('_') {
+                Some(x) => loc[..x].to_owned(),
+                None => return Err(CompileError::InvalidLocation { loc }),
+            }
+        };
+
+        let mut token_map = Vec::with_capacity(orig_locs.len());
+        for (&pos, &loc) in orig_locs.iter() {
+            if !loc.starts_with(&prefix) { return Err(CompileError::InvalidLocation { loc }) }
+            debug_assert!(loc[prefix.len()..].starts_with('_'));
+
+            let tokens: Vec<usize> = match loc[prefix.len() + 1..].split('_').map(|x| x.parse()).collect::<Result<_,_>>() {
+                Ok(x) => x,
+                Err(_) => return Err(CompileError::InvalidLocation { loc }),
+            };
+            token_map.push((pos, tokens));
+        }
+
+        let base_token = token_map.iter().flat_map(|x| &x.1).copied().min().unwrap_or(0);
+
+        let mut token_data = Vec::with_capacity(token_map.len());
+        let mut locs = Vec::with_capacity(token_map.len());
+        for (pos, toks) in token_map {
+            locs.push((pos, token_data.len()));
+            for tok in toks {
+                encode_u64((tok - base_token + 1) as u64, &mut token_data, None);
+            }
+            encode_u64(0, &mut token_data, None); // null terminator
+        }
+
+        Ok(Self { prefix, base_token, token_data, locs })
+    }
+
     /// Looks up a bytecode position and returns the most local block location provided by the ast.
     /// If the ast came from a standard NetsBlox XML file, this is the collab id of the looked up bytecode address.
     /// In other cases, this could be some other localization mechanism for error reporting (e.g., line number and column).
     ///
     /// Note that it is possible for blocks to not have location information,
     /// hence returning the most local location that was provided in the ast.
-    pub fn lookup(&self, bytecode_pos: usize) -> Option<&T> {
-        self.locs.range(bytecode_pos + 1..).next().map(|x| x.1)
-    }
-    /// Transforms the location information stored in this instruction lookup table.
-    /// One useful application is `transform(ToOwned::to_owned)`, which creates an owning lookup table.
-    pub fn transform<U, F: FnMut(T) -> U>(self, mut f: F) -> Locations<U> {
-        Locations { locs: self.locs.into_iter().map(|(k, v)| (k, f(v))).collect() }
+    pub fn lookup(&self, bytecode_pos: usize) -> Option<String> {
+        let mut start = {
+            let p = self.locs.lower_bound_by_key(&(bytecode_pos + 1), |x| x.0);
+            debug_assert!(p <= self.locs.len());
+            self.locs.get(p)?.1
+        };
+
+        let mut res = self.prefix.clone();
+        loop {
+            let (v, aft) = decode_u64(&self.token_data, start);
+            if v == 0 { return Some(res) }
+
+            start = aft;
+            res.push('_');
+            res.push_str(&(v as usize - 1 + self.base_token).to_string());
+        }
     }
 }
 
@@ -1605,7 +1667,7 @@ impl<'a> ByteCodeBuilder<'a> {
         self.ins.push(Instruction::Return.into());
         Ok(())
     }
-    fn link(mut self, funcs: Vec<(&'a ast::Function, usize)>, entities: Vec<(&'a ast::Entity, EntityScriptInfo<'a>)>) -> (ByteCode, ScriptInfo<'a>, Locations<&'a str>) {
+    fn link(mut self, funcs: Vec<(&'a ast::Function, usize)>, entities: Vec<(&'a ast::Entity, EntityScriptInfo<'a>)>) -> Result<(ByteCode, ScriptInfo<'a>, Locations), CompileError<'a>> {
         assert!(self.closure_holes.is_empty());
 
         let global_fn_to_info = {
@@ -1643,7 +1705,7 @@ impl<'a> ByteCodeBuilder<'a> {
 
         self.finalize(funcs, entities)
     }
-    fn finalize(self, funcs: Vec<(&'a ast::Function, usize)>, entities: Vec<(&'a ast::Entity, EntityScriptInfo<'a>)>) -> (ByteCode, ScriptInfo<'a>, Locations<&'a str>) {
+    fn finalize(self, funcs: Vec<(&'a ast::Function, usize)>, entities: Vec<(&'a ast::Entity, EntityScriptInfo<'a>)>) -> Result<(ByteCode, ScriptInfo<'a>, Locations), CompileError<'a>> {
         let mut code = Vec::with_capacity(self.ins.len() * 4);
         let mut data = BinPool::new();
         let mut relocate_info = Vec::with_capacity(64);
@@ -1757,9 +1819,9 @@ impl<'a> ByteCodeBuilder<'a> {
             for func in entity.1.funcs.iter_mut() { func.1 = final_ins_pos[func.1]; }
             for script in entity.1.scripts.iter_mut() { script.1 = final_ins_pos[script.1]; }
         }
-        let instructions = Locations { locs: self.ins_locations.iter().map(|(p, v)| (final_ins_pos[*p], *v)).collect() };
+        let locations = Locations::condense(self.ins_locations.iter().map(|(p, v)| (final_ins_pos[*p], *v)).collect())?;
 
-        (ByteCode { tag: Default::default(), code: code.into_boxed_slice(), data: data.into_boxed_slice() }, ScriptInfo { funcs, entities }, instructions)
+        Ok((ByteCode { tag: Default::default(), code: code.into_boxed_slice(), data: data.into_boxed_slice() }, ScriptInfo { funcs, entities }, locations))
     }
 }
 
@@ -1769,7 +1831,7 @@ impl ByteCode {
     /// (needed to execute a specific segment of code), as well as a lookup table of bytecode index
     /// to code location (e.g., the block `collabId` from project xml), which is needed to
     /// provide human-readable error locations.
-    pub fn compile<'a>(role: &'a ast::Role) -> Result<(ByteCode, InitInfo, ScriptInfo<'a>, Locations<&'a str>), CompileError<'a>> {
+    pub fn compile<'a>(role: &'a ast::Role) -> Result<(ByteCode, InitInfo, ScriptInfo<'a>, Locations), CompileError<'a>> {
         let mut code = ByteCodeBuilder::default();
 
         let mut funcs = Vec::with_capacity(role.funcs.len());
@@ -1811,7 +1873,7 @@ impl ByteCode {
             code.ins[hole_pos] = InternalInstruction::Packed(ins_pack);
         }
 
-        let (bytecode, script_info, locations) = code.link(funcs, entities);
+        let (bytecode, script_info, locations) = code.link(funcs, entities)?;
         let init_info = Self::extract_init_info(role, &script_info)?;
 
         Ok((bytecode, init_info, script_info, locations))

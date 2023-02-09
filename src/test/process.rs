@@ -21,7 +21,7 @@ struct Env<'gc> {
 }
 type EnvArena = Arena<Rootable![Env<'gc>]>;
 
-fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>) -> (EnvArena, Locations<String>) {
+fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>) -> (EnvArena, Locations) {
     let parser = ast::Parser::default();
     let ast = parser.parse(xml).unwrap();
     assert_eq!(ast.roles.len(), 1);
@@ -40,7 +40,7 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
         assert!(proc.is_running());
 
         Env { glob, proc: GcCell::allocate(mc, proc) }
-    }), ins_locs.transform(ToOwned::to_owned))
+    }), ins_locs)
 }
 
 fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc, StdSystem<C>>>, usize), ExecError<StdSystem<C>>>) {

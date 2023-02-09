@@ -57,7 +57,7 @@ pub struct ErrorSummary {
     pub trace: Vec<TraceEntry>,
 }
 impl ErrorSummary {
-    pub fn extract<S: System>(error: &ExecError<S>, process: &Process<S>, locations: &Locations<String>) -> Self {
+    pub fn extract<S: System>(error: &ExecError<S>, process: &Process<S>, locations: &Locations) -> Self {
         let raw_entity = process.get_entity();
         let entity = raw_entity.read().name.clone();
         let cause = format!("{:?}", error.cause);
