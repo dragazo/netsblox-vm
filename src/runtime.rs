@@ -1,9 +1,9 @@
 use std::prelude::v1::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::marker::PhantomData;
+use std::{iter, fmt, mem};
 use std::rc::{Rc, Weak};
 use std::borrow::Cow;
-use std::{iter, fmt};
 use std::ops::Deref;
 use std::cell::Ref;
 
@@ -642,11 +642,35 @@ pub enum MaybeAsync<T, K> {
 }
 
 /// The result of a successful call to an async poller operation such as in [`System`].
-pub enum AsyncPoll<T> {
-    /// The async operation completed with the given value.
-    Completed(T),
+pub enum AsyncResult<T> {
     /// The async operation is still pending and has not completed.
     Pending,
+    /// The async operation completed with the given value.
+    Completed(T),
+    /// The async operation was completed and the result was already consumed.
+    Consumed,
+}
+impl<T> AsyncResult<T> {
+    /// Constructs a new async result handle in the [`AsyncResult::Pending`] state.
+    pub fn new() -> Self {
+        Self::Pending
+    }
+    /// Transitions from the [`AsyncResult::Pending`] state to [`AsyncResult::Completed`] with the provided result value.
+    /// If this async result handle has already been completed, [`Err`] is returned with the passed value.
+    pub fn complete(&mut self, value: T) -> Result<(), T> {
+        match self {
+            AsyncResult::Pending => Ok(*self = AsyncResult::Completed(value)),
+            AsyncResult::Completed(_) | AsyncResult::Consumed => Err(value),
+        }
+    }
+    /// Polls the status of the async operation.
+    /// A [`AsyncResult::Completed`] result transitions permanently to the [`AsyncResult::Consumed`] state.
+    pub fn poll(&mut self) -> Self {
+        match self {
+            AsyncResult::Pending => AsyncResult::Pending,
+            AsyncResult::Completed(_) | AsyncResult::Consumed => mem::replace(self, AsyncResult::Consumed),
+        }
+    }
 }
 
 /// Types of [`System`] resources, grouped into feature categories.
@@ -821,7 +845,7 @@ pub trait System: 'static + Sized {
     fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RequestKey>, ErrorCause<Self>>;
     /// Poll for the completion of an asynchronous request.
     /// The [`Entity`] that made the request is provided for context.
-    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, entity: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>>;
+    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, entity: &Entity<'gc, Self>) -> Result<AsyncResult<Result<Value<'gc, Self>, String>>, ErrorCause<Self>>;
 
     /// Performs a general command which does not return a value to the system.
     /// Ideally, this function should be non-blocking, and the commander will await the task's completion asynchronously.
@@ -829,7 +853,7 @@ pub trait System: 'static + Sized {
     fn perform_command<'gc>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<Self>>;
     /// Poll for the completion of an asynchronous command.
     /// The [`Entity`] that issued the command is provided for context.
-    fn poll_command<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::CommandKey, entity: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<(), String>>, ErrorCause<Self>>;
+    fn poll_command<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::CommandKey, entity: &Entity<'gc, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<Self>>;
 
     /// Sends a message containing a set of named `values` to each of the specified `targets`.
     /// The `expect_reply` value controls whether or not to use a reply mechanism to asynchronously receive a response from the target(s).
@@ -838,7 +862,7 @@ pub trait System: 'static + Sized {
     /// Polls for a response from a client initiated by [`System::send_message`].
     /// If the client responds, a value of [`Some(x)`] is returned.
     /// The system may elect to impose a timeout for reply results, in which case [`None`] is returned instead.
-    fn poll_reply(&self, key: &Self::ExternReplyKey) -> AsyncPoll<Option<Json>>;
+    fn poll_reply(&self, key: &Self::ExternReplyKey) -> AsyncResult<Option<Json>>;
     /// Attempts to receive a message from the message buffer.
     /// This operation is always non-blocking and returns [`None`] if there are no messages in the buffer.
     /// If a message is received, a tuple of form `(msg_type, values, reply_key)` is returned.

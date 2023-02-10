@@ -337,21 +337,23 @@ impl<'gc, S: System> Process<'gc, S> {
         match &self.defer {
             None => (),
             Some(Defer::Request { key, aft_pos, action }) => match global_context.system.poll_request(mc, key, &*self.entity.read())? {
-                AsyncPoll::Completed(x) => {
+                AsyncResult::Completed(x) => {
                     process_request!(x, action, *aft_pos);
                     self.defer = None;
                 }
-                AsyncPoll::Pending => return Ok(ProcessStep::Yield),
+                AsyncResult::Pending => return Ok(ProcessStep::Yield),
+                AsyncResult::Consumed => panic!(),
             }
             Some(Defer::Command { key, aft_pos }) => match global_context.system.poll_command(mc, key, &*self.entity.read())? {
-                AsyncPoll::Completed(x) => {
+                AsyncResult::Completed(x) => {
                     process_command!(x, *aft_pos);
                     self.defer = None;
                 }
-                AsyncPoll::Pending => return Ok(ProcessStep::Yield),
+                AsyncResult::Pending => return Ok(ProcessStep::Yield),
+                AsyncResult::Consumed => panic!(),
             }
             Some(Defer::MessageReply { key, aft_pos }) => match global_context.system.poll_reply(key) {
-                AsyncPoll::Completed(x) => {
+                AsyncResult::Completed(x) => {
                     let value = match x {
                         Some(x) => Value::from_json(mc, x)?,
                         None => empty_string().into(),
@@ -360,7 +362,8 @@ impl<'gc, S: System> Process<'gc, S> {
                     self.pos = *aft_pos;
                     self.defer = None;
                 }
-                AsyncPoll::Pending => return Ok(ProcessStep::Yield),
+                AsyncResult::Pending => return Ok(ProcessStep::Yield),
+                AsyncResult::Consumed => panic!(),
             }
             Some(Defer::Barrier { condition, aft_pos }) => match condition.is_completed() {
                 true => {

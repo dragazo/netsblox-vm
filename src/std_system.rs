@@ -85,59 +85,27 @@ struct ReplyEntry {
     value: Option<Json>,
 }
 
-enum AsyncResult<T> {
-    Pending,
-    Completed(T),
-    Used,
-}
-#[derive(Educe)]
-#[educe(Clone)]
-struct AsyncResultHandle<T>(Arc<Mutex<AsyncResult<T>>>);
-impl<T> AsyncResultHandle<T> {
-    fn pending() -> Self {
-        Self(Arc::new(Mutex::new(AsyncResult::Pending)))
-    }
-    fn complete(&self, result: T) {
-        let mut handle = self.0.lock().unwrap();
-        match &mut *handle {
-            AsyncResult::Pending => *handle = AsyncResult::Completed(result),
-            _ => panic!("AsyncResultHandle can only be completed once"),
-        }
-    }
-    fn poll(&self) -> AsyncPoll<T> {
-        let mut handle = self.0.lock().unwrap();
-        match &mut *handle {
-            AsyncResult::Pending => AsyncPoll::Pending,
-            AsyncResult::Completed(_) => match std::mem::replace(&mut *handle, AsyncResult::Used) {
-                AsyncResult::Completed(x) => AsyncPoll::Completed(x),
-                _ => unreachable!(),
-            }
-            AsyncResult::Used => panic!("AsyncResultHandle can only be successfully polled once"),
-        }
-    }
-}
-
 /// A [`StdSystem`] key type for an asynchronous request.
-pub struct RequestKey<C: CustomTypes>(AsyncResultHandle<Result<C::Intermediate, String>>);
+pub struct RequestKey<C: CustomTypes>(Arc<Mutex<AsyncResult<Result<C::Intermediate, String>>>>);
 impl<C: CustomTypes> RequestKey<C> {
     /// Completes the request with the given result.
     /// A value of [`Ok`] denotes a successful request, whose value will be returned to the system
     /// after conversion under [`CustomTypes::from_intermediate`].
     /// A value of [`Err`] denotes a failed request, which will be returned as an error to the runtime,
     /// subject to the caller's [`ErrorScheme`](crate::runtime::ErrorScheme) setting.
-    pub fn complete(self, result: Result<C::Intermediate, String>) { self.0.complete(result) }
-    pub(crate) fn poll(&self) -> AsyncPoll<Result<C::Intermediate, String>> { self.0.poll() }
+    pub fn complete(self, result: Result<C::Intermediate, String>) { assert!(self.0.lock().unwrap().complete(result).is_ok()) }
+    pub(crate) fn poll(&self) -> AsyncResult<Result<C::Intermediate, String>> { self.0.lock().unwrap().poll() }
 }
 
 /// A [`StdSystem`] key type for an asynchronous command.
-pub struct CommandKey(AsyncResultHandle<Result<(), String>>);
+pub struct CommandKey(Arc<Mutex<AsyncResult<Result<(), String>>>>);
 impl CommandKey {
     /// Completes the command.
     /// A value of [`Ok`] denotes a successful command.
     /// A value of [`Err`] denotes a failed command, which will be returned as an error to the runtime,
     /// subject to the caller's [`ErrorScheme`](crate::runtime::ErrorScheme) setting.
-    pub fn complete(self, result: Result<(), String>) { self.0.complete(result) }
-    pub(crate) fn poll(&self) -> AsyncPoll<Result<(), String>> { self.0.poll() }
+    pub fn complete(self, result: Result<(), String>) { assert!(self.0.lock().unwrap().complete(result).is_ok()) }
+    pub(crate) fn poll(&self) -> AsyncResult<Result<(), String>> { self.0.lock().unwrap().poll() }
 }
 
 type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
@@ -409,7 +377,7 @@ impl<C: CustomTypes> System for StdSystem<C> {
     }
 
     fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RequestKey>, ErrorCause<Self>> {
-        let key = RequestKey(AsyncResultHandle::pending());
+        let key = RequestKey(Arc::new(Mutex::new(AsyncResult::new())));
         let use_default = match self.config.request.as_ref() {
             Some(handler) => {
                 match handler(self, mc, RequestKey(key.0.clone()), request, entity) {
@@ -430,20 +398,19 @@ impl<C: CustomTypes> System for StdSystem<C> {
         }
         Ok(MaybeAsync::Async(key))
     }
-    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, _: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<Value<'gc, Self>, String>>, ErrorCause<Self>> {
+    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, _: &Entity<'gc, Self>) -> Result<AsyncResult<Result<Value<'gc, Self>, String>>, ErrorCause<Self>> {
         Ok(match key.poll() {
-            AsyncPoll::Completed(x) => match x {
-                Ok(x) => AsyncPoll::Completed(Ok(C::from_intermediate(mc, x)?)),
-                Err(x) => AsyncPoll::Completed(Err(x)),
-            }
-            AsyncPoll::Pending => AsyncPoll::Pending,
+            AsyncResult::Completed(Ok(x)) => AsyncResult::Completed(Ok(C::from_intermediate(mc, x)?)),
+            AsyncResult::Completed(Err(x)) => AsyncResult::Completed(Err(x)),
+            AsyncResult::Pending => AsyncResult::Pending,
+            AsyncResult::Consumed => AsyncResult::Consumed,
         })
     }
 
     fn perform_command<'gc>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<Self>> {
         match self.config.command.as_ref() {
             Some(handler) => {
-                let key = CommandKey(AsyncResultHandle::pending());
+                let key = CommandKey(Arc::new(Mutex::new(AsyncResult::new())));
                 match handler(self, mc, CommandKey(key.0.clone()), command, entity) {
                     CommandStatus::Handled => (),
                     CommandStatus::UseDefault { key: _, command } => return Err(ErrorCause::NotSupported { feature: command.feature() }),
@@ -453,7 +420,7 @@ impl<C: CustomTypes> System for StdSystem<C> {
             None => Err(ErrorCause::NotSupported { feature: command.feature() }),
         }
     }
-    fn poll_command<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::CommandKey, _: &Entity<'gc, Self>) -> Result<AsyncPoll<Result<(), String>>, ErrorCause<Self>> {
+    fn poll_command<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::CommandKey, _: &Entity<'gc, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<Self>> {
         Ok(key.poll())
     }
 
@@ -469,17 +436,17 @@ impl<C: CustomTypes> System for StdSystem<C> {
         self.message_sender.send(msg).unwrap();
         Ok(reply_key)
     }
-    fn poll_reply(&self, key: &Self::ExternReplyKey) -> AsyncPoll<Option<Json>> {
+    fn poll_reply(&self, key: &Self::ExternReplyKey) -> AsyncResult<Option<Json>> {
         let mut message_replies = self.message_replies.lock().unwrap();
         let entry = message_replies.get(key).unwrap();
         if entry.value.is_some() {
-            return AsyncPoll::Completed(message_replies.remove(key).unwrap().value);
+            return AsyncResult::Completed(message_replies.remove(key).unwrap().value);
         }
         if entry.timestamp.elapsed().as_millis() as u32 >= MESSAGE_REPLY_TIMEOUT_MS {
             message_replies.remove(key).unwrap();
-            return AsyncPoll::Completed(None);
+            return AsyncResult::Completed(None);
         }
-        AsyncPoll::Pending
+        AsyncResult::Pending
     }
     fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<Self>> {
         self.message_sender.send(OutgoingMessage::Reply { value, reply_key: key }).unwrap();
