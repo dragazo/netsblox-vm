@@ -962,10 +962,17 @@ impl Locations {
             if !loc.starts_with(&prefix) { return Err(CompileError::InvalidLocation { loc }) }
             debug_assert!(loc[prefix.len()..].starts_with('_'));
 
-            let tokens: Vec<usize> = match loc[prefix.len() + 1..].split('_').map(|x| x.parse()).collect::<Result<_,_>>() {
-                Ok(x) => x,
-                Err(_) => return Err(CompileError::InvalidLocation { loc }),
-            };
+            let mut tokens = vec![];
+            for token in loc[prefix.len() + 1..].split('_') {
+                let v: usize = match token.parse() {
+                    Ok(x) => x,
+                    Err(_) => return Err(CompileError::InvalidLocation { loc }),
+                };
+                if v.to_string() != token {
+                    return Err(CompileError::InvalidLocation { loc });
+                }
+                tokens.push(v);
+            }
             token_map.push((pos, tokens));
         }
 
@@ -981,7 +988,18 @@ impl Locations {
             encode_u64(0, &mut token_data, None); // null terminator
         }
 
-        Ok(Self { tag: Default::default(), prefix, base_token, token_data, locs })
+        let res = Self { tag: Default::default(), prefix, base_token, token_data, locs };
+
+        #[cfg(test)]
+        {
+            for pos in 0..orig_locs.iter().last().unwrap().0 + 16 {
+                let expected = orig_locs.range(pos + 1..).next().map(|x| *x.1);
+                let actual = res.lookup(pos);
+                assert_eq!(expected, actual.as_deref());
+            }
+        }
+
+        Ok(res)
     }
 
     /// Looks up a bytecode position and returns the most local block location provided by the ast.
