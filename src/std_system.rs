@@ -9,6 +9,7 @@
 
 use std::prelude::v1::*;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use std::fmt;
 
 extern crate std as real_std;
@@ -337,6 +338,22 @@ impl<C: CustomTypes> StdSystem<C> {
         let mut seed: <ChaChaRng as SeedableRng>::Seed = Default::default();
         getrandom::getrandom(&mut seed).expect("failed to generate random seed");
 
+        let config = config.fallback(&Config {
+            request: Some(Rc::new(|system, _, key, request, _| {
+                match request {
+                    Request::Rpc { service, rpc, args } => {
+                        match args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_>>>() {
+                            Ok(args) => system.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap(),
+                            Err(err) => key.complete(Err(format!("failed to convert RPC args to json: {err:?}"))),
+                        }
+                        RequestStatus::Handled
+                    }
+                    _ => RequestStatus::UseDefault { key, request },
+                }
+            })),
+            command: None,
+        });
+
         Self {
             config, context, client,
             start_time: Instant::now(),
@@ -377,26 +394,16 @@ impl<C: CustomTypes> System for StdSystem<C> {
     }
 
     fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RequestKey>, ErrorCause<Self>> {
-        let key = RequestKey(Arc::new(Mutex::new(AsyncResult::new())));
-        let use_default = match self.config.request.as_ref() {
+        Ok(match self.config.request.as_ref() {
             Some(handler) => {
+                let key = RequestKey(Arc::new(Mutex::new(AsyncResult::new())));
                 match handler(self, mc, RequestKey(key.0.clone()), request, entity) {
-                    RequestStatus::Handled => None,
-                    RequestStatus::UseDefault { key, request } => Some((key, request)),
+                    RequestStatus::Handled => MaybeAsync::Async(key),
+                    RequestStatus::UseDefault { key: _, request } => return Err(ErrorCause::NotSupported { feature: request.feature() }),
                 }
             }
-            None => Some((RequestKey(key.0.clone()), request)),
-        };
-        if let Some((key, request)) = use_default {
-            match request {
-                Request::Rpc { service, rpc, args } => {
-                    let args = args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_>>>()?;
-                    self.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap();
-                }
-                _ => return Err(ErrorCause::NotSupported { feature: request.feature() }),
-            }
-        }
-        Ok(MaybeAsync::Async(key))
+            None => return Err(ErrorCause::NotSupported { feature: request.feature() }),
+        })
     }
     fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, _: &Entity<'gc, Self>) -> Result<AsyncResult<Result<Value<'gc, Self>, String>>, ErrorCause<Self>> {
         Ok(match key.poll() {
@@ -408,17 +415,16 @@ impl<C: CustomTypes> System for StdSystem<C> {
     }
 
     fn perform_command<'gc>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<Self>> {
-        match self.config.command.as_ref() {
+        Ok(match self.config.command.as_ref() {
             Some(handler) => {
                 let key = CommandKey(Arc::new(Mutex::new(AsyncResult::new())));
                 match handler(self, mc, CommandKey(key.0.clone()), command, entity) {
-                    CommandStatus::Handled => (),
+                    CommandStatus::Handled => MaybeAsync::Async(key),
                     CommandStatus::UseDefault { key: _, command } => return Err(ErrorCause::NotSupported { feature: command.feature() }),
                 }
-                Ok(MaybeAsync::Async(key))
             }
-            None => Err(ErrorCause::NotSupported { feature: command.feature() }),
-        }
+            None => return Err(ErrorCause::NotSupported { feature: command.feature() }),
+        })
     }
     fn poll_command<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::CommandKey, _: &Entity<'gc, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<Self>> {
         Ok(key.poll())
