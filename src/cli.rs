@@ -334,6 +334,7 @@ fn run_server<C: CustomTypes>(nb_server: String, addr: String, port: u16, overri
         server: &format!("http://{addr}:{port}"),
         syscalls,
         omitted_elements: &["thumbnail", "pentrails", "history", "replay"],
+        pull_interval: Duration::from_millis(250),
     }.render();
 
     enum ServerCommand {

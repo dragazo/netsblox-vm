@@ -1,7 +1,7 @@
 (function () {{
     const SERVER = '{server}';
 
-    const OUTPUT_UPDATE_INTERVAL_MS = 250;
+    const OUTPUT_UPDATE_INTERVAL_MS = {pull_interval_ms};
     const OUTPUT_MAX_SIZE = 1024 * 1024;
 
     function request(info) {{

@@ -1,6 +1,7 @@
 //! Various templated source files.
 
 use std::prelude::v1::*;
+use std::time::Duration;
 use std::fmt::Write;
 
 #[cfg(feature = "serde")]
@@ -64,6 +65,8 @@ pub struct ExtensionArgs<'a> {
     pub syscalls: &'a [SyscallMenu<'a>],
     /// A list of XML element names to omit from the XML sent to the VM server.
     pub omitted_elements: &'a [&'a str],
+    /// The duration between successive calls to pull status from the VM server.
+    pub pull_interval: Duration,
 }
 impl ExtensionArgs<'_> {
     /// Renders the provided arguments into an extension.
@@ -72,6 +75,7 @@ impl ExtensionArgs<'_> {
             server = self.server,
             syscalls = SyscallMenu::format(self.syscalls),
             omitted_elements = self.omitted_elements,
+            pull_interval_ms = self.pull_interval.as_millis(),
         )
     }
 }
