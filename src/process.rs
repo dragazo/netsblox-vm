@@ -1001,6 +1001,21 @@ impl<'gc, S: System> Process<'gc, S> {
                 if !right { angle = angle.neg()? }
                 perform_command!(Command::Turn { angle }, aft_pos);
             }
+            Instruction::PushEffect { kind } => {
+                self.value_stack.push(entity.effects.get_effect_mut(kind).clone().into());
+                self.pos = aft_pos;
+            }
+            Instruction::SetEffect { kind } => {
+                let value = self.value_stack.pop().unwrap().to_number()?;
+                *entity.effects.get_effect_mut(kind) = value;
+                self.pos = aft_pos;
+            }
+            Instruction::ChangeEffect { kind } => {
+                let delta = self.value_stack.pop().unwrap().to_number()?;
+                let effect = entity.effects.get_effect_mut(kind);
+                *effect = effect.add(delta)?;
+                self.pos = aft_pos;
+            }
         }
 
         Ok(ProcessStep::Normal)

@@ -59,6 +59,24 @@ fn test_proj_counting() {
 }
 
 #[test]
+fn test_proj_effects() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/effects.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        let expected = Value::from_json(mc, json!([
+            [0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [12, 47, 32, 14, 11, -37, 123, 65, 74],
+            [54, 79, 107, 7, 23, 37, 168, 66, -6],
+        ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-20, "res");
+    });
+}
+
+#[test]
 fn test_proj_broadcast() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/broadcast.xml"), system);

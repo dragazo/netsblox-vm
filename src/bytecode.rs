@@ -61,6 +61,28 @@ pub type Number = CheckedFloat<f64, NumberChecker>;
 
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
+pub(crate) enum EffectKind {
+    Color, Saturation, Brightness, Ghost,
+    Fisheye, Whirl, Pixelate, Mosaic, Negative,
+}
+impl EffectKind {
+    pub(crate) fn parse(kind: &ast::EffectKind) -> Self {
+        match kind {
+            ast::EffectKind::Color => EffectKind::Color,
+            ast::EffectKind::Saturation => EffectKind::Saturation,
+            ast::EffectKind::Brightness => EffectKind::Brightness,
+            ast::EffectKind::Ghost => EffectKind::Ghost,
+            ast::EffectKind::Fisheye => EffectKind::Fisheye,
+            ast::EffectKind::Whirl => EffectKind::Whirl,
+            ast::EffectKind::Pixelate => EffectKind::Pixelate,
+            ast::EffectKind::Mosaic => EffectKind::Mosaic,
+            ast::EffectKind::Negative => EffectKind::Negative,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, FromPrimitive)]
+#[repr(u8)]
 pub(crate) enum BinaryOp {
     Add, Sub, Mul, Div, Mod, Pow, Log, Atan2,
     Greater, GreaterEq, Less, LessEq,
@@ -339,6 +361,13 @@ pub(crate) enum Instruction<'a> {
     Forward,
     /// Consumes 1 value, `angle`, and asynchronously turns the entity left or right by that angle (opposite direction if negative).
     Turn { right: bool },
+
+    /// Pushes the current value of an effect onto the value stack.
+    PushEffect { kind: EffectKind },
+    /// Consumes 1 value, `value`, and assigns it to the specified effect.
+    SetEffect { kind: EffectKind },
+    /// Consumes 1 value, `delta`, and adds its value to the specified effect.
+    ChangeEffect { kind: EffectKind },
 }
 
 /// A key from the keyboard.
@@ -393,16 +422,16 @@ trait BinaryWrite: Sized {
 impl BinaryRead<'_> for u8 { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (code[start], start + 1) } }
 impl BinaryWrite for u8 { fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) { code.push(*val) } }
 
-impl BinaryRead<'_> for BinaryOp { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
-impl BinaryWrite for BinaryOp {
+impl BinaryRead<'_> for EffectKind { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
+impl BinaryWrite for EffectKind {
     fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) {
         debug_assert_eq!(mem::size_of::<Self>(), 1);
-        code.push((*val) as u8);
+        code.push((*val) as u8)
     }
 }
 
-impl BinaryRead<'_> for VariadicOp { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
-impl BinaryWrite for VariadicOp {
+impl BinaryRead<'_> for BinaryOp { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
+impl BinaryWrite for BinaryOp {
     fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) {
         debug_assert_eq!(mem::size_of::<Self>(), 1);
         code.push((*val) as u8);
@@ -414,6 +443,14 @@ impl BinaryWrite for UnaryOp {
     fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) {
         debug_assert_eq!(mem::size_of::<Self>(), 1);
         code.push((*val) as u8)
+    }
+}
+
+impl BinaryRead<'_> for VariadicOp { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
+impl BinaryWrite for VariadicOp {
+    fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) {
+        debug_assert_eq!(mem::size_of::<Self>(), 1);
+        code.push((*val) as u8);
     }
 }
 
@@ -717,6 +754,10 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             92 => read_prefixed!(Instruction::Turn { right: true }),
             93 => read_prefixed!(Instruction::Turn { right: false }),
 
+            94 => read_prefixed!(Instruction::PushEffect {} : kind),
+            95 => read_prefixed!(Instruction::SetEffect {} : kind),
+            96 => read_prefixed!(Instruction::ChangeEffect {} : kind),
+
             _ => unreachable!(),
         }
     }
@@ -869,6 +910,10 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::Forward => append_prefixed!(91),
             Instruction::Turn { right: true } => append_prefixed!(92),
             Instruction::Turn { right: false } => append_prefixed!(93),
+
+            Instruction::PushEffect { kind } => append_prefixed!(94: kind),
+            Instruction::SetEffect { kind } => append_prefixed!(95: kind),
+            Instruction::ChangeEffect { kind } => append_prefixed!(96: kind),
         }
     }
 }
@@ -1109,7 +1154,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::Floor { value } => self.append_simple_ins(entity, &[value], UnaryOp::Floor.into())?,
             ast::ExprKind::Ceil { value } => self.append_simple_ins(entity, &[value], UnaryOp::Ceil.into())?,
             ast::ExprKind::Not { value } => self.append_simple_ins(entity, &[value], UnaryOp::Not.into())?,
-            ast::ExprKind::Strlen { value } => self.append_simple_ins(entity, &[value], UnaryOp::StrLen.into())?,
+            ast::ExprKind::StrLen { value } => self.append_simple_ins(entity, &[value], UnaryOp::StrLen.into())?,
             ast::ExprKind::UnicodeToChar { value } => self.append_simple_ins(entity, &[value], UnaryOp::UnicodeToChar.into())?,
             ast::ExprKind::CharToUnicode { value } => self.append_simple_ins(entity, &[value], UnaryOp::CharToUnicode.into())?,
             ast::ExprKind::Eq { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::Eq { negate: false })?,
@@ -1128,13 +1173,14 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::ListCdr { value } => self.append_simple_ins(entity, &[value], Instruction::ListCdr)?,
             ast::ExprKind::ListFind { list, value } => self.append_simple_ins(entity, &[value, list], Instruction::ListFind)?,
             ast::ExprKind::ListContains { list, value } => self.append_simple_ins(entity, &[list, value], Instruction::ListContains)?,
-            ast::ExprKind::MakeListRange { start, stop } => self.append_simple_ins(entity, &[start, stop], BinaryOp::Range.into())?,
+            ast::ExprKind::Range { start, stop } => self.append_simple_ins(entity, &[start, stop], BinaryOp::Range.into())?,
             ast::ExprKind::Random { a, b } => self.append_simple_ins(entity, &[a, b], BinaryOp::Random.into())?,
             ast::ExprKind::ListJson { value } => self.append_simple_ins(entity, &[value], Instruction::ListJson)?,
             ast::ExprKind::StrGet { string, index } => self.append_simple_ins(entity, &[index, string], BinaryOp::StrGet.into())?,
             ast::ExprKind::StrGetLast { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetLast.into())?,
             ast::ExprKind::StrGetRandom { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetRandom.into())?,
             ast::ExprKind::SyscallError => self.append_simple_ins(entity, &[], Instruction::PushSyscallError)?,
+            ast::ExprKind::Effect { kind } => self.append_simple_ins(entity, &[], Instruction::PushEffect { kind: EffectKind::parse(kind) })?,
             ast::ExprKind::RpcError => self.ins.push(Instruction::PushRpcError.into()),
             ast::ExprKind::Answer => self.ins.push(Instruction::PushAnswer.into()),
             ast::ExprKind::Timer => self.ins.push(Instruction::PushTimer.into()),
@@ -1143,9 +1189,9 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::Mul { values } => self.append_variadic_op(entity, values, VariadicOp::Mul)?,
             ast::ExprKind::Min { values } => self.append_variadic_op(entity, values, VariadicOp::Min)?,
             ast::ExprKind::Max { values } => self.append_variadic_op(entity, values, VariadicOp::Max)?,
-            ast::ExprKind::Strcat { values } => self.append_variadic_op(entity, values, VariadicOp::StrCat)?,
+            ast::ExprKind::StrCat { values } => self.append_variadic_op(entity, values, VariadicOp::StrCat)?,
             ast::ExprKind::MakeList { values } => self.append_variadic_op(entity, values, VariadicOp::MakeList)?,
-            ast::ExprKind::MakeListConcat { lists } => self.append_variadic_op(entity, lists, VariadicOp::ListCat)?,
+            ast::ExprKind::ListCat { lists } => self.append_variadic_op(entity, lists, VariadicOp::ListCat)?,
             ast::ExprKind::ListReshape { value, dims } => {
                 self.append_expr(value, entity)?;
                 let len = self.append_variadic(dims, entity)?;
@@ -1405,8 +1451,10 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::StmtKind::Throw { error } => self.append_simple_ins(entity, &[error], Instruction::Throw)?,
             ast::StmtKind::Ask { prompt } => self.append_simple_ins(entity, &[prompt], Instruction::Ask)?,
             ast::StmtKind::Sleep { seconds } => self.append_simple_ins(entity, &[seconds], Instruction::Sleep)?,
-            ast::StmtKind::ResetTimer => self.ins.push(Instruction::ResetTimer.into()),
             ast::StmtKind::SendNetworkReply { value } => self.append_simple_ins(entity, &[value], Instruction::SendNetworkReply)?,
+            ast::StmtKind::SetEffect { kind, value } => self.append_simple_ins(entity, &[value], Instruction::SetEffect { kind: EffectKind::parse(kind) })?,
+            ast::StmtKind::ChangeEffect { kind, delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeEffect { kind: EffectKind::parse(kind) })?,
+            ast::StmtKind::ResetTimer => self.ins.push(Instruction::ResetTimer.into()),
             ast::StmtKind::Say { content, duration } | ast::StmtKind::Think { content, duration } => {
                 self.append_simple_ins(entity, &[content], Instruction::Print)?;
                 if let Some(t) = duration {

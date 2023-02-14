@@ -99,6 +99,50 @@ impl<S: System> From<ToJsonError<S>> for ErrorCause<S> { fn from(error: ToJsonEr
 impl<S: System> From<FromJsonError> for ErrorCause<S> { fn from(error: FromJsonError) -> Self { Self::FromJsonError { error } } }
 impl<S: System> From<NumberError> for ErrorCause<S> { fn from(error: NumberError) -> Self { Self::NumberError { error } } }
 
+/// A collection of graphical effects applied to an entity.
+pub struct Effects {
+    pub color: Number,
+    pub saturation: Number,
+    pub brightness: Number,
+    pub ghost: Number,
+    pub fisheye: Number,
+    pub whirl: Number,
+    pub pixelate: Number,
+    pub mosaic: Number,
+    pub negative: Number,
+}
+impl Default for Effects {
+    fn default() -> Self {
+        let zero = Number::new(0.0).unwrap();
+        Self {
+            color: zero,
+            saturation: zero,
+            brightness: zero,
+            ghost: zero,
+            fisheye: zero,
+            whirl: zero,
+            pixelate: zero,
+            mosaic: zero,
+            negative: zero,
+        }
+    }
+}
+impl Effects {
+    pub(crate) fn get_effect_mut(&mut self, kind: EffectKind) -> &mut Number {
+        match kind {
+            EffectKind::Color => &mut self.color,
+            EffectKind::Saturation => &mut self.saturation,
+            EffectKind::Brightness => &mut self.brightness,
+            EffectKind::Ghost => &mut self.ghost,
+            EffectKind::Fisheye => &mut self.fisheye,
+            EffectKind::Whirl => &mut self.whirl,
+            EffectKind::Pixelate => &mut self.pixelate,
+            EffectKind::Mosaic => &mut self.mosaic,
+            EffectKind::Negative => &mut self.negative,
+        }
+    }
+}
+
 /// A value representing the identity of a [`Value`].
 #[derive(Educe)]
 #[educe(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
@@ -319,6 +363,7 @@ pub enum EntityKind<'gc, 'a, S: System> {
 pub struct Entity<'gc, S: System> {
     #[collect(require_static)] pub name: String,
                                pub fields: SymbolTable<'gc, S>,
+    #[collect(require_static)] pub effects: Effects,
     #[collect(require_static)] pub state: S::EntityState,
 }
 impl<S: System> fmt::Debug for Entity<'_, S> {
@@ -597,7 +642,7 @@ impl<'gc, S: System> GlobalContext<'gc, S> {
                 fields.redefine_or_define(field, Shared::Unique(get_value(value, &allocated_refs)));
             }
 
-            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, state }));
+            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, state, effects: Default::default() }));
         }
 
         let proj_name = init_info.proj_name.clone();
