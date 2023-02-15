@@ -61,22 +61,22 @@ pub type Number = CheckedFloat<f64, NumberChecker>;
 
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
-pub(crate) enum EffectKind {
+pub(crate) enum Property {
     Color, Saturation, Brightness, Ghost,
     Fisheye, Whirl, Pixelate, Mosaic, Negative,
 }
-impl EffectKind {
+impl Property {
     pub(crate) fn parse(kind: &ast::EffectKind) -> Self {
         match kind {
-            ast::EffectKind::Color => EffectKind::Color,
-            ast::EffectKind::Saturation => EffectKind::Saturation,
-            ast::EffectKind::Brightness => EffectKind::Brightness,
-            ast::EffectKind::Ghost => EffectKind::Ghost,
-            ast::EffectKind::Fisheye => EffectKind::Fisheye,
-            ast::EffectKind::Whirl => EffectKind::Whirl,
-            ast::EffectKind::Pixelate => EffectKind::Pixelate,
-            ast::EffectKind::Mosaic => EffectKind::Mosaic,
-            ast::EffectKind::Negative => EffectKind::Negative,
+            ast::EffectKind::Color => Property::Color,
+            ast::EffectKind::Saturation => Property::Saturation,
+            ast::EffectKind::Brightness => Property::Brightness,
+            ast::EffectKind::Ghost => Property::Ghost,
+            ast::EffectKind::Fisheye => Property::Fisheye,
+            ast::EffectKind::Whirl => Property::Whirl,
+            ast::EffectKind::Pixelate => Property::Pixelate,
+            ast::EffectKind::Mosaic => Property::Mosaic,
+            ast::EffectKind::Negative => Property::Negative,
         }
     }
 }
@@ -362,12 +362,12 @@ pub(crate) enum Instruction<'a> {
     /// Consumes 1 value, `angle`, and asynchronously turns the entity left or right by that angle (opposite direction if negative).
     Turn { right: bool },
 
-    /// Pushes the current value of an effect onto the value stack.
-    PushEffect { kind: EffectKind },
-    /// Consumes 1 value, `value`, and assigns it to the specified effect.
-    SetEffect { kind: EffectKind },
-    /// Consumes 1 value, `delta`, and adds its value to the specified effect.
-    ChangeEffect { kind: EffectKind },
+    /// Pushes the current value of a property onto the value stack.
+    PushProperty { prop: Property },
+    /// Consumes 1 value, `value`, and assigns it to the specified property.
+    SetProperty { prop: Property },
+    /// Consumes 1 value, `delta`, and adds its value to the specified property.
+    ChangeProperty { prop: Property },
 }
 
 /// A key from the keyboard.
@@ -422,8 +422,8 @@ trait BinaryWrite: Sized {
 impl BinaryRead<'_> for u8 { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (code[start], start + 1) } }
 impl BinaryWrite for u8 { fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) { code.push(*val) } }
 
-impl BinaryRead<'_> for EffectKind { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
-impl BinaryWrite for EffectKind {
+impl BinaryRead<'_> for Property { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
+impl BinaryWrite for Property {
     fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) {
         debug_assert_eq!(mem::size_of::<Self>(), 1);
         code.push((*val) as u8)
@@ -754,9 +754,9 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             92 => read_prefixed!(Instruction::Turn { right: true }),
             93 => read_prefixed!(Instruction::Turn { right: false }),
 
-            94 => read_prefixed!(Instruction::PushEffect {} : kind),
-            95 => read_prefixed!(Instruction::SetEffect {} : kind),
-            96 => read_prefixed!(Instruction::ChangeEffect {} : kind),
+            94 => read_prefixed!(Instruction::PushProperty {} : prop),
+            95 => read_prefixed!(Instruction::SetProperty {} : prop),
+            96 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
             _ => unreachable!(),
         }
@@ -911,9 +911,9 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::Turn { right: true } => append_prefixed!(92),
             Instruction::Turn { right: false } => append_prefixed!(93),
 
-            Instruction::PushEffect { kind } => append_prefixed!(94: kind),
-            Instruction::SetEffect { kind } => append_prefixed!(95: kind),
-            Instruction::ChangeEffect { kind } => append_prefixed!(96: kind),
+            Instruction::PushProperty { prop } => append_prefixed!(94: prop),
+            Instruction::SetProperty { prop } => append_prefixed!(95: prop),
+            Instruction::ChangeProperty { prop } => append_prefixed!(96: prop),
         }
     }
 }
@@ -1180,7 +1180,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::StrGetLast { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetLast.into())?,
             ast::ExprKind::StrGetRandom { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetRandom.into())?,
             ast::ExprKind::SyscallError => self.append_simple_ins(entity, &[], Instruction::PushSyscallError)?,
-            ast::ExprKind::Effect { kind } => self.append_simple_ins(entity, &[], Instruction::PushEffect { kind: EffectKind::parse(kind) })?,
+            ast::ExprKind::Effect { kind } => self.append_simple_ins(entity, &[], Instruction::PushProperty { prop: Property::parse(kind) })?,
             ast::ExprKind::RpcError => self.ins.push(Instruction::PushRpcError.into()),
             ast::ExprKind::Answer => self.ins.push(Instruction::PushAnswer.into()),
             ast::ExprKind::Timer => self.ins.push(Instruction::PushTimer.into()),
@@ -1452,8 +1452,8 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::StmtKind::Ask { prompt } => self.append_simple_ins(entity, &[prompt], Instruction::Ask)?,
             ast::StmtKind::Sleep { seconds } => self.append_simple_ins(entity, &[seconds], Instruction::Sleep)?,
             ast::StmtKind::SendNetworkReply { value } => self.append_simple_ins(entity, &[value], Instruction::SendNetworkReply)?,
-            ast::StmtKind::SetEffect { kind, value } => self.append_simple_ins(entity, &[value], Instruction::SetEffect { kind: EffectKind::parse(kind) })?,
-            ast::StmtKind::ChangeEffect { kind, delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeEffect { kind: EffectKind::parse(kind) })?,
+            ast::StmtKind::SetEffect { kind, value } => self.append_simple_ins(entity, &[value], Instruction::SetProperty { prop: Property::parse(kind) })?,
+            ast::StmtKind::ChangeEffect { kind, delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeProperty { prop: Property::parse(kind) })?,
             ast::StmtKind::ResetTimer => self.ins.push(Instruction::ResetTimer.into()),
             ast::StmtKind::Say { content, duration } | ast::StmtKind::Think { content, duration } => {
                 self.append_simple_ins(entity, &[content], Instruction::Print)?;

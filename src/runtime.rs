@@ -99,8 +99,79 @@ impl<S: System> From<ToJsonError<S>> for ErrorCause<S> { fn from(error: ToJsonEr
 impl<S: System> From<FromJsonError> for ErrorCause<S> { fn from(error: FromJsonError) -> Self { Self::FromJsonError { error } } }
 impl<S: System> From<NumberError> for ErrorCause<S> { fn from(error: NumberError) -> Self { Self::NumberError { error } } }
 
-/// A collection of graphical effects applied to an entity.
-pub struct Effects {
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Color { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
+impl Color {
+    pub fn from_hsva(mut h: f32, mut s: f32, mut v: f32, mut a: f32) -> Self {
+        h = h.rem_euclid(360.0);
+        s = s.clamp(0.0, 1.0);
+        v = v.clamp(0.0, 1.0);
+        a = a.clamp(0.0, 1.0);
+
+        let c = v * s;
+        let hp = h / 60.0;
+        let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+        let m = v - c;
+
+        let (r, g, b) = [(c, x, 0.0), (x, c, 0.0), (0.0, c, x), (0.0, x, c), (x, 0.0, c), (c, 0.0, x)][hp as usize % 6]; // mod is required (rem_euclid is not perfect)
+        fn f(x: f32) -> u8 { (x * 255.0).round() as u8 }
+        Self { r: f(r + m), g: f(g + m), b: f(b + m), a: f(a) }
+    }
+}
+
+#[test]
+fn test_hsv_to_rgb() {
+    assert_eq!(Color::from_hsva(0.0, 0.0, 0.0, 1.0), Color { r: 0x00, g: 0x00, b: 0x00, a: 0xFF });
+    assert_eq!(Color::from_hsva(0.0, -0.5, 0.0, 1.0), Color { r: 0x00, g: 0x00, b: 0x00, a: 0xFF });
+    assert_eq!(Color::from_hsva(0.0, 0.07, 0.36, 1.0), Color { r: 0x5C, g: 0x55, b: 0x55, a: 0xFF });
+    assert_eq!(Color::from_hsva(0.0, 1.0, 0.36, 1.0), Color { r: 92, g: 0, b: 0, a: 0xFF });
+    assert_eq!(Color::from_hsva(0.0, 1.5, 0.36, 1.0), Color { r: 92, g: 0, b: 0, a: 0xFF });
+    assert_eq!(Color::from_hsva(0.0, 1.3, 0.36, 1.0), Color { r: 92, g: 0, b: 0, a: 0xFF });
+    assert_eq!(Color::from_hsva(0.0, 14.5, 0.36, 1.0), Color { r: 92, g: 0, b: 0, a: 0xFF });
+    assert_eq!(Color::from_hsva(0.0, 0.0, 0.36, 1.0), Color { r: 92, g: 92, b: 92, a: 0xFF });
+    assert_eq!(Color::from_hsva(0.0, -2.4, 0.36, 1.0), Color { r: 92, g: 92, b: 92, a: 0xFF });
+    assert_eq!(Color::from_hsva(0.0, -0.4, 0.36, 1.0), Color { r: 92, g: 92, b: 92, a: 0xFF });
+    assert_eq!(Color::from_hsva(360.0, 0.07, 0.36, 1.0), Color { r: 0x5C, g: 0x55, b: 0x55, a: 0xFF });
+    assert_eq!(Color::from_hsva(-360.0, 0.07, 0.36, 1.0), Color { r: 0x5C, g: 0x55, b: 0x55, a: 0xFF });
+    assert_eq!(Color::from_hsva(25.0, 0.5, 0.25, 1.0), Color { r: 0x40, g: 0x2D, b: 0x20, a: 0xFF });
+    assert_eq!(Color::from_hsva(25.0 + 360.0, 0.5, 0.25, 1.0), Color { r: 0x40, g: 0x2D, b: 0x20, a: 0xFF });
+    assert_eq!(Color::from_hsva(25.0 - 360.0, 0.5, 0.25, 1.0), Color { r: 0x40, g: 0x2D, b: 0x20, a: 0xFF });
+    assert_eq!(Color::from_hsva(49.0, 0.75, 0.12, 1.0), Color { r: 0x1F, g: 0x1A, b: 0x08, a: 0xFF });
+    assert_eq!(Color::from_hsva(65.0, 0.12, 0.87, 1.0), Color { r: 0xDC, g: 0xDE, b: 0xC3, a: 0xFF });
+    assert_eq!(Color::from_hsva(65.0, 0.12, 1.0, 1.0), Color { r: 252, g: 255, b: 224, a: 0xFF });
+    assert_eq!(Color::from_hsva(65.0, 0.12, 1.4, 1.0), Color { r: 252, g: 255, b: 224, a: 0xFF });
+    assert_eq!(Color::from_hsva(90.0, 0.22, 0.55, 1.0), Color { r: 0x7D, g: 0x8C, b: 0x6D, a: 0xFF });
+    assert_eq!(Color::from_hsva(90.0 + 360.0, 0.22, 0.55, 1.0), Color { r: 0x7D, g: 0x8C, b: 0x6D, a: 0xFF });
+    assert_eq!(Color::from_hsva(90.0, 0.22, 0.55, 1.0), Color { r: 0x7D, g: 0x8C, b: 0x6D, a: 0xFF });
+    assert_eq!(Color::from_hsva(120.0, 0.26, 0.91, 1.0), Color { r: 0xAC, g: 0xE8, b: 0xAC, a: 0xFF });
+    assert_eq!(Color::from_hsva(175.0, 0.97, 0.04, 1.0), Color { r: 0x00, g: 0x0A, b: 0x09, a: 0xFF });
+    assert_eq!(Color::from_hsva(175.0 + 360.0, 0.97, 0.04, 1.0), Color { r: 0x00, g: 0x0A, b: 0x09, a: 0xFF });
+    assert_eq!(Color::from_hsva(175.0 - 360.0, 0.97, 0.04, 1.0), Color { r: 0x00, g: 0x0A, b: 0x09, a: 0xFF });
+    assert_eq!(Color::from_hsva(180.0, 1.0, 1.0, 1.0), Color { r: 0x00, g: 0xFF, b: 0xFF, a: 0xFF });
+    assert_eq!(Color::from_hsva(211.0, 0.11, 0.59, 1.0), Color { r: 0x86, g: 0x8E, b: 0x96, a: 0xFF });
+    assert_eq!(Color::from_hsva(299.0, 0.58, 0.91, 1.0), Color { r: 0xE6, g: 0x61, b: 0xE8, a: 0xFF });
+    assert_eq!(Color::from_hsva(299.0 + 360.0, 0.58, 0.91, 1.0), Color { r: 0xE6, g: 0x61, b: 0xE8, a: 0xFF });
+    assert_eq!(Color::from_hsva(299.0 - 360.0, 0.58, 0.91, 1.0), Color { r: 0xE6, g: 0x61, b: 0xE8, a: 0xFF });
+    assert_eq!(Color::from_hsva(310.0, 0.33, 0.77, 1.0), Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0xFF });
+    assert_eq!(Color::from_hsva(310.0, 0.33, 0.77, 1.5), Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0xFF });
+    assert_eq!(Color::from_hsva(310.0, 0.33, 0.77, 0.5), Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0x80 });
+    assert_eq!(Color::from_hsva(310.0, 0.33, 0.77, 0.0), Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0x00 });
+    assert_eq!(Color::from_hsva(310.0, 0.33, 0.77, -0.2), Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0x00 });
+}
+
+/// A collection of properties related to an entity.
+pub struct Properties {
+    pub visible: bool,
+    pub size: Number,
+
+    pub pen_down: bool,
+    pub pen_size: Number,
+    pub pen_color: Color,
+
+    pub tempo: Number,
+    pub volume: Number,
+    pub balance: Number,
+
     pub color: Number,
     pub saturation: Number,
     pub brightness: Number,
@@ -111,10 +182,23 @@ pub struct Effects {
     pub mosaic: Number,
     pub negative: Number,
 }
-impl Default for Effects {
+impl Default for Properties {
     fn default() -> Self {
         let zero = Number::new(0.0).unwrap();
+        let hundred = Number::new(100.0).unwrap();
+
         Self {
+            visible: true,
+            size: hundred,
+
+            pen_down: false,
+            pen_size: Number::new(1.0).unwrap(),
+            pen_color: Color { r: 0, g: 0, b: 0, a: 255 },
+
+            tempo: Number::new(60.0).unwrap(),
+            volume: hundred,
+            balance: zero,
+
             color: zero,
             saturation: zero,
             brightness: zero,
@@ -127,18 +211,18 @@ impl Default for Effects {
         }
     }
 }
-impl Effects {
-    pub(crate) fn get_effect_mut(&mut self, kind: EffectKind) -> &mut Number {
-        match kind {
-            EffectKind::Color => &mut self.color,
-            EffectKind::Saturation => &mut self.saturation,
-            EffectKind::Brightness => &mut self.brightness,
-            EffectKind::Ghost => &mut self.ghost,
-            EffectKind::Fisheye => &mut self.fisheye,
-            EffectKind::Whirl => &mut self.whirl,
-            EffectKind::Pixelate => &mut self.pixelate,
-            EffectKind::Mosaic => &mut self.mosaic,
-            EffectKind::Negative => &mut self.negative,
+impl Properties {
+    pub(crate) fn get_mut(&mut self, prop: Property) -> &mut Number {
+        match prop {
+            Property::Color => &mut self.color,
+            Property::Saturation => &mut self.saturation,
+            Property::Brightness => &mut self.brightness,
+            Property::Ghost => &mut self.ghost,
+            Property::Fisheye => &mut self.fisheye,
+            Property::Whirl => &mut self.whirl,
+            Property::Pixelate => &mut self.pixelate,
+            Property::Mosaic => &mut self.mosaic,
+            Property::Negative => &mut self.negative,
         }
     }
 }
@@ -363,7 +447,7 @@ pub enum EntityKind<'gc, 'a, S: System> {
 pub struct Entity<'gc, S: System> {
     #[collect(require_static)] pub name: String,
                                pub fields: SymbolTable<'gc, S>,
-    #[collect(require_static)] pub effects: Effects,
+    #[collect(require_static)] pub properties: Properties,
     #[collect(require_static)] pub state: S::EntityState,
 }
 impl<S: System> fmt::Debug for Entity<'_, S> {
@@ -642,7 +726,7 @@ impl<'gc, S: System> GlobalContext<'gc, S> {
                 fields.redefine_or_define(field, Shared::Unique(get_value(value, &allocated_refs)));
             }
 
-            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, state, effects: Default::default() }));
+            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, state, properties: Default::default() }));
         }
 
         let proj_name = init_info.proj_name.clone();
