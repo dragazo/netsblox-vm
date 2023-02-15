@@ -113,14 +113,46 @@ impl Color {
         let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
         let m = v - c;
 
-        let (r, g, b) = [(c, x, 0.0), (x, c, 0.0), (0.0, c, x), (0.0, x, c), (x, 0.0, c), (c, 0.0, x)][hp as usize % 6]; // mod is required (rem_euclid is not perfect)
+        let (r, g, b) = match hp as usize {
+            0 | 6 => (c, x, 0.0), // (0 mod 6) - needed because rem_euclid is not perfect
+            1 => (x, c, 0.0),
+            2 => (0.0, c, x),
+            3 => (0.0, x, c),
+            4 => (x, 0.0, c),
+            5 => (c, 0.0, x),
+            _ => unreachable!(),
+        };
+
         fn f(x: f32) -> u8 { (x * 255.0).round() as u8 }
+
         Self { r: f(r + m), g: f(g + m), b: f(b + m), a: f(a) }
+    }
+    pub fn to_hsva(self) -> (f32, f32, f32, f32) {
+        fn f(x: u8) -> f32 { x as f32 / 255.0 }
+
+        let vals = [self.r, self.g, self.b];
+        let (c_max_i, c_max) = vals.iter().copied().enumerate().max_by_key(|x| x.1).map(|(i, v)| (i, f(v))).unwrap();
+        let c_min = vals.iter().copied().min().map(f).unwrap();
+        let delta = c_max - c_min;
+
+        let h = if delta == 0.0 { 0.0 } else {
+            match c_max_i {
+                0 => 60.0 * ((f(self.g) - f(self.b)) / delta).rem_euclid(6.0),
+                1 => 60.0 * ((f(self.b) - f(self.r)) / delta + 2.0),
+                2 => 60.0 * ((f(self.r) - f(self.g)) / delta + 4.0),
+                _ => unreachable!(),
+            }
+        };
+        let s = if c_max == 0.0 { 0.0 } else { delta / c_max };
+        let v = c_max;
+        let a = f(self.a);
+
+        (h, s, v, a)
     }
 }
 
 #[test]
-fn test_hsv_to_rgb() {
+fn test_color_hsv_to_rgb() {
     assert_eq!(Color::from_hsva(0.0, 0.0, 0.0, 1.0), Color { r: 0x00, g: 0x00, b: 0x00, a: 0xFF });
     assert_eq!(Color::from_hsva(0.0, -0.5, 0.0, 1.0), Color { r: 0x00, g: 0x00, b: 0x00, a: 0xFF });
     assert_eq!(Color::from_hsva(0.0, 0.07, 0.36, 1.0), Color { r: 0x5C, g: 0x55, b: 0x55, a: 0xFF });
@@ -157,6 +189,65 @@ fn test_hsv_to_rgb() {
     assert_eq!(Color::from_hsva(310.0, 0.33, 0.77, 0.5), Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0x80 });
     assert_eq!(Color::from_hsva(310.0, 0.33, 0.77, 0.0), Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0x00 });
     assert_eq!(Color::from_hsva(310.0, 0.33, 0.77, -0.2), Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0x00 });
+}
+#[test]
+fn test_color_rgb_to_hsv() {
+    macro_rules! assert_close {
+        ($c1:expr, $c2:expr) => {{
+            let (h1, s1, v1, a1) = $c1;
+            let (h2, s2, v2, a2) = $c2;
+            let thresh = 1.0 / 255.0;
+            assert!((h1 - h2).abs() < thresh, "{h1} vs {h2}");
+            assert!((s1 - s2).abs() < thresh, "{s1} vs {s2}");
+            assert!((v1 - v2).abs() < thresh, "{v1} vs {v2}");
+            assert!((a1 - a2).abs() < thresh, "{a1} vs {a2}");
+        }}
+    }
+    assert_close!(Color { r: 0x00, g: 0x00, b: 0x00, a: 0xFF }.to_hsva(), (0.0, 0.0, 0.0, 1.0));
+    assert_close!(Color { r: 0x5C, g: 0x55, b: 0x55, a: 0xFF }.to_hsva(), (0.0, 0.076, 0.361, 1.0));
+    assert_close!(Color { r: 92, g: 0, b: 0, a: 0xFF }.to_hsva(), (0.0, 1.0, 0.361, 1.0));
+    assert_close!(Color { r: 92, g: 92, b: 92, a: 0xFF }.to_hsva(), (0.0, 0.0, 0.361, 1.0));
+    assert_close!(Color { r: 0x40, g: 0x2D, b: 0x20, a: 0xFF }.to_hsva(), (24.375, 0.5, 0.251, 1.0));
+    assert_close!(Color { r: 0x1F, g: 0x1A, b: 0x08, a: 0xFF }.to_hsva(), (46.956, 0.742, 0.122, 1.0));
+    assert_close!(Color { r: 0xDC, g: 0xDE, b: 0xC3, a: 0xFF }.to_hsva(), (64.444, 0.122, 0.871, 1.0));
+    assert_close!(Color { r: 252, g: 255, b: 224, a: 0xFF }.to_hsva(), (65.806, 0.122, 1.0, 1.0));
+    assert_close!(Color { r: 0x7D, g: 0x8C, b: 0x6D, a: 0xFF }.to_hsva(), (89.032, 0.221, 0.549, 1.0));
+    assert_close!(Color { r: 0xAC, g: 0xE8, b: 0xAC, a: 0xFF }.to_hsva(), (120.0, 0.259, 0.91, 1.0));
+    assert_close!(Color { r: 0x00, g: 0x0A, b: 0x09, a: 0xFF }.to_hsva(), (174.0, 1.0, 0.039, 1.0));
+    assert_close!(Color { r: 0x00, g: 0xFF, b: 0xFF, a: 0xFF }.to_hsva(), (180.0, 1.0, 1.0, 1.0));
+    assert_close!(Color { r: 0x86, g: 0x8E, b: 0x96, a: 0xFF }.to_hsva(), (210.0, 0.107, 0.588, 1.0));
+    assert_close!(Color { r: 0xE6, g: 0x61, b: 0xE8, a: 0xFF }.to_hsva(), (299.111, 0.582, 0.91, 1.0));
+    assert_close!(Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0xFF }.to_hsva(), (309.375, 0.327, 0.769, 1.0));
+    assert_close!(Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0x80 }.to_hsva(), (309.375, 0.327, 0.769, 0.5));
+    assert_close!(Color { r: 0xC4, g: 0x84, b: 0xBA, a: 0x00 }.to_hsva(), (309.375, 0.327, 0.769, 0.0));
+    assert_close!(Color { r: 255, g: 67, b: 14, a: 255 }.to_hsva(), (13.195, 0.945, 1.0, 1.0));
+    assert_close!(Color { r: 255, g: 14, b: 67, a: 255 }.to_hsva(), (346.805, 0.945, 1.0, 1.0));
+    assert_close!(Color { r: 87, g: 255, b: 33, a: 255 }.to_hsva(), (105.4054, 0.871, 1.0, 1.0));
+    assert_close!(Color { r: 33, g: 255, b: 87, a: 255 }.to_hsva(), (134.594, 0.871, 1.0, 1.0));
+    assert_close!(Color { r: 12, g: 54, b: 255, a: 255 }.to_hsva(), (229.629, 0.953, 1.0, 1.0));
+    assert_close!(Color { r: 54, g: 12, b: 255, a: 255 }.to_hsva(), (250.37, 0.953, 1.0, 1.0));
+
+    macro_rules! assert_round_trip {
+        ($v:expr) => {{
+            let rgba = $v;
+            let hsva = rgba.to_hsva();
+            let back = Color::from_hsva(hsva.0, hsva.1, hsva.2, hsva.3);
+            assert_eq!(rgba, back);
+        }}
+    }
+    assert_round_trip!(Color { r: 12, g: 65, b: 23, a: 87 });
+    assert_round_trip!(Color { r: 128, g: 0, b: 23, a: 186 });
+    assert_round_trip!(Color { r: 0, g: 0, b: 0, a: 0 });
+    assert_round_trip!(Color { r: 0, g: 0, b: 0, a: 255 });
+    assert_round_trip!(Color { r: 255, g: 0, b: 0, a: 255 });
+    assert_round_trip!(Color { r: 0, g: 255, b: 0, a: 255 });
+    assert_round_trip!(Color { r: 0, g: 0, b: 255, a: 255 });
+    assert_round_trip!(Color { r: 255, g: 0, b: 0, a: 0 });
+    assert_round_trip!(Color { r: 0, g: 255, b: 0, a: 0 });
+    assert_round_trip!(Color { r: 0, g: 0, b: 255, a: 0 });
+    assert_round_trip!(Color { r: 57, g: 0, b: 0, a: 0 });
+    assert_round_trip!(Color { r: 0, g: 198, b: 0, a: 0 });
+    assert_round_trip!(Color { r: 0, g: 0, b: 10, a: 0 });
 }
 
 /// A collection of properties related to an entity.
