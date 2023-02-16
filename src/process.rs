@@ -415,7 +415,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         }
 
         let (ins, aft_pos) = Instruction::read(&global_context.bytecode.code, &global_context.bytecode.data, self.pos);
-        println!("ins: {ins:?}");
         match ins {
             Instruction::Yield => {
                 self.pos = aft_pos;
@@ -1001,6 +1000,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ChangeProperty { prop } => {
                 let delta = self.value_stack.pop().unwrap();
                 perform_command!(Command::ChangeProperty { prop, delta }, aft_pos);
+            }
+            Instruction::ClearEffects => {
+                perform_command!(Command::ClearEffects, aft_pos);
             }
             Instruction::Forward => {
                 let distance = self.value_stack.pop().unwrap().to_number()?;

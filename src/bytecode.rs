@@ -368,6 +368,8 @@ pub(crate) enum Instruction<'a> {
     /// Consumes 1 value, `delta`, and adds its value to the specified property.
     ChangeProperty { prop: Property },
 
+    /// Clears all graphic effects on the entity.
+    ClearEffects,
     /// Consumes 1 value, `dist`, and asynchronously moves the entity forward by that distance (or backwards if negative).
     Forward,
 }
@@ -753,7 +755,8 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             90 => read_prefixed!(Instruction::SetProperty {} : prop),
             91 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
-            92 => read_prefixed!(Instruction::Forward),
+            92 => read_prefixed!(Instruction::ClearEffects),
+            93 => read_prefixed!(Instruction::Forward),
 
             _ => unreachable!(),
         }
@@ -905,7 +908,8 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::SetProperty { prop } => append_prefixed!(90: prop),
             Instruction::ChangeProperty { prop } => append_prefixed!(91: prop),
 
-            Instruction::Forward => append_prefixed!(92),
+            Instruction::ClearEffects => append_prefixed!(92),
+            Instruction::Forward => append_prefixed!(93),
         }
     }
 }
@@ -1438,6 +1442,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::StmtKind::SendNetworkReply { value } => self.append_simple_ins(entity, &[value], Instruction::SendNetworkReply)?,
             ast::StmtKind::SetEffect { kind, value } => self.append_simple_ins(entity, &[value], Instruction::SetProperty { prop: Property::from_effect(kind) })?,
             ast::StmtKind::ChangeEffect { kind, delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeProperty { prop: Property::from_effect(kind) })?,
+            ast::StmtKind::ClearEffects => self.ins.push(Instruction::ClearEffects.into()),
             ast::StmtKind::Forward { distance } => self.append_simple_ins(entity, &[distance], Instruction::Forward)?,
             ast::StmtKind::ResetTimer => self.ins.push(Instruction::ResetTimer.into()),
             ast::StmtKind::TurnRight { angle } => self.append_simple_ins(entity, &[angle], Instruction::ChangeProperty { prop: Property::Heading })?,
