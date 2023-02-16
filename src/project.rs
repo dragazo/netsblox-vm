@@ -28,7 +28,7 @@ impl IdleAction {
     }
     /// Consumes a step result and advances the state machine.
     /// If the step resulting in an idle action, this may trigger the idle action to fire and reset the state machine.
-    pub fn consume<S: System>(&mut self, res: &ProjectStep<'_, S>) {
+    pub fn consume<C: CustomTypes<S>, S: System<C>>(&mut self, res: &ProjectStep<'_, C, S>) {
         match res {
             ProjectStep::Idle | ProjectStep::Yield => {
                 self.count += 1;
@@ -67,7 +67,7 @@ pub enum Input {
 }
 
 /// Result of stepping through the execution of a [`Project`].
-pub enum ProjectStep<'gc, S: System> {
+pub enum ProjectStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// There were no running processes to execute.
     Idle,
     /// The project had a running process, which yielded.
@@ -77,31 +77,31 @@ pub enum ProjectStep<'gc, S: System> {
     /// The project had a running process which terminated successfully.
     /// This can be though of as a special case of [`ProjectStep::Normal`],
     /// but also returns the result and process so it can be queried for state information if needed.
-    ProcessTerminated { result: Option<Value<'gc, S>>, proc: Process<'gc, S> },
+    ProcessTerminated { result: Option<Value<'gc, C, S>>, proc: Process<'gc, C, S> },
     /// The project had a running process, which encountered a runtime error.
     /// The dead process is returned, which can be queried for diagnostic information.
-    Error { error: ExecError<S>, proc: Process<'gc, S> },
+    Error { error: ExecError<C, S>, proc: Process<'gc, C, S> },
 }
 
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
-struct ContextEntry<'gc, S: System> {
-                               locals: SymbolTable<'gc, S>,
+struct ContextEntry<'gc, C: CustomTypes<S>, S: System<C>> {
+                               locals: SymbolTable<'gc, C, S>,
     #[collect(require_static)] barrier: Option<Barrier>,
     #[collect(require_static)] reply_key: Option<S::InternReplyKey>,
 }
 
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
-struct Script<'gc, S: System> {
+struct Script<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] event: Event,
     #[collect(require_static)] start_pos: usize,
-                               entity: GcCell<'gc, Entity<'gc, S>>,
+                               entity: GcCell<'gc, Entity<'gc, C, S>>,
     #[collect(require_static)] process: Option<ProcessKey>,
-                               context_queue: VecDeque<ContextEntry<'gc, S>>,
+                               context_queue: VecDeque<ContextEntry<'gc, C, S>>,
 }
-impl<'gc, S: System> Script<'gc, S> {
-    fn consume_context(&mut self, state: &mut State<'gc, S>) {
+impl<'gc, C: CustomTypes<S>, S: System<C>> Script<'gc, C, S> {
+    fn consume_context(&mut self, state: &mut State<'gc, C, S>) {
         let process = self.process.and_then(|key| Some((key, state.processes.get_mut(key)?)));
         if process.as_ref().map(|x| x.1.is_running()).unwrap_or(false) { return }
 
@@ -127,13 +127,13 @@ impl<'gc, S: System> Script<'gc, S> {
             }
         }
     }
-    fn stop_all(&mut self, state: &mut State<'gc, S>) {
+    fn stop_all(&mut self, state: &mut State<'gc, C, S>) {
         if let Some(process) = self.process.take() {
             state.processes.remove(process);
         }
         self.context_queue.clear();
     }
-    fn schedule(&mut self, state: &mut State<'gc, S>, locals: SymbolTable<'gc, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, max_queue: usize) {
+    fn schedule(&mut self, state: &mut State<'gc, C, S>, locals: SymbolTable<'gc, C, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, max_queue: usize) {
         self.context_queue.push_back(ContextEntry { locals, barrier, reply_key });
         self.consume_context(state);
         if self.context_queue.len() > max_queue {
@@ -144,18 +144,18 @@ impl<'gc, S: System> Script<'gc, S> {
 
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
-struct State<'gc, S: System> {
-                               global_context: GcCell<'gc, GlobalContext<'gc, S>>,
-                               processes: SlotMap<ProcessKey, Process<'gc, S>>,
+struct State<'gc, C: CustomTypes<S>, S: System<C>> {
+                               global_context: GcCell<'gc, GlobalContext<'gc, C, S>>,
+                               processes: SlotMap<ProcessKey, Process<'gc, C, S>>,
     #[collect(require_static)] process_queue: VecDeque<ProcessKey>,
 }
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
-pub struct Project<'gc, S: System> {
-    state: State<'gc, S>,
-    scripts: Vec<Script<'gc, S>>,
+pub struct Project<'gc, C: CustomTypes<S>, S: System<C>> {
+    state: State<'gc, C, S>,
+    scripts: Vec<Script<'gc, C, S>>,
 }
-impl<'gc, S: System> Project<'gc, S> {
+impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
     pub fn from_init<'a>(mc: MutationContext<'gc, '_>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
         let global_context = GlobalContext::from_init(mc, init_info, bytecode, settings, system);
         let mut project = Self::new(GcCell::allocate(mc, global_context));
@@ -169,7 +169,7 @@ impl<'gc, S: System> Project<'gc, S> {
 
         project
     }
-    pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, S>>) -> Self {
+    pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, C, S>>) -> Self {
         Self {
             state: State {
                 global_context,
@@ -179,7 +179,7 @@ impl<'gc, S: System> Project<'gc, S> {
             scripts: Default::default(),
         }
     }
-    pub fn add_script(&mut self, start_pos: usize, entity: GcCell<'gc, Entity<'gc, S>>, event: Option<Event>) {
+    pub fn add_script(&mut self, start_pos: usize, entity: GcCell<'gc, Entity<'gc, C, S>>, event: Option<Event>) {
         match event {
             Some(event) => self.scripts.push(Script {
                 start_pos, event, entity,
@@ -219,7 +219,7 @@ impl<'gc, S: System> Project<'gc, S> {
             Input::KeyUp(_) => unimplemented!(),
         }
     }
-    pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> ProjectStep<'gc, S> {
+    pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> ProjectStep<'gc, C, S> {
         let msg = self.state.global_context.read().system.receive_message();
         if let Some((msg_type, values, reply_key)) = msg {
             let values: BTreeMap<_,_> = values.into_iter().collect();
@@ -273,7 +273,7 @@ impl<'gc, S: System> Project<'gc, S> {
             Err(error) => ProjectStep::Error { error, proc: self.state.processes.remove(proc_key).unwrap() },
         }
     }
-    pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc, S>> {
+    pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc, C, S>> {
         self.state.global_context
     }
 }

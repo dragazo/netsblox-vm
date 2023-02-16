@@ -16,8 +16,8 @@ use super::*;
 #[derive(Collect)]
 #[collect(no_drop)]
 struct Env<'gc> {
-    proc: GcCell<'gc, Process<'gc, StdSystem<C>>>,
-    glob: GcCell<'gc, GlobalContext<'gc, StdSystem<C>>>,
+    proc: GcCell<'gc, Process<'gc, C, StdSystem<C>>>,
+    glob: GcCell<'gc, GlobalContext<'gc, C, StdSystem<C>>>,
 }
 type EnvArena = Arena<Rootable![Env<'gc>]>;
 
@@ -43,7 +43,7 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
     }), ins_locs)
 }
 
-fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc, StdSystem<C>>>, usize), ExecError<StdSystem<C>>>) {
+fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc, C, StdSystem<C>>>, usize), ExecError<C, StdSystem<C>>>) {
     env.mutate(|mc, env| {
         let mut proc = env.proc.write(mc);
         assert!(proc.is_running());
@@ -182,7 +182,7 @@ fn test_proc_recursively_self_containing_lists() {
             let res = res.read();
             assert_eq!(res.len(), 4);
 
-            fn check<'gc>(name: &str, mc: MutationContext<'gc, '_>, got: &Value<'gc, StdSystem<C>>, expected_basic: &Value<'gc, StdSystem<C>>) {
+            fn check<'gc>(name: &str, mc: MutationContext<'gc, '_>, got: &Value<'gc, C, StdSystem<C>>, expected_basic: &Value<'gc, C, StdSystem<C>>) {
                 let orig_got = got;
                 match got {
                     Value::List(got) => {
@@ -562,7 +562,7 @@ fn test_proc_literal_types() {
 fn test_proc_say() {
     let output = Rc::new(RefCell::new(String::new()));
     let output_cpy = output.clone();
-    let config = Config::<StdSystem<_>> {
+    let config = Config::<C, StdSystem<C>> {
         request: None,
         command: Some(Rc::new(move |_, _, key, command, _| match command {
             Command::Print { value } => {
@@ -589,7 +589,7 @@ fn test_proc_say() {
 fn test_proc_syscall() {
     let buffer = Rc::new(RefCell::new(String::new()));
     let buffer_cpy = buffer.clone();
-    let config = Config::<StdSystem<_>> {
+    let config = Config::<C, StdSystem<C>> {
         request: Some(Rc::new(move |_, _, key, request, _| match &request {
             Request::Syscall { name, args } => match name.as_str() {
                 "bar" => match args.is_empty() {
@@ -918,7 +918,7 @@ fn test_proc_rand_list_ops() {
 
     run_till_term(&mut env, |_, _, res| {
         let (results, last) = {
-            fn extract_value(val: &Value<'_, StdSystem<C>>) -> String {
+            fn extract_value(val: &Value<'_, C, StdSystem<C>>) -> String {
                 match val {
                     Value::Number(x) => x.to_string(),
                     Value::String(x) if matches!(x.as_str(), "hello" | "goodbye") => x.as_str().to_owned(),
@@ -1364,13 +1364,13 @@ fn test_proc_basic_motion() {
     }
 
     let sequence = Rc::new(RefCell::new(Vec::with_capacity(16)));
-    let config = Config::<StdSystem<_>> {
+    let config = Config::<C, StdSystem<C>> {
         command: {
             let sequence = sequence.clone();
             Some(Rc::new(move |_, _, key, command, _| {
                 match command {
                     Command::Forward { distance } => sequence.borrow_mut().push(Action::Forward(to_i32(distance))),
-                    Command::Turn { angle } => sequence.borrow_mut().push(Action::Turn(to_i32(angle))),
+                    Command::ChangeProperty { prop: Property::Heading, delta } => sequence.borrow_mut().push(Action::Turn(to_i32(delta.to_number().unwrap()))),
                     _ => return CommandStatus::UseDefault { key, command },
                 }
                 key.complete(Ok(()));
@@ -1381,11 +1381,15 @@ fn test_proc_basic_motion() {
             let sequence = sequence.clone();
             Some(Rc::new(move |_, _, key, request, _| {
                 match request {
-                    Request::Position => {
+                    Request::Property { prop: Property::XPos } => {
                         sequence.borrow_mut().push(Action::Position);
-                        key.complete(Ok(Intermediate::from_json(json!([13, 54]))));
+                        key.complete(Ok(Intermediate::from_json(json!(13))));
                     }
-                    Request::Heading => {
+                    Request::Property { prop: Property::YPos } => {
+                        sequence.borrow_mut().push(Action::Position);
+                        key.complete(Ok(Intermediate::from_json(json!(54))));
+                    }
+                    Request::Property { prop: Property::Heading } => {
                         sequence.borrow_mut().push(Action::Heading);
                         key.complete(Ok(Intermediate::from_json(json!(39))));
                     }

@@ -13,7 +13,7 @@ use super::*;
 #[derive(Collect)]
 #[collect(no_drop)]
 struct Env<'gc> {
-    proj: GcCell<'gc, Project<'gc, StdSystem<C>>>,
+    proj: GcCell<'gc, Project<'gc, C, StdSystem<C>>>,
 }
 type EnvArena = Arena<Rootable![Env<'gc>]>;
 
@@ -31,7 +31,7 @@ fn get_running_project(xml: &str, system: Rc<StdSystem<C>>) -> EnvArena {
     })
 }
 
-fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, StdSystem<C>>) -> Result<(), ExecError<StdSystem<C>>> {
+fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, C, StdSystem<C>>) -> Result<(), ExecError<C, StdSystem<C>>> {
     loop {
         match proj.step(mc) {
             ProjectStep::Idle => return Ok(()),

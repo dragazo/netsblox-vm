@@ -26,8 +26,8 @@ impl GetType for NativeValue {
 }
 
 struct EntityState;
-impl<S: System> From<EntityKind<'_, '_, S>> for EntityState {
-    fn from(_: EntityKind<'_, '_, S>) -> Self {
+impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
+    fn from(_: EntityKind<'_, '_, C, StdSystem<C>>) -> Self {
         EntityState
     }
 }
@@ -46,13 +46,13 @@ impl IntermediateType for Intermediate {
 }
 
 struct C;
-impl CustomTypes for C {
+impl CustomTypes<StdSystem<C>> for C {
     type NativeValue = NativeValue;
     type Intermediate = Intermediate;
 
     type EntityState = EntityState;
 
-    fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
+    fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, C, StdSystem<C>>, ErrorCause<C, StdSystem<C>>> {
         Ok(match value {
             Intermediate::Json(x) => Value::from_json(mc, x)?,
             Intermediate::Image(x) => Value::Image(Rc::new(x)),
@@ -60,7 +60,7 @@ impl CustomTypes for C {
     }
 }
 
-fn assert_values_eq<'gc, S: System>(got: &Value<'gc, S>, expected: &Value<'gc, S>, epsilon: f64, path: &str) {
+fn assert_values_eq<'gc>(got: &Value<'gc, C, StdSystem<C>>, expected: &Value<'gc, C, StdSystem<C>>, epsilon: f64, path: &str) {
     if got.get_type() != expected.get_type() {
         panic!("{} - type error - got {:?} expected {:?} - {:?}", path, got.get_type(), expected.get_type(), got);
     }

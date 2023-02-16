@@ -6,8 +6,8 @@ use std::fmt;
 
 use netsblox_vm::cli::{run, Mode};
 use netsblox_vm::template::SyscallMenu;
-use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, System, Request, RequestStatus, Config};
-use netsblox_vm::std_system::{CustomTypes, StdSystem, IntermediateType};
+use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, Request, RequestStatus, Config, CustomTypes, IntermediateType, Key};
+use netsblox_vm::std_system::StdSystem;
 use netsblox_vm::gc::MutationContext;
 use netsblox_vm::json::{Json, json};
 use clap::Parser;
@@ -41,8 +41,8 @@ impl GetType for NativeValue {
 }
 
 struct EntityState;
-impl<S: System> From<EntityKind<'_, '_, S>> for EntityState {
-    fn from(_: EntityKind<'_, '_, S>) -> Self {
+impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
+    fn from(_: EntityKind<'_, '_, C, StdSystem<C>>) -> Self {
         EntityState
     }
 }
@@ -62,13 +62,13 @@ impl IntermediateType for Intermediate {
 }
 
 struct C;
-impl CustomTypes for C {
+impl CustomTypes<StdSystem<C>> for C {
     type NativeValue = NativeValue;
     type Intermediate = Intermediate;
 
     type EntityState = EntityState;
 
-    fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>> {
+    fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, C, StdSystem<C>>, ErrorCause<C, StdSystem<C>>> {
         Ok(match value {
             Intermediate::Json(x) => Value::from_json(mc, x)?,
             Intermediate::Image(x) => Value::Image(Rc::new(x)),
@@ -78,7 +78,7 @@ impl CustomTypes for C {
 }
 
 fn main() {
-    let config = Config::<StdSystem<_>> {
+    let config = Config::<C, StdSystem<C>> {
         request: Some(Rc::new(move |_, _, key, request, _| match &request {
             Request::Syscall { name, args } => match name.as_str() {
                 "open" => {
@@ -198,12 +198,12 @@ fn main() {
                                 }
                             }
                             _ => {
-                                key.complete(Err(format!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<StdSystem<C>>::String, file.get_type(), Type::<StdSystem<C>>::String)));
+                                key.complete(Err(format!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::String, file.get_type(), Type::<C, StdSystem<C>>::String)));
                                 return RequestStatus::Handled;
                             }
                         }
                         _ => {
-                            key.complete(Err(format!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<StdSystem<C>>::String, file.get_type(), content.get_type())));
+                            key.complete(Err(format!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::String, file.get_type(), content.get_type())));
                             return RequestStatus::Handled;
                         }
                     }

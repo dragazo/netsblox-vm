@@ -61,17 +61,26 @@ pub type Number = CheckedFloat<f64, NumberChecker>;
 
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
-pub(crate) enum Property {
-    Color, Saturation, Brightness, Ghost,
+pub enum Property {
+    XPos, YPos, Heading,
+
+    Visible, Size,
+
+    PenDown, PenSize, PenColor,
+    PenColorH, PenColorS, PenColorV, PenColorT,
+
+    Tempo, Volume, Balance,
+
+    ColorH, ColorS, ColorV, ColorT,
     Fisheye, Whirl, Pixelate, Mosaic, Negative,
 }
 impl Property {
-    pub(crate) fn parse(kind: &ast::EffectKind) -> Self {
+    pub(crate) fn from_effect(kind: &ast::EffectKind) -> Self {
         match kind {
-            ast::EffectKind::Color => Property::Color,
-            ast::EffectKind::Saturation => Property::Saturation,
-            ast::EffectKind::Brightness => Property::Brightness,
-            ast::EffectKind::Ghost => Property::Ghost,
+            ast::EffectKind::Color => Property::ColorH,
+            ast::EffectKind::Saturation => Property::ColorS,
+            ast::EffectKind::Brightness => Property::ColorV,
+            ast::EffectKind::Ghost => Property::ColorT,
             ast::EffectKind::Fisheye => Property::Fisheye,
             ast::EffectKind::Whirl => Property::Whirl,
             ast::EffectKind::Pixelate => Property::Pixelate,
@@ -352,22 +361,15 @@ pub(crate) enum Instruction<'a> {
     /// It is not an error to reply to a message that was not expecting a reply, in which case the value is simply discarded.
     SendNetworkReply,
 
-    /// Gets an entity's position and pushes it onto the value stack as a list of form `[x, y]`.
-    PushPosition,
-    /// Gets an entity's heading and pushes it onto the value stack.
-    PushHeading,
-
-    /// Consumes 1 value, `dist`, and asynchronously moves the entity forward by that distance (or backwards if negative).
-    Forward,
-    /// Consumes 1 value, `angle`, and asynchronously turns the entity left or right by that angle (opposite direction if negative).
-    Turn { right: bool },
-
     /// Pushes the current value of a property onto the value stack.
     PushProperty { prop: Property },
     /// Consumes 1 value, `value`, and assigns it to the specified property.
     SetProperty { prop: Property },
     /// Consumes 1 value, `delta`, and adds its value to the specified property.
     ChangeProperty { prop: Property },
+
+    /// Consumes 1 value, `dist`, and asynchronously moves the entity forward by that distance (or backwards if negative).
+    Forward,
 }
 
 /// A key from the keyboard.
@@ -747,16 +749,11 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             87 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
             88 => read_prefixed!(Instruction::SendNetworkReply),
 
-            89 => read_prefixed!(Instruction::PushPosition),
-            90 => read_prefixed!(Instruction::PushHeading),
+            89 => read_prefixed!(Instruction::PushProperty {} : prop),
+            90 => read_prefixed!(Instruction::SetProperty {} : prop),
+            91 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
-            91 => read_prefixed!(Instruction::Forward),
-            92 => read_prefixed!(Instruction::Turn { right: true }),
-            93 => read_prefixed!(Instruction::Turn { right: false }),
-
-            94 => read_prefixed!(Instruction::PushProperty {} : prop),
-            95 => read_prefixed!(Instruction::SetProperty {} : prop),
-            96 => read_prefixed!(Instruction::ChangeProperty {} : prop),
+            92 => read_prefixed!(Instruction::Forward),
 
             _ => unreachable!(),
         }
@@ -904,16 +901,11 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(87: move str msg_type, values),
             Instruction::SendNetworkReply => append_prefixed!(88),
 
-            Instruction::PushPosition => append_prefixed!(89),
-            Instruction::PushHeading => append_prefixed!(90),
+            Instruction::PushProperty { prop } => append_prefixed!(89: prop),
+            Instruction::SetProperty { prop } => append_prefixed!(90: prop),
+            Instruction::ChangeProperty { prop } => append_prefixed!(91: prop),
 
-            Instruction::Forward => append_prefixed!(91),
-            Instruction::Turn { right: true } => append_prefixed!(92),
-            Instruction::Turn { right: false } => append_prefixed!(93),
-
-            Instruction::PushProperty { prop } => append_prefixed!(94: prop),
-            Instruction::SetProperty { prop } => append_prefixed!(95: prop),
-            Instruction::ChangeProperty { prop } => append_prefixed!(96: prop),
+            Instruction::Forward => append_prefixed!(92),
         }
     }
 }
@@ -1180,11 +1172,13 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::StrGetLast { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetLast.into())?,
             ast::ExprKind::StrGetRandom { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetRandom.into())?,
             ast::ExprKind::SyscallError => self.append_simple_ins(entity, &[], Instruction::PushSyscallError)?,
-            ast::ExprKind::Effect { kind } => self.append_simple_ins(entity, &[], Instruction::PushProperty { prop: Property::parse(kind) })?,
+            ast::ExprKind::Effect { kind } => self.append_simple_ins(entity, &[], Instruction::PushProperty { prop: Property::from_effect(kind) })?,
+            ast::ExprKind::Heading => self.ins.push(Instruction::PushProperty { prop: Property::Heading }.into()),
             ast::ExprKind::RpcError => self.ins.push(Instruction::PushRpcError.into()),
             ast::ExprKind::Answer => self.ins.push(Instruction::PushAnswer.into()),
             ast::ExprKind::Timer => self.ins.push(Instruction::PushTimer.into()),
-            ast::ExprKind::Heading => self.ins.push(Instruction::PushHeading.into()),
+            ast::ExprKind::XPos => self.ins.push(Instruction::PushProperty { prop: Property::XPos }.into()),
+            ast::ExprKind::YPos => self.ins.push(Instruction::PushProperty { prop: Property::YPos }.into()),
             ast::ExprKind::Add { values } => self.append_variadic_op(entity, values, VariadicOp::Add)?,
             ast::ExprKind::Mul { values } => self.append_variadic_op(entity, values, VariadicOp::Mul)?,
             ast::ExprKind::Min { values } => self.append_variadic_op(entity, values, VariadicOp::Min)?,
@@ -1415,16 +1409,6 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins[first_check_pos] = Instruction::ListPopFirstOrElse { goto: empty_list }.into();
                 self.ins[loop_done_pos] = Instruction::ListPopFirstOrElse { goto: ret }.into();
             }
-            ast::ExprKind::XPos => {
-                self.ins.push(Instruction::PushInt { value: 1 }.into());
-                self.ins.push(Instruction::PushPosition.into());
-                self.ins.push(Instruction::ListGet.into());
-            }
-            ast::ExprKind::YPos => {
-                self.ins.push(Instruction::PushInt { value: 2 }.into());
-                self.ins.push(Instruction::PushPosition.into());
-                self.ins.push(Instruction::ListGet.into());
-            }
             kind => return Err(CompileError::UnsupportedExpr { kind }),
         }
 
@@ -1452,9 +1436,16 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::StmtKind::Ask { prompt } => self.append_simple_ins(entity, &[prompt], Instruction::Ask)?,
             ast::StmtKind::Sleep { seconds } => self.append_simple_ins(entity, &[seconds], Instruction::Sleep)?,
             ast::StmtKind::SendNetworkReply { value } => self.append_simple_ins(entity, &[value], Instruction::SendNetworkReply)?,
-            ast::StmtKind::SetEffect { kind, value } => self.append_simple_ins(entity, &[value], Instruction::SetProperty { prop: Property::parse(kind) })?,
-            ast::StmtKind::ChangeEffect { kind, delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeProperty { prop: Property::parse(kind) })?,
+            ast::StmtKind::SetEffect { kind, value } => self.append_simple_ins(entity, &[value], Instruction::SetProperty { prop: Property::from_effect(kind) })?,
+            ast::StmtKind::ChangeEffect { kind, delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeProperty { prop: Property::from_effect(kind) })?,
+            ast::StmtKind::Forward { distance } => self.append_simple_ins(entity, &[distance], Instruction::Forward)?,
             ast::StmtKind::ResetTimer => self.ins.push(Instruction::ResetTimer.into()),
+            ast::StmtKind::TurnRight { angle } => self.append_simple_ins(entity, &[angle], Instruction::ChangeProperty { prop: Property::Heading })?,
+            ast::StmtKind::TurnLeft { angle } => {
+                self.append_expr(angle, entity)?;
+                self.ins.push(Instruction::from(UnaryOp::Neg).into());
+                self.ins.push(Instruction::ChangeProperty { prop: Property::Heading }.into());
+            }
             ast::StmtKind::Say { content, duration } | ast::StmtKind::Think { content, duration } => {
                 self.append_simple_ins(entity, &[content], Instruction::Print)?;
                 if let Some(t) = duration {
@@ -1681,10 +1672,7 @@ impl<'a> ByteCodeBuilder<'a> {
             }
             ast::StmtKind::SendLocalMessage { target, msg_type, wait } => match target {
                 Some(_) => unimplemented!(),
-                None => {
-                    self.append_expr(msg_type, entity)?;
-                    self.ins.push(Instruction::Broadcast { wait: *wait }.into());
-                }
+                None => self.append_simple_ins(entity, &[msg_type], Instruction::Broadcast { wait: *wait })?,
             }
             ast::StmtKind::RunRpc { service, rpc, args } => {
                 for (arg_name, arg) in args {
@@ -1707,18 +1695,6 @@ impl<'a> ByteCodeBuilder<'a> {
                 let len = self.append_variadic(args, entity)?;
                 self.ins.push(Instruction::Syscall { len }.into());
                 self.ins.push(Instruction::PopValue.into());
-            }
-            ast::StmtKind::Forward { distance } => {
-                self.append_expr(distance, entity)?;
-                self.ins.push(Instruction::Forward.into());
-            }
-            ast::StmtKind::TurnRight { angle } => {
-                self.append_expr(angle, entity)?;
-                self.ins.push(Instruction::Turn { right: true }.into());
-            }
-            ast::StmtKind::TurnLeft { angle } => {
-                self.append_expr(angle, entity)?;
-                self.ins.push(Instruction::Turn { right: false }.into());
             }
             kind => return Err(CompileError::UnsupportedStmt { kind }),
         }

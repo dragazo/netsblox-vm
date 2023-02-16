@@ -57,12 +57,12 @@ pub struct ErrorSummary {
     pub trace: Vec<TraceEntry>,
 }
 impl ErrorSummary {
-    pub fn extract<S: System>(error: &ExecError<S>, process: &Process<S>, locations: &Locations) -> Self {
+    pub fn extract<C: CustomTypes<S>, S: System<C>>(error: &ExecError<C, S>, process: &Process<C, S>, locations: &Locations) -> Self {
         let raw_entity = process.get_entity();
         let entity = raw_entity.read().name.clone();
         let cause = format!("{:?}", error.cause);
 
-        fn summarize_symbols<S: System>(symbols: &SymbolTable<'_, S>) -> Vec<VarEntry> {
+        fn summarize_symbols<C: CustomTypes<S>, S: System<C>>(symbols: &SymbolTable<'_, C, S>) -> Vec<VarEntry> {
             let mut res = Vec::with_capacity(symbols.len());
             for (k, v) in symbols {
                 res.push(VarEntry { name: k.clone(), value: format!("{:?}", &*v.get()) });
@@ -92,13 +92,13 @@ impl ErrorSummary {
 /// a human-readable error location in the original program.
 #[derive(Educe)]
 #[educe(Debug)]
-pub struct ExecError<S: System> {
-    pub cause: ErrorCause<S>,
+pub struct ExecError<C: CustomTypes<S>, S: System<C>> {
+    pub cause: ErrorCause<C, S>,
     pub pos: usize,
 }
 
 /// Result of stepping through a [`Process`].
-pub enum ProcessStep<'gc, S: System> {
+pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// The process was not running.
     Idle,
     /// The process executed an instruction successfully and does not need to yield.
@@ -111,7 +111,7 @@ pub enum ProcessStep<'gc, S: System> {
     Yield,
     /// The process has successfully terminated with the given return value, or [`None`] if terminated by an (error-less) abort,
     /// such as a stop script command or the death of the process's associated entity.
-    Terminate { result: Option<Value<'gc, S>> },
+    Terminate { result: Option<Value<'gc, C, S>> },
     /// The process has requested to broadcast a message to all entities, which may trigger other code to execute.
     Broadcast { msg_type: String, barrier: Option<Barrier> },
 }
@@ -121,10 +121,10 @@ pub enum ProcessStep<'gc, S: System> {
 /// This contains information about the call origin and local variables defined in the called context.
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
-pub struct CallStackEntry<'gc, S: System> {
+pub struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub called_from: usize,
     #[collect(require_static)]     return_to: usize,
-                               pub locals: SymbolTable<'gc, S>,
+                               pub locals: SymbolTable<'gc, C, S>,
 
     #[collect(require_static)] warp_counter: usize,
     #[collect(require_static)] value_stack_size: usize,
@@ -139,7 +139,7 @@ struct Handler {
     value_stack_size: usize,
 }
 
-enum Defer<S: System> {
+enum Defer<C: CustomTypes<S>, S: System<C>> {
     Request { key: S::RequestKey, aft_pos: usize, action: RequestAction },
     Command { key: S::CommandKey, aft_pos: usize },
     MessageReply { key: S::ExternReplyKey, aft_pos: usize },
@@ -156,28 +156,28 @@ enum RequestAction {
 /// It maintains its own state machine for executing instructions step by step.
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
-pub struct Process<'gc, S: System> {
-                               global_context: GcCell<'gc, GlobalContext<'gc, S>>,
-                               entity: GcCell<'gc, Entity<'gc, S>>,
+pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
+                               global_context: GcCell<'gc, GlobalContext<'gc, C, S>>,
+                               entity: GcCell<'gc, Entity<'gc, C, S>>,
     #[collect(require_static)] start_pos: usize,
     #[collect(require_static)] pos: usize,
     #[collect(require_static)] running: bool,
     #[collect(require_static)] barrier: Option<Barrier>,
     #[collect(require_static)] reply_key: Option<S::InternReplyKey>,
     #[collect(require_static)] warp_counter: usize,
-                               call_stack: Vec<CallStackEntry<'gc, S>>,
-                               value_stack: Vec<Value<'gc, S>>,
+                               call_stack: Vec<CallStackEntry<'gc, C, S>>,
+                               value_stack: Vec<Value<'gc, C, S>>,
     #[collect(require_static)] handler_stack: Vec<Handler>,
     #[collect(require_static)] meta_stack: Vec<String>,
-    #[collect(require_static)] defer: Option<Defer<S>>,
-                               last_syscall_error: Option<Value<'gc, S>>,
-                               last_rpc_error: Option<Value<'gc, S>>,
-                               last_answer: Option<Value<'gc, S>>,
+    #[collect(require_static)] defer: Option<Defer<C, S>>,
+                               last_syscall_error: Option<Value<'gc, C, S>>,
+                               last_rpc_error: Option<Value<'gc, C, S>>,
+                               last_answer: Option<Value<'gc, C, S>>,
 }
-impl<'gc, S: System> Process<'gc, S> {
+impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity` and `system`.
     /// The created process is initialized to an idle (non-running) state; use [`Process::initialize`] to begin execution.
-    pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, S>>, entity: GcCell<'gc, Entity<'gc, S>>, start_pos: usize) -> Self {
+    pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, C, S>>, entity: GcCell<'gc, Entity<'gc, C, S>>, start_pos: usize) -> Self {
         Self {
             global_context, entity, start_pos,
             running: false,
@@ -201,25 +201,25 @@ impl<'gc, S: System> Process<'gc, S> {
         self.running
     }
     /// Gets the global context that this process is tied to (see [`Process::new`]).
-    pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc, S>> {
+    pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc, C, S>> {
         self.global_context
     }
     /// Gets the entity that this process is tied to (see [`Process::new`]).
-    pub fn get_entity(&self) -> GcCell<'gc, Entity<'gc, S>> {
+    pub fn get_entity(&self) -> GcCell<'gc, Entity<'gc, C, S>> {
         self.entity
     }
     /// Gets a reference to the current call stack.
     /// This gives access to stack trace information including all local scopes in the call chain.
     /// Note that the call stack is never empty, and that the always-present first element (denoting the initial execution request) is a special
     /// entry which has an invalid value for [`CallStackEntry::called_from`], namely [`usize::MAX`].
-    pub fn get_call_stack(&self) -> &[CallStackEntry<'gc, S>] {
+    pub fn get_call_stack(&self) -> &[CallStackEntry<'gc, C, S>] {
         &self.call_stack
     }
     /// Prepares the process to execute starting at the main entry point (see [`Process::new`]) with the provided input local variables.
     /// A [`Barrier`] may also be set, which will be destroyed upon termination, either due to completion or an error.
     /// 
     /// Any previous process state is wiped when performing this action.
-    pub fn initialize(&mut self, locals: SymbolTable<'gc, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>) {
+    pub fn initialize(&mut self, locals: SymbolTable<'gc, C, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>) {
         self.pos = self.start_pos;
         self.running = true;
         self.barrier = barrier;
@@ -247,7 +247,7 @@ impl<'gc, S: System> Process<'gc, S> {
     /// as well as to retrieve the return value or execution error in the event that the process terminates.
     /// 
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`ProcessStep::Terminate`].
-    pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, S>, ExecError<S>> {
+    pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, C, S>, ExecError<C, S>> {
         let mut res = self.step_impl(mc);
         if let Err(err) = &res {
             if let Some(Handler { pos, var, warp_counter, call_stack_size, value_stack_size }) = self.handler_stack.last() {
@@ -274,11 +274,11 @@ impl<'gc, S: System> Process<'gc, S> {
         }
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
-    fn step_impl(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, S>, ErrorCause<S>> {
+    fn step_impl(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, C, S>, ErrorCause<C, S>> {
         let mut global_context = self.global_context.write(mc);
         let mut global_context = &mut *global_context;
 
-        fn process_result<'gc, S: System, T>(result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, S>>>, last_ok: Option<&mut Option<Value<'gc, S>>>, last_err: Option<&mut Option<Value<'gc, S>>>, to_value: fn(T) -> Option<Value<'gc, S>>) -> Result<(), ErrorCause<S>> {
+        fn process_result<'gc, C: CustomTypes<S>, S: System<C>, T>(result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, C, S>>>, last_ok: Option<&mut Option<Value<'gc, C, S>>>, last_err: Option<&mut Option<Value<'gc, C, S>>>, to_value: fn(T) -> Option<Value<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
             match result {
                 Ok(x) => match to_value(x) {
                     Some(x) => {
@@ -336,7 +336,7 @@ impl<'gc, S: System> Process<'gc, S> {
 
         match &self.defer {
             None => (),
-            Some(Defer::Request { key, aft_pos, action }) => match global_context.system.poll_request(mc, key, &*self.entity.read())? {
+            Some(Defer::Request { key, aft_pos, action }) => match global_context.system.poll_request(mc, key, &mut *self.entity.write(mc))? {
                 AsyncResult::Completed(x) => {
                     process_request!(x, action, *aft_pos);
                     self.defer = None;
@@ -344,7 +344,7 @@ impl<'gc, S: System> Process<'gc, S> {
                 AsyncResult::Pending => return Ok(ProcessStep::Yield),
                 AsyncResult::Consumed => panic!(),
             }
-            Some(Defer::Command { key, aft_pos }) => match global_context.system.poll_command(mc, key, &*self.entity.read())? {
+            Some(Defer::Command { key, aft_pos }) => match global_context.system.poll_command(mc, key, &mut *self.entity.write(mc))? {
                 AsyncResult::Completed(x) => {
                     process_command!(x, *aft_pos);
                     self.defer = None;
@@ -399,7 +399,7 @@ impl<'gc, S: System> Process<'gc, S> {
 
         macro_rules! perform_command {
             ($command:expr, $aft_pos:expr) => {{
-                match global_context.system.perform_command(mc, $command, &*entity)? {
+                match global_context.system.perform_command(mc, $command, &mut *entity)? {
                     MaybeAsync::Async(key) => self.defer = Some(Defer::Command { key, aft_pos: $aft_pos }),
                     MaybeAsync::Sync(res) => process_command!(res, $aft_pos),
                 }
@@ -407,7 +407,7 @@ impl<'gc, S: System> Process<'gc, S> {
         }
         macro_rules! perform_request {
             ($request:expr, $action:expr, $aft_pos:expr) => {{
-                match global_context.system.perform_request(mc, $request, &*entity)? {
+                match global_context.system.perform_request(mc, $request, &mut *entity)? {
                     MaybeAsync::Async(key) => self.defer = Some(Defer::Request { key, aft_pos: $aft_pos, action: $action }),
                     MaybeAsync::Sync(res) => process_request!(res, $action, $aft_pos),
                 }
@@ -415,6 +415,7 @@ impl<'gc, S: System> Process<'gc, S> {
         }
 
         let (ins, aft_pos) = Instruction::read(&global_context.bytecode.code, &global_context.bytecode.data, self.pos);
+        println!("ins: {ins:?}");
         match ins {
             Instruction::Yield => {
                 self.pos = aft_pos;
@@ -686,15 +687,15 @@ impl<'gc, S: System> Process<'gc, S> {
                 self.pos = aft_pos;
             }
             Instruction::VariadicOp { op, len } => {
-                fn combine_as_binary<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, mut acc: Value<'gc, S>, values: &mut dyn Iterator<Item = &Value<'gc, S>>, op: BinaryOp) -> Result<Value<'gc, S>, ErrorCause<S>> {
+                fn combine_as_binary<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, mut acc: Value<'gc, C, S>, values: &mut dyn Iterator<Item = &Value<'gc, C, S>>, op: BinaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
                     for item in values {
                         acc = ops::binary_op(mc, system, &acc, item, op)?;
                     }
                     Ok(acc)
                 }
 
-                type Combine<'gc, S, I> = fn(MutationContext<'gc, '_>, &S, I) -> Result<Value<'gc, S>, ErrorCause<S>>;
-                let combine: Combine<'gc, S, &mut dyn Iterator<Item = &Value<'gc, S>>> = match op {
+                type Combine<'gc, C, S, I> = fn(MutationContext<'gc, '_>, &S, I) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
+                let combine: Combine<'gc, C, S, &mut dyn Iterator<Item = &Value<'gc, C, S>>> = match op {
                     VariadicOp::Add => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(0.0)?), values, BinaryOp::Add),
                     VariadicOp::Mul => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(1.0)?), values, BinaryOp::Mul),
                     VariadicOp::Min => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::infinity()?), values, BinaryOp::Min),
@@ -990,31 +991,20 @@ impl<'gc, S: System> Process<'gc, S> {
                 }
                 self.pos = aft_pos;
             }
-            Instruction::PushPosition => perform_request!(Request::Position, RequestAction::Push, aft_pos),
-            Instruction::PushHeading => perform_request!(Request::Heading, RequestAction::Push, aft_pos),
+            Instruction::PushProperty { prop } => {
+                perform_request!(Request::Property { prop }, RequestAction::Push, aft_pos);
+            }
+            Instruction::SetProperty { prop } => {
+                let value = self.value_stack.pop().unwrap();
+                perform_command!(Command::SetProperty { prop, value }, aft_pos);
+            }
+            Instruction::ChangeProperty { prop } => {
+                let delta = self.value_stack.pop().unwrap();
+                perform_command!(Command::ChangeProperty { prop, delta }, aft_pos);
+            }
             Instruction::Forward => {
                 let distance = self.value_stack.pop().unwrap().to_number()?;
                 perform_command!(Command::Forward { distance }, aft_pos);
-            }
-            Instruction::Turn { right } => {
-                let mut angle = self.value_stack.pop().unwrap().to_number()?;
-                if !right { angle = angle.neg()? }
-                perform_command!(Command::Turn { angle }, aft_pos);
-            }
-            Instruction::PushProperty { prop } => {
-                self.value_stack.push(entity.properties.get_mut(prop).clone().into());
-                self.pos = aft_pos;
-            }
-            Instruction::SetProperty { prop } => {
-                let value = self.value_stack.pop().unwrap().to_number()?;
-                *entity.properties.get_mut(prop) = value;
-                self.pos = aft_pos;
-            }
-            Instruction::ChangeProperty { prop } => {
-                let delta = self.value_stack.pop().unwrap().to_number()?;
-                let effect = entity.properties.get_mut(prop);
-                *effect = effect.add(delta)?;
-                self.pos = aft_pos;
             }
         }
 
@@ -1025,13 +1015,10 @@ impl<'gc, S: System> Process<'gc, S> {
 mod ops {
     use super::*;
 
-    fn as_list<'gc, S: System>(v: &Value<'gc, S>) -> Option<GcCell<'gc, VecDeque<Value<'gc, S>>>> {
-        match v {
-            Value::List(v) => Some(*v),
-            _ => None
-        }
+    fn as_list<'gc, C: CustomTypes<S>, S: System<C>>(v: &Value<'gc, C, S>) -> Option<GcCell<'gc, VecDeque<Value<'gc, C, S>>>> {
+        v.as_list().ok()
     }
-    fn as_matrix<'gc, S: System>(v: &Value<'gc, S>) -> Option<GcCell<'gc, VecDeque<Value<'gc, S>>>> {
+    fn as_matrix<'gc, C: CustomTypes<S>, S: System<C>>(v: &Value<'gc, C, S>) -> Option<GcCell<'gc, VecDeque<Value<'gc, C, S>>>> {
         let vals = as_list(v)?;
         let good = match vals.read().front() {
             None => false,
@@ -1040,20 +1027,20 @@ mod ops {
         if good { Some(vals) } else { None }
     }
 
-    pub(super) fn prep_index<S: System>(index: &Value<'_, S>, len: usize) -> Result<usize, ErrorCause<S>> {
+    pub(super) fn prep_index<C: CustomTypes<S>, S: System<C>>(index: &Value<'_, C, S>, len: usize) -> Result<usize, ErrorCause<C, S>> {
         let raw_index = index.to_number()?.get();
         if raw_index < 1.0 || raw_index > len as f64 { return Err(ErrorCause::IndexOutOfBounds { index: raw_index, len }) }
         let index = raw_index as u64;
         if index as f64 != raw_index { return Err(ErrorCause::IndexNotInteger { index: raw_index }) }
         Ok(index as usize - 1)
     }
-    pub(super) fn prep_rand_index<S: System>(system: &S, len: usize) -> Result<usize, ErrorCause<S>> {
+    pub(super) fn prep_rand_index<C: CustomTypes<S>, S: System<C>>(system: &S, len: usize) -> Result<usize, ErrorCause<C, S>> {
         if len == 0 { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }) }
         system.rand(0..len)
     }
 
-    pub(super) fn flatten<'gc, S: System>(value: &Value<'gc, S>) -> Result<VecDeque<Value<'gc, S>>, ErrorCause<S>> {
-        fn flatten_impl<'gc, S: System>(value: &Value<'gc, S>, dest: &mut VecDeque<Value<'gc, S>>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<(), ErrorCause<S>> {
+    pub(super) fn flatten<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>) -> Result<VecDeque<Value<'gc, C, S>>, ErrorCause<C, S>> {
+        fn flatten_impl<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>, dest: &mut VecDeque<Value<'gc, C, S>>, cache: &mut BTreeSet<Identity<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
             match value {
                 Value::List(values) => {
                     let key = value.identity();
@@ -1073,8 +1060,8 @@ mod ops {
         debug_assert_eq!(cache.len(), 0);
         Ok(res)
     }
-    pub(super) fn dimensions<S: System>(value: &Value<'_, S>) -> Result<Vec<usize>, ErrorCause<S>> {
-        fn dimensions_impl<'gc, S: System>(value: &Value<'gc, S>, depth: usize, res: &mut Vec<usize>, cache: &mut BTreeSet<Identity<'gc, S>>) -> Result<(), ErrorCause<S>> {
+    pub(super) fn dimensions<C: CustomTypes<S>, S: System<C>>(value: &Value<'_, C, S>) -> Result<Vec<usize>, ErrorCause<C, S>> {
+        fn dimensions_impl<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>, depth: usize, res: &mut Vec<usize>, cache: &mut BTreeSet<Identity<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
             debug_assert!(depth <= res.len());
 
             if let Value::List(values) = value {
@@ -1099,7 +1086,7 @@ mod ops {
         debug_assert_eq!(cache.len(), 0);
         Ok(res)
     }
-    pub(super) fn reshape<'gc, S: System>(mc: MutationContext<'gc, '_>, src: &Value<'gc, S>, dims: &[usize]) -> Result<Value<'gc, S>, ErrorCause<S>> {
+    pub(super) fn reshape<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, src: &Value<'gc, C, S>, dims: &[usize]) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         if dims.iter().any(|&x| x == 0) {
             return Ok(GcCell::allocate(mc, VecDeque::default()).into())
         }
@@ -1109,7 +1096,7 @@ mod ops {
             src.push_back(empty_string().into());
         }
 
-        fn reshape_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, src: &mut Cycle<VecDequeIter<Value<'gc, S>>>, dims: &[usize]) -> Value<'gc, S> {
+        fn reshape_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, src: &mut Cycle<VecDequeIter<Value<'gc, C, S>>>, dims: &[usize]) -> Value<'gc, C, S> {
             match dims {
                 [] => src.next().unwrap().clone(),
                 [first, rest @ ..] => GcCell::allocate(mc, (0..*first).map(|_| reshape_impl(mc, src, rest)).collect::<VecDeque<_>>()).into(),
@@ -1117,10 +1104,10 @@ mod ops {
         }
         Ok(reshape_impl(mc, &mut src.iter().cycle(), dims))
     }
-    pub(super) fn cartesian_product<'gc, S: System>(mc: MutationContext<'gc, '_>, sources: &[GcCell<VecDeque<Value<'gc, S>>>]) -> VecDeque<Value<'gc, S>> {
+    pub(super) fn cartesian_product<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, sources: &[GcCell<VecDeque<Value<'gc, C, S>>>]) -> VecDeque<Value<'gc, C, S>> {
         if sources.is_empty() { return Default::default() }
 
-        fn cartesian_product_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, res: &mut VecDeque<Value<'gc, S>>, partial: &mut VecDeque<Value<'gc, S>>, sources: &[GcCell<VecDeque<Value<'gc, S>>>]) {
+        fn cartesian_product_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, res: &mut VecDeque<Value<'gc, C, S>>, partial: &mut VecDeque<Value<'gc, C, S>>, sources: &[GcCell<VecDeque<Value<'gc, C, S>>>]) {
             match sources {
                 [] => res.push_back(GcCell::allocate(mc, partial.clone()).into()),
                 [first, rest @ ..] => for item in first.read().iter() {
@@ -1136,14 +1123,14 @@ mod ops {
         res
     }
 
-    fn cmp_values<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>) -> Result<Ordering, ErrorCause<S>> {
+    fn cmp_values<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> Result<Ordering, ErrorCause<C, S>> {
         Ok(match (a.to_number(), b.to_number()) {
             (Ok(a), Ok(b)) => a.cmp(&b),
             _ => a.to_string()?.as_ref().cmp(b.to_string()?.as_ref()),
         })
     }
 
-    fn binary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc, S>, b: &Value<'gc, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, S>, Identity<'gc, S>, bool), Value<'gc, S>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc, S>, &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>>) -> Result<Value<'gc, S>, ErrorCause<S>> {
+    fn binary_op_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, C, S>, Identity<'gc, C, S>, bool), Value<'gc, C, S>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc, C, S>, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let cache_key = (a.identity(), b.identity(), matrix_mode);
         Ok(match cache.get(&cache_key) {
             Some(x) => x.clone(),
@@ -1152,7 +1139,7 @@ mod ops {
                 match (checker(a), checker(b)) {
                     (Some(a), Some(b)) => {
                         let (a, b) = (a.read(), b.read());
-                        let real_res: Value<S> = GcCell::allocate(mc, VecDeque::with_capacity(a.len().min(b.len()))).into();
+                        let real_res: Value<C, S> = GcCell::allocate(mc, VecDeque::with_capacity(a.len().min(b.len()))).into();
                         cache.insert(cache_key, real_res.clone());
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
@@ -1163,7 +1150,7 @@ mod ops {
                     }
                     (Some(a), None) => {
                         let a = a.read();
-                        let real_res: Value<S> = GcCell::allocate(mc, VecDeque::with_capacity(a.len())).into();
+                        let real_res: Value<C, S> = GcCell::allocate(mc, VecDeque::with_capacity(a.len())).into();
                         cache.insert(cache_key, real_res.clone());
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
@@ -1174,7 +1161,7 @@ mod ops {
                     }
                     (None, Some(b)) => {
                         let b = b.read();
-                        let real_res: Value<S> = GcCell::allocate(mc, VecDeque::with_capacity(b.len())).into();
+                        let real_res: Value<C, S> = GcCell::allocate(mc, VecDeque::with_capacity(b.len())).into();
                         cache.insert(cache_key, real_res.clone());
                         let res = as_list(&real_res).unwrap();
                         let mut res = res.write(mc);
@@ -1188,7 +1175,7 @@ mod ops {
             }
         })
     }
-    pub(super) fn binary_op<'gc, 'a, S: System>(mc: MutationContext<'gc, '_>, system: &S, a: &'a Value<'gc, S>, b: &'a Value<'gc, S>, op: BinaryOp) -> Result<Value<'gc, S>, ErrorCause<S>> {
+    pub(super) fn binary_op<'gc, 'a, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, a: &'a Value<'gc, C, S>, b: &'a Value<'gc, C, S>, op: BinaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let mut cache = Default::default();
         match op {
             BinaryOp::Add       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.add(b.to_number()?)?.into())),
@@ -1252,14 +1239,14 @@ mod ops {
         }
     }
 
-    fn unary_op_impl<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, x: &Value<'gc, S>, cache: &mut BTreeMap<Identity<'gc, S>, Value<'gc, S>>, scalar_op: &dyn Fn(MutationContext<'gc, '_>, &S, &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>>) -> Result<Value<'gc, S>, ErrorCause<S>> {
+    fn unary_op_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, x: &Value<'gc, C, S>, cache: &mut BTreeMap<Identity<'gc, C, S>, Value<'gc, C, S>>, scalar_op: &dyn Fn(MutationContext<'gc, '_>, &S, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let cache_key = x.identity();
         Ok(match cache.get(&cache_key) {
             Some(x) => x.clone(),
             None => match as_list(x) {
                 Some(x) => {
                     let x = x.read();
-                    let real_res: Value<S> = GcCell::allocate(mc, VecDeque::with_capacity(x.len())).into();
+                    let real_res: Value<C, S> = GcCell::allocate(mc, VecDeque::with_capacity(x.len())).into();
                     cache.insert(cache_key, real_res.clone());
                     let res = as_list(&real_res).unwrap();
                     let mut res = res.write(mc);
@@ -1272,7 +1259,7 @@ mod ops {
             }
         })
     }
-    pub(super) fn unary_op<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, x: &Value<'gc, S>, op: UnaryOp) -> Result<Value<'gc, S>, ErrorCause<S>> {
+    pub(super) fn unary_op<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, x: &Value<'gc, C, S>, op: UnaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let mut cache = Default::default();
         match op {
             UnaryOp::Not    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok((!x.to_bool()?).into())),
@@ -1350,13 +1337,13 @@ mod ops {
             }),
         }
     }
-    pub(super) fn index_list<'gc, S: System>(mc: MutationContext<'gc, '_>, system: &S, list: &Value<'gc, S>, index: &Value<'gc, S>) -> Result<Value<'gc, S>, ErrorCause<S>> {
+    pub(super) fn index_list<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, list: &Value<'gc, C, S>, index: &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let list = list.as_list()?;
         let list = list.read();
         unary_op_impl(mc, system, index, &mut Default::default(), &|_, _, x| Ok(list[prep_index(x, list.len())?].clone()))
     }
 
-    fn check_eq_impl<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>, cache: &mut BTreeSet<(Identity<'gc, S>, Identity<'gc, S>)>) -> bool {
+    fn check_eq_impl<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, cache: &mut BTreeSet<(Identity<'gc, C, S>, Identity<'gc, C, S>)>) -> bool {
         // if already cached, that cmp handles overall check, so no-op with true (if we ever get a false, the whole thing is false)
         if !cache.insert((a.identity(), b.identity())) { return true }
 
@@ -1395,10 +1382,10 @@ mod ops {
             (Value::Native(a), Value::Native(b)) => Rc::ptr_eq(a, b),
         }
     }
-    pub(super) fn check_eq<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>) -> bool {
+    pub(super) fn check_eq<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> bool {
         check_eq_impl(a, b, &mut Default::default())
     }
-    pub(super) fn check_ref_eq<'gc, S: System>(a: &Value<'gc, S>, b: &Value<'gc, S>) -> bool {
+    pub(super) fn check_ref_eq<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> bool {
         match (a, b) {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Bool(_), _) | (_, Value::Bool(_)) => false,

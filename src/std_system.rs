@@ -10,7 +10,6 @@
 use std::prelude::v1::*;
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::fmt;
 
 extern crate std as real_std;
 use real_std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -53,7 +52,7 @@ struct Context {
     role_name: String,
     role_id: String,
 }
-struct RpcRequest<C: CustomTypes> {
+struct RpcRequest<C: CustomTypes<StdSystem<C>>> {
     service: String,
     rpc: String,
     args: Vec<(String, Json)>,
@@ -87,56 +86,39 @@ struct ReplyEntry {
 }
 
 /// A [`StdSystem`] key type for an asynchronous request.
-pub struct RequestKey<C: CustomTypes>(Arc<Mutex<AsyncResult<Result<C::Intermediate, String>>>>);
-impl<C: CustomTypes> RequestKey<C> {
+pub struct RequestKey<C: CustomTypes<StdSystem<C>>>(Arc<Mutex<AsyncResult<Result<C::Intermediate, String>>>>);
+impl<C: CustomTypes<StdSystem<C>>> RequestKey<C> {
+    pub(crate) fn poll(&self) -> AsyncResult<Result<C::Intermediate, String>> { self.0.lock().unwrap().poll() }
+}
+impl<C: CustomTypes<StdSystem<C>>> Key<Result<C::Intermediate, String>> for RequestKey<C> {
     /// Completes the request with the given result.
     /// A value of [`Ok`] denotes a successful request, whose value will be returned to the system
     /// after conversion under [`CustomTypes::from_intermediate`].
     /// A value of [`Err`] denotes a failed request, which will be returned as an error to the runtime,
     /// subject to the caller's [`ErrorScheme`](crate::runtime::ErrorScheme) setting.
-    pub fn complete(self, result: Result<C::Intermediate, String>) { assert!(self.0.lock().unwrap().complete(result).is_ok()) }
-    pub(crate) fn poll(&self) -> AsyncResult<Result<C::Intermediate, String>> { self.0.lock().unwrap().poll() }
+    fn complete(self, value: Result<C::Intermediate, String>) {
+        assert!(self.0.lock().unwrap().complete(value).is_ok())
+    }
 }
 
 /// A [`StdSystem`] key type for an asynchronous command.
 pub struct CommandKey(Arc<Mutex<AsyncResult<Result<(), String>>>>);
 impl CommandKey {
+    pub(crate) fn poll(&self) -> AsyncResult<Result<(), String>> { self.0.lock().unwrap().poll() }
+}
+impl Key<Result<(), String>> for CommandKey {
     /// Completes the command.
     /// A value of [`Ok`] denotes a successful command.
     /// A value of [`Err`] denotes a failed command, which will be returned as an error to the runtime,
     /// subject to the caller's [`ErrorScheme`](crate::runtime::ErrorScheme) setting.
-    pub fn complete(self, result: Result<(), String>) { assert!(self.0.lock().unwrap().complete(result).is_ok()) }
-    pub(crate) fn poll(&self) -> AsyncResult<Result<(), String>> { self.0.lock().unwrap().poll() }
+    fn complete(self, value: Result<(), String>) {
+        assert!(self.0.lock().unwrap().complete(value).is_ok())
+    }
 }
 
 type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
 
-/// The required interface used by [`CustomTypes::Intermediate`].
-pub trait IntermediateType {
-    fn from_json(json: Json) -> Self;
-    fn from_image(img: Vec<u8>) -> Self;
-}
-
-/// A collection of static settings for using custom native types.
-pub trait CustomTypes: 'static + Sized {
-    /// A native type that can be exposed directly to the VM as a value of type [`Value::Native`].
-    /// For type checking, this is required to implement [`GetType`], which can use a custom type enum.
-    type NativeValue: 'static + GetType + fmt::Debug;
-    /// An intermediate type used to produce a [`Value`] for the [`StdSystem`] under async context.
-    /// The reason this is needed is that [`Value`] can only be used during the lifetime of an associated [`MutationContext`] handle,
-    /// which cannot be extended into the larger lifetime required for async operations.
-    /// 
-    /// Conversions are automatically performed from this type to [`Value`] via [`CustomTypes::from_intermediate`].
-    type Intermediate: 'static + Send + IntermediateType;
-
-    /// The type to use for [`System::EntityState`].
-    type EntityState: 'static + for<'gc, 'a> From<EntityKind<'gc, 'a, StdSystem<Self>>>;
-
-    /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
-    fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, StdSystem<Self>>, ErrorCause<StdSystem<Self>>>;
-}
-
-async fn call_rpc_async<C: CustomTypes>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<C::Intermediate, String> {
+async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<C::Intermediate, String> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
     let url = format!("{base_url}/services/{service}/{rpc}?uuid={client_id}&projectId={project_id}&roleId={role_id}&t={time}",
         base_url = context.base_url, client_id = context.client_id, project_id = context.project_id, role_id = context.role_id);
@@ -171,8 +153,8 @@ async fn call_rpc_async<C: CustomTypes>(context: &Context, client: &reqwest::Cli
 }
 
 /// A type implementing the [`System`] trait which supports all features.
-pub struct StdSystem<C: CustomTypes> {
-    config: Config<Self>,
+pub struct StdSystem<C: CustomTypes<StdSystem<C>>> {
+    config: Config<C, Self>,
     context: Arc<Context>,
     client: Arc<reqwest::Client>,
     start_time: Instant,
@@ -184,10 +166,10 @@ pub struct StdSystem<C: CustomTypes> {
     message_sender: Sender<OutgoingMessage>,
     message_receiver: Receiver<IncomingMessage>,
 }
-impl<C: CustomTypes> StdSystem<C> {
+impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://editor.netsblox.org`).
     #[tokio::main(flavor = "current_thread")]
-    pub async fn new(base_url: String, project_name: Option<&str>, config: Config<Self>) -> Self {
+    pub async fn new(base_url: String, project_name: Option<&str>, config: Config<C, Self>) -> Self {
         let mut context = Context {
             base_url,
             client_id: format!("vm-{}", names::Generator::default().next().unwrap()),
@@ -321,7 +303,7 @@ impl<C: CustomTypes> StdSystem<C> {
             let (sender, receiver) = channel();
 
             #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
-            async fn handler<C: CustomTypes>(client: Arc<reqwest::Client>, context: Arc<Context>, receiver: Receiver<RpcRequest<C>>) {
+            async fn handler<C: CustomTypes<StdSystem<C>>>(client: Arc<reqwest::Client>, context: Arc<Context>, receiver: Receiver<RpcRequest<C>>) {
                 while let Ok(request) = receiver.recv() {
                     let (client, context) = (client.clone(), context.clone());
                     tokio::spawn(async move {
@@ -342,7 +324,7 @@ impl<C: CustomTypes> StdSystem<C> {
             request: Some(Rc::new(|system, _, key, request, _| {
                 match request {
                     Request::Rpc { service, rpc, args } => {
-                        match args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_>>>() {
+                        match args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_,_>>>() {
                             Ok(args) => system.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap(),
                             Err(err) => key.complete(Err(format!("failed to convert RPC args to json: {err:?}"))),
                         }
@@ -374,7 +356,7 @@ impl<C: CustomTypes> StdSystem<C> {
         format!("{}@{}", self.context.project_name, self.context.client_id)
     }
 }
-impl<C: CustomTypes> System for StdSystem<C> {
+impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
     type NativeValue = C::NativeValue;
 
     type RequestKey = RequestKey<C>;
@@ -385,15 +367,15 @@ impl<C: CustomTypes> System for StdSystem<C> {
 
     type EntityState = C::EntityState;
 
-    fn rand<T, R>(&self, range: R) -> Result<T, ErrorCause<StdSystem<C>>> where T: SampleUniform, R: SampleRange<T> {
+    fn rand<T, R>(&self, range: R) -> Result<T, ErrorCause<C, StdSystem<C>>> where T: SampleUniform, R: SampleRange<T> {
         Ok(self.rng.lock().unwrap().gen_range(range))
     }
 
-    fn time_ms(&self) -> Result<u64, ErrorCause<StdSystem<C>>> {
+    fn time_ms(&self) -> Result<u64, ErrorCause<C, StdSystem<C>>> {
         Ok(self.start_time.elapsed().as_millis() as u64)
     }
 
-    fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<Value<'gc, Self>, String>, Self::RequestKey>, ErrorCause<Self>> {
+    fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<Value<'gc, C, Self>, String>, Self::RequestKey>, ErrorCause<C, Self>> {
         Ok(match self.config.request.as_ref() {
             Some(handler) => {
                 let key = RequestKey(Arc::new(Mutex::new(AsyncResult::new())));
@@ -405,7 +387,7 @@ impl<C: CustomTypes> System for StdSystem<C> {
             None => return Err(ErrorCause::NotSupported { feature: request.feature() }),
         })
     }
-    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, _: &Entity<'gc, Self>) -> Result<AsyncResult<Result<Value<'gc, Self>, String>>, ErrorCause<Self>> {
+    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, _: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>> {
         Ok(match key.poll() {
             AsyncResult::Completed(Ok(x)) => AsyncResult::Completed(Ok(C::from_intermediate(mc, x)?)),
             AsyncResult::Completed(Err(x)) => AsyncResult::Completed(Err(x)),
@@ -414,7 +396,7 @@ impl<C: CustomTypes> System for StdSystem<C> {
         })
     }
 
-    fn perform_command<'gc>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, Self>, entity: &Entity<'gc, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<Self>> {
+    fn perform_command<'gc>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>> {
         Ok(match self.config.command.as_ref() {
             Some(handler) => {
                 let key = CommandKey(Arc::new(Mutex::new(AsyncResult::new())));
@@ -426,11 +408,11 @@ impl<C: CustomTypes> System for StdSystem<C> {
             None => return Err(ErrorCause::NotSupported { feature: command.feature() }),
         })
     }
-    fn poll_command<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::CommandKey, _: &Entity<'gc, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<Self>> {
+    fn poll_command<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::CommandKey, _: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>> {
         Ok(key.poll())
     }
 
-    fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<Self::ExternReplyKey>, ErrorCause<StdSystem<C>>> {
+    fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<Self::ExternReplyKey>, ErrorCause<C, StdSystem<C>>> {
         let (msg, reply_key) = match expect_reply {
             false => (OutgoingMessage::Normal { msg_type, values, targets }, None),
             true => {
@@ -454,7 +436,7 @@ impl<C: CustomTypes> System for StdSystem<C> {
         }
         AsyncResult::Pending
     }
-    fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<Self>> {
+    fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<C, Self>> {
         self.message_sender.send(OutgoingMessage::Reply { value, reply_key: key }).unwrap();
         Ok(())
     }
