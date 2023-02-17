@@ -1,4 +1,5 @@
 use std::prelude::v1::*;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use crate::*;
@@ -78,6 +79,169 @@ fn test_proj_effects() {
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
         ])).unwrap();
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-20, "res");
+    });
+}
+
+#[test]
+fn test_proj_costumes() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/costumes.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        let res = global_context.globals.lookup("res").unwrap().get().clone();
+        match &res {
+            Value::List(x) => {
+                let x = x.read();
+                assert_eq!(x.len(), 16);
+                let costumes = match &x[0] {
+                    Value::List(x) => {
+                        let x = x.read();
+                        assert_eq!(x.len(), 5);
+                        x.iter().map(|x| match x {
+                            Value::Image(x) => x.clone(),
+                            x => panic!("{x:?}"),
+                        }).collect::<Vec<_>>()
+                    }
+                    x => panic!("{x:?}"),
+                };
+                let costume_set = costumes.iter().map(Rc::as_ptr).collect::<BTreeSet<_>>();
+                assert_eq!(costume_set.len(), 5);
+
+                let chart = match &x[9] {
+                    Value::List(x) => match &x.read()[0] {
+                        Value::Image(x) => x.clone(),
+                        x => panic!("{x:?}"),
+                    }
+                    Value::Image(x) => x.clone(),
+                    x => panic!("{x:?}"),
+                };
+                assert!(!costume_set.contains(&Rc::as_ptr(&chart)));
+
+                for idx in [1, 6, 14] {
+                    match &x[idx] {
+                        Value::List(x) => {
+                            let x = x.read();
+                            assert_eq!(x.len(), 2);
+                            match &x[0] {
+                                Value::Image(x) => assert!(Rc::ptr_eq(x, &costumes[1])),
+                                x => panic!("{x:?}"),
+                            }
+                            match &x[1] {
+                                Value::Number(x) => assert_eq!(x.get(), 2.0),
+                                x => panic!("{x:?}"),
+                            }
+                        }
+                        x => panic!("{x:?}"),
+                    }
+                }
+                for idx in [2, 7, 8, 15] {
+                    match &x[idx] {
+                        Value::List(x) => {
+                            let x = x.read();
+                            assert_eq!(x.len(), 2);
+                            match &x[0] {
+                                Value::String(x) => assert_eq!(x.as_str(), ""),
+                                x => panic!("{x:?}"),
+                            }
+                            match &x[1] {
+                                Value::Number(x) => assert_eq!(x.get(), 0.0),
+                                x => panic!("{x:?}"),
+                            }
+                        }
+                        x => panic!("{x:?}"),
+                    }
+                }
+                for idx in [3] {
+                    match &x[idx] {
+                        Value::List(x) => {
+                            let x = x.read();
+                            assert_eq!(x.len(), 2);
+                            match &x[0] {
+                                Value::Image(x) => assert!(Rc::ptr_eq(x, &costumes[3])),
+                                x => panic!("{x:?}"),
+                            }
+                            match &x[1] {
+                                Value::Number(x) => assert_eq!(x.get(), 4.0),
+                                x => panic!("{x:?}"),
+                            }
+                        }
+                        x => panic!("{x:?}"),
+                    }
+                }
+                for idx in [4, 11] {
+                    match &x[idx] {
+                        Value::List(x) => {
+                            let x = x.read();
+                            assert_eq!(x.len(), 2);
+                            match &x[0] {
+                                Value::Image(x) => assert!(Rc::ptr_eq(x, &costumes[4])),
+                                x => panic!("{x:?}"),
+                            }
+                            match &x[1] {
+                                Value::Number(x) => assert_eq!(x.get(), 5.0),
+                                x => panic!("{x:?}"),
+                            }
+                        }
+                        x => panic!("{x:?}"),
+                    }
+                }
+                for idx in [5, 12] {
+                    match &x[idx] {
+                        Value::List(x) => {
+                            let x = x.read();
+                            assert_eq!(x.len(), 2);
+                            match &x[0] {
+                                Value::Image(x) => assert!(Rc::ptr_eq(x, &costumes[0])),
+                                x => panic!("{x:?}"),
+                            }
+                            match &x[1] {
+                                Value::Number(x) => assert_eq!(x.get(), 1.0),
+                                x => panic!("{x:?}"),
+                            }
+                        }
+                        x => panic!("{x:?}"),
+                    }
+                }
+                for idx in [9, 10] {
+                    match &x[idx] {
+                        Value::List(x) => {
+                            let x = x.read();
+                            assert_eq!(x.len(), 2);
+                            match &x[0] {
+                                Value::Image(x) => assert!(Rc::ptr_eq(x, &chart)),
+                                x => panic!("{x:?}"),
+                            }
+                            match &x[1] {
+                                Value::Number(x) => assert_eq!(x.get(), 0.0),
+                                x => panic!("{x:?}"),
+                            }
+                        }
+                        x => panic!("{x:?}"),
+                    }
+                }
+                for idx in [13] {
+                    match &x[idx] {
+                        Value::List(x) => {
+                            let x = x.read();
+                            assert_eq!(x.len(), 2);
+                            match &x[0] {
+                                Value::Image(x) => assert!(Rc::ptr_eq(x, &costumes[2])),
+                                x => panic!("{x:?}"),
+                            }
+                            match &x[1] {
+                                Value::Number(x) => assert_eq!(x.get(), 3.0),
+                                x => panic!("{x:?}"),
+                            }
+                        }
+                        x => panic!("{x:?}"),
+                    }
+                }
+            }
+            x => panic!("{x:?}"),
+        }
     });
 }
 

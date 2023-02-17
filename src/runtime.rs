@@ -61,6 +61,8 @@ pub struct ConversionError<C: CustomTypes<S>, S: System<C>> {
 pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     /// A variable lookup operation failed. `name` holds the name of the variable that was expected.
     UndefinedVariable { name: String },
+    /// A name-based costume lookup operation failed.
+    UndefinedCostume { name: String },
     /// The result of a failed type conversion.
     ConversionError { got: Type<C, S>, expected: Type<C, S> },
     /// The result of a failed variadic type conversion (expected type `T` or a list of type `T`).
@@ -283,14 +285,13 @@ impl Default for Effects {
 }
 
 /// A collection of properties related to an entity.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Properties {
     pub pos: (Number, Number),
     pub heading: Number,
 
     pub visible: bool,
     pub size: Number,
-    pub costume: Option<Costume>,
 
     pub pen_down: bool,
     pub pen_size: Number,
@@ -317,7 +318,6 @@ impl Default for Properties {
 
             visible: true,
             size: hundred,
-            costume: None,
 
             pen_down: false,
             pen_size: Number::new(1.0).unwrap(),
@@ -554,19 +554,14 @@ pub enum EntityKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     SpriteClone { parent: &'a Entity<'gc, C, S> },
 }
 
-#[derive(Clone)]
-pub enum Costume {
-    Static(usize),
-    Dynamic(Rc<Vec<u8>>),
-}
-
 /// Information about an entity (sprite or stage).
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub name: String,
                                pub fields: SymbolTable<'gc, C, S>,
-    #[collect(require_static)] pub costumes: Vec<(String, Rc<Vec<u8>>)>,
+    #[collect(require_static)] pub costume_list: Vec<(String, Rc<Vec<u8>>)>,
+    #[collect(require_static)] pub costume: Option<Rc<Vec<u8>>>,
     #[collect(require_static)] pub properties: Properties,
     #[collect(require_static)] pub state: S::EntityState,
 }
@@ -847,18 +842,19 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
                 fields.redefine_or_define(field, Shared::Unique(get_value(value, &allocated_refs)));
             }
 
-            let mut costumes = Vec::with_capacity(entity_info.costumes.len());
+            let mut costume_list = Vec::with_capacity(entity_info.costumes.len());
             for (name, value) in entity_info.costumes.iter() {
                 let image = match get_value(value, &allocated_refs) {
                     Value::Image(x) => x.clone(),
                     _ => unreachable!(),
                 };
-                costumes.push((name.clone(), image));
+                costume_list.push((name.clone(), image));
             }
+
+            let costume = entity_info.active_costume.and_then(|x| costume_list.get(x)).map(|x| x.1.clone());
 
             let mut properties = Properties::default();
             properties.visible = entity_info.visible;
-            properties.costume = entity_info.active_costume.map(Costume::Static);
             properties.size = entity_info.size;
             properties.pos = entity_info.pos;
             properties.heading = entity_info.heading;
@@ -870,7 +866,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             properties.pen_color_v = Number::new(v as f64 * 100.0).unwrap();
             properties.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
 
-            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, costumes, state, properties }));
+            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, costume_list, costume, state, properties }));
         }
 
         let proj_name = init_info.proj_name.clone();

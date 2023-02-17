@@ -129,6 +129,7 @@ pub struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] warp_counter: usize,
     #[collect(require_static)] value_stack_size: usize,
     #[collect(require_static)] handler_stack_size: usize,
+    #[collect(require_static)] meta_stack_size: usize,
 }
 
 struct Handler {
@@ -137,6 +138,7 @@ struct Handler {
     warp_counter: usize,
     call_stack_size: usize,
     value_stack_size: usize,
+    meta_stack_size: usize,
 }
 
 enum Defer<C: CustomTypes<S>, S: System<C>> {
@@ -232,6 +234,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             warp_counter: 0,
             value_stack_size: 0,
             handler_stack_size: 0,
+            meta_stack_size: 0,
             locals,
         });
         self.value_stack.clear();
@@ -250,12 +253,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, C, S>, ExecError<C, S>> {
         let mut res = self.step_impl(mc);
         if let Err(err) = &res {
-            if let Some(Handler { pos, var, warp_counter, call_stack_size, value_stack_size }) = self.handler_stack.last() {
+            if let Some(Handler { pos, var, warp_counter, call_stack_size, value_stack_size, meta_stack_size }) = self.handler_stack.last() {
                 self.warp_counter = *warp_counter;
                 self.call_stack.drain(*call_stack_size..);
                 self.value_stack.drain(*value_stack_size..);
+                self.meta_stack.drain(*meta_stack_size..);
                 debug_assert_eq!(self.call_stack.len(), *call_stack_size);
                 debug_assert_eq!(self.value_stack.len(), *value_stack_size);
+                debug_assert_eq!(self.meta_stack.len(), *meta_stack_size);
 
                 let msg = match err {
                     ErrorCause::Custom { msg } => msg.clone(),
@@ -784,8 +789,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     return Err(ErrorCause::CallDepthLimit { limit: global_context.settings.max_call_depth });
                 }
 
-                debug_assert_eq!(self.meta_stack.len(), params);
-                let params: Vec<_> = self.meta_stack.drain(..).collect();
+                debug_assert!(self.meta_stack.len() >= params);
+                let params: Vec<_> = self.meta_stack.drain(self.meta_stack.len() - params..).collect();
 
                 let mut locals = SymbolTable::default();
                 for var in params.iter().rev() {
@@ -797,14 +802,15 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     warp_counter: self.warp_counter,
                     value_stack_size: self.value_stack.len(),
                     handler_stack_size: self.handler_stack.len(),
+                    meta_stack_size: self.meta_stack.len(),
                     locals
                 });
                 self.pos = pos;
             }
             Instruction::MakeClosure { pos, params, captures } => {
-                debug_assert_eq!(self.meta_stack.len(), params + captures);
-                let captures: Vec<_> = self.meta_stack.drain(params..).collect();
-                let params: Vec<_> = self.meta_stack.drain(..).collect();
+                debug_assert!(self.meta_stack.len() >= params + captures);
+                let captures: Vec<_> = self.meta_stack.drain(self.meta_stack.len() - captures..).collect();
+                let params: Vec<_> = self.meta_stack.drain(self.meta_stack.len() - params..).collect();
 
                 let mut caps = SymbolTable::default();
                 for var in captures.iter() {
@@ -833,20 +839,23 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     warp_counter: self.warp_counter,
                     value_stack_size: self.value_stack.len(),
                     handler_stack_size: self.handler_stack.len(),
+                    meta_stack_size: self.meta_stack.len(),
                     locals,
                 });
                 self.pos = closure.pos;
             }
             Instruction::Return => {
-                let CallStackEntry { called_from, return_to, locals: _, warp_counter, value_stack_size, handler_stack_size } = self.call_stack.pop().unwrap();
+                let CallStackEntry { called_from, return_to, locals: _, warp_counter, value_stack_size, handler_stack_size, meta_stack_size } = self.call_stack.pop().unwrap();
                 let return_value = self.value_stack.pop().unwrap();
 
                 self.pos = return_to;
                 self.warp_counter = warp_counter;
                 self.value_stack.drain(value_stack_size..);
                 self.handler_stack.drain(handler_stack_size..);
+                self.meta_stack.drain(meta_stack_size..);
                 debug_assert_eq!(self.value_stack.len(), value_stack_size);
                 debug_assert_eq!(self.handler_stack.len(), handler_stack_size);
+                debug_assert_eq!(self.meta_stack.len(), meta_stack_size);
 
                 self.value_stack.push(return_value);
 
@@ -857,6 +866,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     debug_assert_eq!(warp_counter, 0);
                     debug_assert_eq!(value_stack_size, 0);
                     debug_assert_eq!(handler_stack_size, 0);
+                    debug_assert_eq!(meta_stack_size, 0);
                     return Ok(ProcessStep::Terminate { result: Some(self.value_stack.pop().unwrap()) });
                 }
             }
@@ -867,6 +877,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     warp_counter: self.warp_counter,
                     call_stack_size: self.call_stack.len(),
                     value_stack_size: self.value_stack.len(),
+                    meta_stack_size: self.meta_stack.len(),
                 });
                 self.pos = aft_pos;
             }
@@ -879,7 +890,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 return Err(ErrorCause::Custom { msg });
             }
             Instruction::CallRpc { service, rpc, args } => {
-                debug_assert_eq!(self.meta_stack.len(), args);
+                debug_assert!(self.meta_stack.len() >= args);
                 let mut args_vec = Vec::with_capacity(args);
                 for _ in 0..args {
                     let arg_name = self.meta_stack.pop().unwrap();
@@ -1000,6 +1011,40 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ChangeProperty { prop } => {
                 let delta = self.value_stack.pop().unwrap();
                 perform_command!(Command::ChangeProperty { prop, delta }, aft_pos);
+            }
+            Instruction::PushCostume => {
+                self.value_stack.push(entity.costume.clone().map(|x| Value::Image(x)).unwrap_or_else(|| Value::String(empty_string())));
+                self.pos = aft_pos;
+            }
+            Instruction::PushCostumeNumber => {
+                let res = entity.costume.as_ref().and_then(|x| entity.costume_list.iter().enumerate().find(|c| Rc::ptr_eq(x, &c.1.1))).map(|x| x.0 + 1).unwrap_or(0);
+                self.value_stack.push(Value::Number(Number::new(res as f64)?));
+                self.pos = aft_pos;
+            }
+            Instruction::PushCostumeList => {
+                self.value_stack.push(Value::List(GcCell::allocate(mc, entity.costume_list.iter().map(|x| Value::Image(x.1.clone())).collect())));
+                self.pos = aft_pos;
+            }
+            Instruction::SetCostume => {
+                entity.costume = match self.value_stack.pop().unwrap() {
+                    Value::Image(x) => Some(x.clone()),
+                    Value::String(x) => match x.as_str() {
+                        "" => None,
+                        x => match entity.costume_list.iter().find(|c| c.0 == x) {
+                            Some(c) => Some(c.1.clone()),
+                            None => return Err(ErrorCause::UndefinedCostume { name: x.into() }),
+                        }
+                    }
+                    x => return Err(ErrorCause::ConversionError { got: x.get_type(), expected: Type::Image }),
+                };
+                self.pos = aft_pos;
+            }
+            Instruction::NextCostume => {
+                match entity.costume.as_ref().and_then(|x| entity.costume_list.iter().enumerate().find(|c| Rc::ptr_eq(x, &c.1.1))).map(|x| x.0) {
+                    Some(idx) => entity.costume = Some(entity.costume_list[(idx + 1) % entity.costume_list.len()].1.clone()),
+                    None => (),
+                }
+                self.pos = aft_pos;
             }
             Instruction::ClearEffects => {
                 perform_command!(Command::ClearEffects, aft_pos);

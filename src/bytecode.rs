@@ -369,8 +369,23 @@ pub(crate) enum Instruction<'a> {
     /// Consumes 1 value, `delta`, and adds its value to the specified property.
     ChangeProperty { prop: Property },
 
+    /// Pushes a reference to the current costume onto the value stack.
+    PushCostume,
+    /// Pushes the current costume number onto the value stack (or zero if using no costume or a non-static costume for the given entity).
+    PushCostumeNumber,
+    /// Pushes a shallow copy of the entity's list of static costumes onto the value stack.
+    PushCostumeList,
+    /// Consumes 1 value, `costume`, from the value stack and assigns it as the current costume.
+    /// This can be an image or the name of a static costume on the entity.
+    /// Empty string can be used to remove the current costume.
+    SetCostume,
+    /// If using a static costume, advances to the next costume (if one exists).
+    /// If using dynamic costumes or no costume, does nothing.
+    NextCostume,
+
     /// Clears all graphic effects on the entity.
     ClearEffects,
+
     /// Consumes 1 value, `dist`, and asynchronously moves the entity forward by that distance (or backwards if negative).
     Forward,
 }
@@ -756,8 +771,15 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             90 => read_prefixed!(Instruction::SetProperty {} : prop),
             91 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
-            92 => read_prefixed!(Instruction::ClearEffects),
-            93 => read_prefixed!(Instruction::Forward),
+            92 => read_prefixed!(Instruction::PushCostume),
+            93 => read_prefixed!(Instruction::PushCostumeNumber),
+            94 => read_prefixed!(Instruction::PushCostumeList),
+            95 => read_prefixed!(Instruction::SetCostume),
+            96 => read_prefixed!(Instruction::NextCostume),
+
+            97 => read_prefixed!(Instruction::ClearEffects),
+
+            98 => read_prefixed!(Instruction::Forward),
 
             _ => unreachable!(),
         }
@@ -909,8 +931,15 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::SetProperty { prop } => append_prefixed!(90: prop),
             Instruction::ChangeProperty { prop } => append_prefixed!(91: prop),
 
-            Instruction::ClearEffects => append_prefixed!(92),
-            Instruction::Forward => append_prefixed!(93),
+            Instruction::PushCostume => append_prefixed!(92),
+            Instruction::PushCostumeNumber => append_prefixed!(93),
+            Instruction::PushCostumeList => append_prefixed!(94),
+            Instruction::SetCostume => append_prefixed!(95),
+            Instruction::NextCostume => append_prefixed!(96),
+
+            Instruction::ClearEffects => append_prefixed!(97),
+
+            Instruction::Forward => append_prefixed!(98),
         }
     }
 }
@@ -1194,6 +1223,9 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::Timer => self.ins.push(Instruction::PushTimer.into()),
             ast::ExprKind::XPos => self.ins.push(Instruction::PushProperty { prop: Property::XPos }.into()),
             ast::ExprKind::YPos => self.ins.push(Instruction::PushProperty { prop: Property::YPos }.into()),
+            ast::ExprKind::Costume => self.ins.push(Instruction::PushCostume.into()),
+            ast::ExprKind::CostumeNumber => self.ins.push(Instruction::PushCostumeNumber.into()),
+            ast::ExprKind::CostumeList => self.ins.push(Instruction::PushCostumeList.into()),
             ast::ExprKind::Add { values } => self.append_variadic_op(entity, values, VariadicOp::Add)?,
             ast::ExprKind::Mul { values } => self.append_variadic_op(entity, values, VariadicOp::Mul)?,
             ast::ExprKind::Min { values } => self.append_variadic_op(entity, values, VariadicOp::Min)?,
@@ -1457,6 +1489,14 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::StmtKind::Forward { distance } => self.append_simple_ins(entity, &[distance], Instruction::Forward)?,
             ast::StmtKind::ResetTimer => self.ins.push(Instruction::ResetTimer.into()),
             ast::StmtKind::TurnRight { angle } => self.append_simple_ins(entity, &[angle], Instruction::ChangeProperty { prop: Property::Heading })?,
+            ast::StmtKind::NextCostume => self.ins.push(Instruction::NextCostume.into()),
+            ast::StmtKind::SetCostume { costume } => match costume {
+                Some(x) => self.append_simple_ins(entity, &[x], Instruction::SetCostume)?,
+                None => {
+                    self.ins.push(Instruction::PushString { value: "" }.into());
+                    self.ins.push(Instruction::SetCostume.into());
+                }
+            }
             ast::StmtKind::TurnLeft { angle } => {
                 self.append_expr(angle, entity)?;
                 self.ins.push(Instruction::from(UnaryOp::Neg).into());
@@ -1977,6 +2017,9 @@ impl ByteCode {
         for entity in role.entities.iter() {
             for field in entity.fields.iter() {
                 register_ref_values(&field.init, &mut ref_values, &mut refs, &mut string_refs, &mut image_refs);
+            }
+            for costume in entity.costumes.iter() {
+                register_ref_values(&costume.init, &mut ref_values, &mut refs, &mut string_refs, &mut image_refs);
             }
         }
 
