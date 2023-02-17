@@ -4,6 +4,7 @@
 
 use std::prelude::v1::*;
 use std::collections::{BTreeMap, VecDeque};
+use std::rc::Rc;
 use std::mem;
 
 #[cfg(feature = "std")]
@@ -939,13 +940,22 @@ pub(crate) enum InitValue {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) enum RefValue {
     List(Vec<InitValue>),
+    Image(Vec<u8>),
     String(String),
 }
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct EntityInitInfo {
     pub(crate) name: String,
     pub(crate) fields: Vec<(String, InitValue)>,
+    pub(crate) costumes: Vec<(String, InitValue)>,
     pub(crate) scripts: Vec<(Event, usize)>,
+
+    pub(crate) visible: bool,
+    pub(crate) active_costume: Option<usize>,
+    pub(crate) size: Number,
+    pub(crate) color: (u8, u8, u8, u8),
+    pub(crate) pos: (Number, Number),
+    pub(crate) heading: Number,
 }
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct InitInfo {
@@ -1123,6 +1133,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     }
                 },
                 ast::Value::Bool(v) => Instruction::PushBool { value: *v },
+                ast::Value::Image(_) => unreachable!(), // Snap! doesn't have image literals
                 ast::Value::List(_, _) => unreachable!(), // Snap! doesn't have list literals
                 ast::Value::Ref(_) => unreachable!(), // Snap! doesn't have reference literals
             }.into()),
@@ -1934,13 +1945,20 @@ impl ByteCode {
 
         let mut refs = BTreeMap::new();
         let mut string_refs = BTreeMap::new();
+        let mut image_refs = BTreeMap::new();
 
-        fn register_ref_values<'a>(val: &'a ast::Value, ref_values: &mut Vec<Option<RefValue>>, refs: &mut BTreeMap<usize, usize>, string_refs: &mut BTreeMap<&'a str, usize>) {
+        fn register_ref_values<'a>(val: &'a ast::Value, ref_values: &mut Vec<Option<RefValue>>, refs: &mut BTreeMap<usize, usize>, string_refs: &mut BTreeMap<&'a str, usize>, image_refs: &mut BTreeMap<*const Vec<u8>, usize>) {
             match val {
                 ast::Value::Ref(_) | ast::Value::Bool(_) | ast::Value::Number(_) | ast::Value::Constant(_) => (),
                 ast::Value::String(x) => {
                     string_refs.entry(x).or_insert_with(|| {
                         ref_values.push(Some(RefValue::String(x.clone()))); // we already have the value to store
+                        ref_values.len() - 1
+                    });
+                }
+                ast::Value::Image(x) => {
+                    image_refs.entry(Rc::as_ptr(x)).or_insert_with(|| {
+                        ref_values.push(Some(RefValue::Image((**x).clone()))); // we already have the value to store
                         ref_values.len() - 1
                     });
                 }
@@ -1954,15 +1972,15 @@ impl ByteCode {
         }
 
         for global in role.globals.iter() {
-            register_ref_values(&global.init, &mut ref_values, &mut refs, &mut string_refs);
+            register_ref_values(&global.init, &mut ref_values, &mut refs, &mut string_refs, &mut image_refs);
         }
         for entity in role.entities.iter() {
             for field in entity.fields.iter() {
-                register_ref_values(&field.init, &mut ref_values, &mut refs, &mut string_refs);
+                register_ref_values(&field.init, &mut ref_values, &mut refs, &mut string_refs, &mut image_refs);
             }
         }
 
-        fn get_value<'a>(val: &'a ast::Value, ref_values: &mut Vec<Option<RefValue>>, refs: &BTreeMap<usize, usize>, string_refs: &BTreeMap<&'a str, usize>) -> Result<InitValue, CompileError<'a>> {
+        fn get_value<'a>(val: &'a ast::Value, ref_values: &mut Vec<Option<RefValue>>, refs: &BTreeMap<usize, usize>, string_refs: &BTreeMap<&'a str, usize>, image_refs: &BTreeMap<*const Vec<u8>, usize>) -> Result<InitValue, CompileError<'a>> {
             Ok(match val {
                 ast::Value::Bool(x) => InitValue::Bool(*x),
                 ast::Value::Number(x) => InitValue::Number(Number::new(*x)?),
@@ -1978,8 +1996,12 @@ impl ByteCode {
                     let idx = *string_refs.get(x.as_str()).ok_or_else(|| CompileError::UndefinedRef)?;
                     InitValue::Ref(idx)
                 }
+                ast::Value::Image(x) => {
+                    let idx = *image_refs.get(&Rc::as_ptr(x)).ok_or_else(|| CompileError::UndefinedRef)?;
+                    InitValue::Ref(idx)
+                }
                 ast::Value::List(values, ref_id) => {
-                    let res = RefValue::List(values.iter().map(|x| get_value(x, ref_values, refs, string_refs)).collect::<Result<_,_>>()?);
+                    let res = RefValue::List(values.iter().map(|x| get_value(x, ref_values, refs, string_refs, image_refs)).collect::<Result<_,_>>()?);
                     match ref_id {
                         Some(ref_id) => {
                             let idx = *refs.get(&ref_id.0).ok_or_else(|| CompileError::UndefinedRef)?;
@@ -2004,16 +2026,28 @@ impl ByteCode {
         let mut entities = vec![];
 
         for global in role.globals.iter() {
-            globals.push((global.def.name.clone(), get_value(&global.init, &mut ref_values, &refs, &string_refs)?));
+            globals.push((global.def.name.clone(), get_value(&global.init, &mut ref_values, &refs, &string_refs, &image_refs)?));
         }
 
         for (entity, entity_info) in script_info.entities.iter() {
             let name = entity.name.clone();
             let mut fields = vec![];
             let mut scripts = vec![];
+            let mut costumes = vec![];
+
+            let visible = entity.visible;
+            let active_costume = entity.active_costume.clone();
+            let color = entity.color;
+            let size = Number::new(entity.scale * 100.0)?;
+            let pos = (Number::new(entity.pos.0)?, Number::new(entity.pos.1)?);
+            let heading = Number::new(entity.heading.rem_euclid(360.0))?;
 
             for field in entity.fields.iter() {
-                fields.push((field.def.name.clone(), get_value(&field.init, &mut ref_values, &refs, &string_refs)?));
+                fields.push((field.def.name.clone(), get_value(&field.init, &mut ref_values, &refs, &string_refs, &image_refs)?));
+            }
+
+            for costume in entity.costumes.iter() {
+                costumes.push((costume.def.name.clone(), get_value(&costume.init, &mut ref_values, &refs, &string_refs, &image_refs)?));
             }
 
             for (script, pos) in entity_info.scripts.iter().copied() {
@@ -2047,7 +2081,7 @@ impl ByteCode {
                 scripts.push((event, pos));
             }
 
-            entities.push(EntityInitInfo { name, fields, scripts });
+            entities.push(EntityInitInfo { name, fields, costumes, scripts, active_costume, pos, heading, size, visible, color });
         }
 
         let ref_values = ref_values.into_iter().map(|x| x.ok_or_else(|| CompileError::UndefinedRef)).collect::<Result<_,_>>()?;

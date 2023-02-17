@@ -283,14 +283,14 @@ impl Default for Effects {
 }
 
 /// A collection of properties related to an entity.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Properties {
-    pub x_pos: Number,
-    pub y_pos: Number,
+    pub pos: (Number, Number),
     pub heading: Number,
 
     pub visible: bool,
     pub size: Number,
+    pub costume: Option<Costume>,
 
     pub pen_down: bool,
     pub pen_size: Number,
@@ -312,12 +312,12 @@ impl Default for Properties {
         let hundred = Number::new(100.0).unwrap();
 
         Self {
-            x_pos: zero,
-            y_pos: zero,
+            pos: (zero, zero),
             heading: zero,
 
             visible: true,
             size: hundred,
+            costume: None,
 
             pen_down: false,
             pen_size: Number::new(1.0).unwrap(),
@@ -554,12 +554,19 @@ pub enum EntityKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     SpriteClone { parent: &'a Entity<'gc, C, S> },
 }
 
+#[derive(Clone)]
+pub enum Costume {
+    Static(usize),
+    Dynamic(Rc<Vec<u8>>),
+}
+
 /// Information about an entity (sprite or stage).
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub name: String,
                                pub fields: SymbolTable<'gc, C, S>,
+    #[collect(require_static)] pub costumes: Vec<(String, Rc<Vec<u8>>)>,
     #[collect(require_static)] pub properties: Properties,
     #[collect(require_static)] pub state: S::EntityState,
 }
@@ -796,6 +803,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
     pub fn from_init(mc: MutationContext<'gc, '_>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
         let allocated_refs = init_info.ref_values.iter().map(|ref_value| match ref_value {
             RefValue::String(value) => Value::String(Rc::new(value.clone())),
+            RefValue::Image(content) => Value::Image(Rc::new(content.clone())),
             RefValue::List(_) => Value::List(GcCell::allocate(mc, Default::default())),
         }).collect::<Vec<_>>();
 
@@ -809,7 +817,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
 
         for (allocated_ref, ref_value) in iter::zip(&allocated_refs, &init_info.ref_values) {
             match ref_value {
-                RefValue::String(_) => continue,
+                RefValue::String(_) | RefValue::Image(_) => continue, // we already populated these values in the first pass
                 RefValue::List(values) => {
                     let allocated_ref = match allocated_ref {
                         Value::List(x) => x,
@@ -839,7 +847,30 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
                 fields.redefine_or_define(field, Shared::Unique(get_value(value, &allocated_refs)));
             }
 
-            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, state, properties: Default::default() }));
+            let mut costumes = Vec::with_capacity(entity_info.costumes.len());
+            for (name, value) in entity_info.costumes.iter() {
+                let image = match get_value(value, &allocated_refs) {
+                    Value::Image(x) => x.clone(),
+                    _ => unreachable!(),
+                };
+                costumes.push((name.clone(), image));
+            }
+
+            let mut properties = Properties::default();
+            properties.visible = entity_info.visible;
+            properties.costume = entity_info.active_costume.map(Costume::Static);
+            properties.size = entity_info.size;
+            properties.pos = entity_info.pos;
+            properties.heading = entity_info.heading;
+
+            let (r, g, b, a) = entity_info.color;
+            let (h, s, v, a) = Color { r, g, b, a }.to_hsva();
+            properties.pen_color_h = Number::new(h as f64).unwrap();
+            properties.pen_color_s = Number::new(s as f64 * 100.0).unwrap();
+            properties.pen_color_v = Number::new(v as f64 * 100.0).unwrap();
+            properties.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
+
+            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, costumes, state, properties }));
         }
 
         let proj_name = init_info.proj_name.clone();
@@ -1033,8 +1064,8 @@ impl<C: CustomTypes<S>, S: System<C>> Default for Config<C, S> {
             request: Some(Rc::new(|_, _, key, request, entity| match request {
                 Request::Property { prop } => {
                     let value: Json = match prop {
-                        Property::XPos => entity.properties.x_pos.get().into(),
-                        Property::YPos => entity.properties.y_pos.get().into(),
+                        Property::XPos => entity.properties.pos.0.get().into(),
+                        Property::YPos => entity.properties.pos.1.get().into(),
                         Property::Heading => entity.properties.heading.get().into(),
 
                         Property::Visible => entity.properties.visible.into(),
@@ -1078,8 +1109,8 @@ impl<C: CustomTypes<S>, S: System<C>> Default for Config<C, S> {
             command: Some(Rc::new(|_, _, key, command, entity| match command {
                 Command::SetProperty { prop, value } => {
                     match prop {
-                        Property::XPos => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.x_pos = value),
-                        Property::YPos => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.y_pos = value),
+                        Property::XPos => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.pos.0 = value),
+                        Property::YPos => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.pos.1 = value),
                         Property::Heading => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.heading = value),
 
                         Property::Visible => with_value(key, value.to_bool().map_err(Into::into), entity, |entity, value| entity.properties.visible = value),
@@ -1121,9 +1152,9 @@ impl<C: CustomTypes<S>, S: System<C>> Default for Config<C, S> {
                 }
                 Command::ChangeProperty { prop, delta } => {
                     match prop {
-                        Property::XPos => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.x_pos.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.x_pos = value),
-                        Property::YPos => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.y_pos.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.y_pos = value),
-                        Property::Heading => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.y_pos.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.y_pos = value),
+                        Property::XPos => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.pos.0.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.pos.0 = value),
+                        Property::YPos => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.pos.1.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.pos.1 = value),
+                        Property::Heading => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.heading.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.heading = value),
 
                         Property::Visible => with_value(key, delta.to_bool().map_err(Into::into), entity, |entity, value| entity.properties.visible ^= value),
                         Property::Size => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.size.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.size = value),
