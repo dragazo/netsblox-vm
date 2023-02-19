@@ -25,10 +25,30 @@ impl GetType for NativeValue {
     }
 }
 
-struct EntityState;
+struct EntityState {
+    props: Properties,
+}
 impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
-    fn from(_: EntityKind<'_, '_, C, StdSystem<C>>) -> Self {
-        EntityState
+    fn from(kind: EntityKind<'_, '_, C, StdSystem<C>>) -> Self {
+        match kind {
+            EntityKind::Stage { props } | EntityKind::Sprite { props } => EntityState { props },
+            EntityKind::SpriteClone { parent } => EntityState { props: parent.state.props },
+        }
+    }
+}
+
+fn default_properties_config() -> Config<C, StdSystem<C>> {
+    Config {
+        request: Some(Rc::new(|_, _, key, request, entity| match request {
+            Request::Property { prop } => entity.state.props.perform_get_property(key, prop),
+            _ => RequestStatus::UseDefault { key, request },
+        })),
+        command: Some(Rc::new(|_, _, key, command, entity| match command {
+            Command::SetProperty { prop, value } => entity.state.props.perform_set_property(key, prop, value),
+            Command::ChangeProperty { prop, delta } => entity.state.props.perform_change_property(key, prop, delta),
+            Command::ClearEffects => entity.state.props.perform_clear_effects(key),
+            _ => CommandStatus::UseDefault { key, command },
+        })),
     }
 }
 

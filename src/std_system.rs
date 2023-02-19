@@ -357,15 +357,11 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     }
 }
 impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
-    type NativeValue = C::NativeValue;
-
     type RequestKey = RequestKey<C>;
     type CommandKey = CommandKey;
 
     type ExternReplyKey = ExternReplyKey;
     type InternReplyKey = InternReplyKey;
-
-    type EntityState = C::EntityState;
 
     fn rand<T, R>(&self, range: R) -> Result<T, ErrorCause<C, StdSystem<C>>> where T: SampleUniform, R: SampleRange<T> {
         Ok(self.rng.lock().unwrap().gen_range(range))

@@ -1026,8 +1026,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::SetCostume => {
-                entity.costume = match self.value_stack.pop().unwrap() {
-                    Value::Image(x) => Some(x.clone()),
+                let new_costume = match self.value_stack.pop().unwrap() {
+                    Value::Image(x) => Some(x),
                     Value::String(x) => match x.as_str() {
                         "" => None,
                         x => match entity.costume_list.iter().find(|c| c.0 == x) {
@@ -1037,14 +1037,26 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     }
                     x => return Err(ErrorCause::ConversionError { got: x.get_type(), expected: Type::Image }),
                 };
-                self.pos = aft_pos;
+
+                if new_costume.as_ref().map(Rc::as_ptr) != entity.costume.as_ref().map(Rc::as_ptr) {
+                    perform_command!(Command::SetCostume { costume: new_costume }, aft_pos);
+                } else {
+                    self.pos = aft_pos;
+                }
             }
             Instruction::NextCostume => {
                 match entity.costume.as_ref().and_then(|x| entity.costume_list.iter().enumerate().find(|c| Rc::ptr_eq(x, &c.1.1))).map(|x| x.0) {
-                    Some(idx) => entity.costume = Some(entity.costume_list[(idx + 1) % entity.costume_list.len()].1.clone()),
-                    None => (),
+                    Some(idx) => {
+                        let new_costume = Some(entity.costume_list[(idx + 1) % entity.costume_list.len()].1.clone());
+
+                        if new_costume.as_ref().map(Rc::as_ptr) != entity.costume.as_ref().map(Rc::as_ptr) {
+                            perform_command!(Command::SetCostume { costume: new_costume }, aft_pos);
+                        } else {
+                            self.pos = aft_pos;
+                        }
+                    }
+                    None => self.pos = aft_pos,
                 }
-                self.pos = aft_pos;
             }
             Instruction::ClearEffects => {
                 perform_command!(Command::ClearEffects, aft_pos);

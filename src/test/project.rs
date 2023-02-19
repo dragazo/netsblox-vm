@@ -61,7 +61,7 @@ fn test_proj_counting() {
 
 #[test]
 fn test_proj_effects() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
     let proj = get_running_project(include_str!("projects/effects.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();

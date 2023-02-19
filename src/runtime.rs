@@ -44,7 +44,7 @@ pub enum ToJsonError<C: CustomTypes<S>, S: System<C>> {
 #[derive(Educe)]
 #[educe(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type<C: CustomTypes<S>, S: System<C>> {
-    Bool, Number, String, Image, List, Closure, Entity, Native(<S::NativeValue as GetType>::Output),
+    Bool, Number, String, Image, List, Closure, Entity, Native(<C::NativeValue as GetType>::Output),
 }
 
 /// A type conversion error on a [`Value`].
@@ -335,6 +335,143 @@ impl Default for Properties {
         }
     }
 }
+impl Properties {
+    fn with_value<'gc, C: CustomTypes<S>, S: System<C>, T>(&mut self, key: S::CommandKey, value: Result<T, ErrorCause<C, S>>, f: fn(&mut Self, T)) {
+        match value {
+            Ok(x) => key.complete(Ok(f(self, x))),
+            Err(e) => key.complete(Err(format!("{e:?}"))),
+        }
+    }
+
+    pub fn perform_get_property<'gc, C: CustomTypes<S>, S: System<C>>(&self, key: S::RequestKey, prop: Property) -> RequestStatus<'gc, C, S> {
+        let value: Json = match prop {
+            Property::XPos => self.pos.0.get().into(),
+            Property::YPos => self.pos.1.get().into(),
+            Property::Heading => self.heading.get().into(),
+
+            Property::Visible => self.visible.into(),
+            Property::Size => self.size.get().into(),
+
+            Property::PenDown => self.pen_down.into(),
+            Property::PenSize => self.pen_size.get().into(),
+
+            Property::PenColor => {
+                let Color { a, r, g, b } = Color::from_hsva(
+                    self.pen_color_h.get() as f32,
+                    self.pen_color_s.get() as f32 / 100.0,
+                    self.pen_color_v.get() as f32 / 100.0,
+                    1.0 - self.pen_color_t.get() as f32 / 100.0
+                );
+                json!(u32::from_be_bytes([a, r, g, b]))
+            }
+
+            Property::PenColorH => self.pen_color_h.get().into(),
+            Property::PenColorS => self.pen_color_s.get().into(),
+            Property::PenColorV => self.pen_color_v.get().into(),
+            Property::PenColorT => self.pen_color_t.get().into(),
+
+            Property::Tempo => self.tempo.get().into(),
+            Property::Volume => self.volume.get().into(),
+            Property::Balance => self.balance.get().into(),
+
+            Property::ColorH => self.effects.color_h.get().into(),
+            Property::ColorS => self.effects.color_s.get().into(),
+            Property::ColorV => self.effects.color_v.get().into(),
+            Property::ColorT => self.effects.color_t.get().into(),
+
+            Property::Fisheye => self.effects.fisheye.get().into(),
+            Property::Whirl => self.effects.whirl.get().into(),
+            Property::Pixelate => self.effects.pixelate.get().into(),
+            Property::Mosaic => self.effects.mosaic.get().into(),
+            Property::Negative => self.effects.negative.get().into(),
+        };
+        key.complete(Ok(C::Intermediate::from_json(value)));
+        RequestStatus::Handled
+    }
+    pub fn perform_set_property<'gc, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, prop: Property, value: Value<'gc, C, S>) -> CommandStatus<'gc, C, S> {
+        match prop {
+            Property::XPos => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.pos.0 = value),
+            Property::YPos => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.pos.1 = value),
+            Property::Heading => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.heading = value),
+
+            Property::Visible => self.with_value(key, value.to_bool().map_err(Into::into), |props, value| props.visible = value),
+            Property::Size => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.size = value),
+
+            Property::PenDown => self.with_value(key, value.to_bool().map_err(Into::into), |props, value| props.pen_down = value),
+            Property::PenSize => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.pen_size = value),
+
+            Property::PenColor => self.with_value(key, value.to_number().map_err(Into::into), |props, value| {
+                let [a, r, g, b] = (value.get() as u32).to_be_bytes();
+                let (h, s, v, a) = Color { a, r, g, b }.to_hsva();
+                props.pen_color_h = Number::new(h as f64).unwrap();
+                props.pen_color_s = Number::new(s as f64 * 100.0).unwrap();
+                props.pen_color_v = Number::new(v as f64 * 100.0).unwrap();
+                props.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
+            }),
+
+            Property::PenColorH => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.pen_color_h = value),
+            Property::PenColorS => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_s = value),
+            Property::PenColorV => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_v = value),
+            Property::PenColorT => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_t = value),
+
+            Property::Tempo => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.tempo = value),
+            Property::Volume => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.volume = value),
+            Property::Balance => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.balance = value),
+
+            Property::ColorH => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.effects.color_h = value),
+            Property::ColorS => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_s = value),
+            Property::ColorV => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_v = value),
+            Property::ColorT => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_t = value),
+
+            Property::Fisheye => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.effects.fisheye = value),
+            Property::Whirl => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.effects.whirl = value),
+            Property::Pixelate => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.effects.pixelate = value),
+            Property::Mosaic => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.effects.mosaic = value),
+            Property::Negative => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.effects.negative = value),
+        }
+        CommandStatus::Handled
+    }
+    pub fn perform_change_property<'gc, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, prop: Property, delta: Value<'gc, C, S>) -> CommandStatus<'gc, C, S> {
+        match prop {
+            Property::XPos => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.pos.0.add(x).map_err(Into::into)), |props, value| props.pos.0 = value),
+            Property::YPos => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.pos.1.add(x).map_err(Into::into)), |props, value| props.pos.1 = value),
+            Property::Heading => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.heading.add(x).map_err(Into::into)), |props, value| props.heading = value),
+
+            Property::Visible => self.with_value(key, delta.to_bool().map_err(Into::into), |props, value| props.visible ^= value),
+            Property::Size => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.size.add(x).map_err(Into::into)), |props, value| props.size = value),
+
+            Property::PenDown => self.with_value(key, delta.to_bool().map_err(Into::into), |props, value| props.pen_down ^= value),
+            Property::PenSize => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.pen_size.add(x).map_err(Into::into)), |props, value| props.pen_size = value),
+
+            Property::PenColor => key.complete(Err("attempt to apply relative change to a color".into())),
+
+            Property::PenColorH => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_h.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.pen_color_h = value),
+            Property::PenColorS => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_s.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_s = value),
+            Property::PenColorV => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_v.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_v = value),
+            Property::PenColorT => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_t.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_t = value),
+
+            Property::Tempo => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.tempo.add(x).map_err(Into::into)), |props, value| props.tempo = value),
+            Property::Volume => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.volume.add(x).map_err(Into::into)), |props, value| props.volume = value),
+            Property::Balance => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.balance.add(x).map_err(Into::into)), |props, value| props.balance = value),
+
+            Property::ColorH => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_h.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.effects.color_h = value),
+            Property::ColorS => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_s.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_s = value),
+            Property::ColorV => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_v.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_v = value),
+            Property::ColorT => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_t.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_t = value),
+
+            Property::Fisheye => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.effects.fisheye.add(x).map_err(Into::into)), |props, value| props.effects.fisheye = value),
+            Property::Whirl => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.effects.whirl.add(x).map_err(Into::into)), |props, value| props.effects.whirl = value),
+            Property::Pixelate => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.effects.pixelate.add(x).map_err(Into::into)), |props, value| props.effects.pixelate = value),
+            Property::Mosaic => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.effects.mosaic.add(x).map_err(Into::into)), |props, value| props.effects.mosaic = value),
+            Property::Negative => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.effects.negative.add(x).map_err(Into::into)), |props, value| props.effects.negative = value),
+        }
+        CommandStatus::Handled
+    }
+    pub fn perform_clear_effects<'gc, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey) -> CommandStatus<'gc, C, S> {
+        key.complete(Ok(self.effects = Default::default()));
+        CommandStatus::Handled
+    }
+}
 
 /// A value representing the identity of a [`Value`].
 #[derive(Educe)]
@@ -366,7 +503,7 @@ pub enum Value<'gc, C: CustomTypes<S>, S: System<C>> {
     /// An image stored as a binary buffer.
     Image(#[collect(require_static)] Rc<Vec<u8>>),
     /// A reference to a native object handle produced by [`System`].
-    Native(#[collect(require_static)] Rc<S::NativeValue>),
+    Native(#[collect(require_static)] Rc<C::NativeValue>),
     /// A primitive list type, which is a mutable reference type.
     List(GcCell<'gc, VecDeque<Value<'gc, C, S>>>),
     /// A closure/lambda function. This contains information about the closure's bytecode location, parameters, and captures from the parent scope.
@@ -549,8 +686,8 @@ impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Closure<'_, C, S> {
 
 /// The kind of entity being represented.
 pub enum EntityKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
-    Stage,
-    Sprite,
+    Stage { props: Properties },
+    Sprite { props: Properties },
     SpriteClone { parent: &'a Entity<'gc, C, S> },
 }
 
@@ -562,8 +699,7 @@ pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
                                pub fields: SymbolTable<'gc, C, S>,
     #[collect(require_static)] pub costume_list: Vec<(String, Rc<Vec<u8>>)>,
     #[collect(require_static)] pub costume: Option<Rc<Vec<u8>>>,
-    #[collect(require_static)] pub properties: Properties,
-    #[collect(require_static)] pub state: S::EntityState,
+    #[collect(require_static)] pub state: C::EntityState,
 }
 impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Entity<'_, C, S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -833,10 +969,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
 
         let mut entities = BTreeMap::new();
         for (i, entity_info) in init_info.entities.iter().enumerate() {
-            let kind = if i == 0 { EntityKind::Stage } else { EntityKind::Sprite };
-            let name = entity_info.name.clone();
-            let state = kind.into();
-
             let mut fields = SymbolTable::default();
             for (field, value) in entity_info.fields.iter() {
                 fields.redefine_or_define(field, Shared::Unique(get_value(value, &allocated_refs)));
@@ -853,20 +985,24 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
 
             let costume = entity_info.active_costume.and_then(|x| costume_list.get(x)).map(|x| x.1.clone());
 
-            let mut properties = Properties::default();
-            properties.visible = entity_info.visible;
-            properties.size = entity_info.size;
-            properties.pos = entity_info.pos;
-            properties.heading = entity_info.heading;
+            let mut props = Properties::default();
+            props.visible = entity_info.visible;
+            props.size = entity_info.size;
+            props.pos = entity_info.pos;
+            props.heading = entity_info.heading;
 
             let (r, g, b, a) = entity_info.color;
             let (h, s, v, a) = Color { r, g, b, a }.to_hsva();
-            properties.pen_color_h = Number::new(h as f64).unwrap();
-            properties.pen_color_s = Number::new(s as f64 * 100.0).unwrap();
-            properties.pen_color_v = Number::new(v as f64 * 100.0).unwrap();
-            properties.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
+            props.pen_color_h = Number::new(h as f64).unwrap();
+            props.pen_color_s = Number::new(s as f64 * 100.0).unwrap();
+            props.pen_color_v = Number::new(v as f64 * 100.0).unwrap();
+            props.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
 
-            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, costume_list, costume, state, properties }));
+            let kind = if i == 0 { EntityKind::Stage { props } } else { EntityKind::Sprite { props } };
+            let name = entity_info.name.clone();
+            let state = kind.into();
+
+            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, costume_list, costume, state }));
         }
 
         let proj_name = init_info.proj_name.clone();
@@ -967,6 +1103,8 @@ pub enum Feature {
     /// The ability of an entity to apply a relative change to a certain property.
     ChangeProperty { prop: Property },
 
+    /// The ability of an entity to change the current costume.
+    SetCostume,
     /// The ability to clear all graphic effects on an entity. This is equivalent to setting all the graphic effect properties to zero.
     ClearEffects,
     /// The ability of an entity to move forward or backwards by a distance.
@@ -1004,6 +1142,9 @@ pub enum Command<'gc, C: CustomTypes<S>, S: System<C>> {
     SetProperty { prop: Property, value: Value<'gc, C, S> },
     /// Apply a relative change to the value of an entity property.
     ChangeProperty { prop: Property, delta: Value<'gc, C, S> },
+    /// Sets the costume on the entity. This should essentially assigns the costume to [`Entity::costume`],
+    /// but is treated as a system command so that custom code can be executed when an entity switches costumes.
+    SetCostume { costume: Option<Rc<Vec<u8>>> },
     /// Clear all graphic effects on the entity. This is equivalent to setting all the graphic effect properties to zero.
     ClearEffects,
     /// Move forward by a given distance. If the distance is negative, move backwards instead.
@@ -1016,6 +1157,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Command<'gc, C, S> {
             Command::Print { .. } => Feature::Print,
             Command::SetProperty { prop, .. } => Feature::SetProperty { prop: *prop },
             Command::ChangeProperty { prop, .. } => Feature::ChangeProperty { prop: *prop },
+            Command::SetCostume { .. } => Feature::SetCostume,
             Command::ClearEffects { .. } => Feature::ClearEffects,
             Command::Forward { .. } => Feature::Forward,
         }
@@ -1050,140 +1192,11 @@ pub struct Config<C: CustomTypes<S>, S: System<C>> {
 }
 impl<C: CustomTypes<S>, S: System<C>> Default for Config<C, S> {
     fn default() -> Self {
-        fn with_value<'gc, C: CustomTypes<S>, S: System<C>, T>(key: S::CommandKey, value: Result<T, ErrorCause<C, S>>, entity: &mut Entity<'gc, C, S>, f: fn(&mut Entity<'gc, C, S>, T)) {
-            match value {
-                Ok(x) => key.complete(Ok(f(entity, x))),
-                Err(e) => key.complete(Err(format!("{e:?}"))),
-            }
-        }
         Self {
-            request: Some(Rc::new(|_, _, key, request, entity| match request {
-                Request::Property { prop } => {
-                    let value: Json = match prop {
-                        Property::XPos => entity.properties.pos.0.get().into(),
-                        Property::YPos => entity.properties.pos.1.get().into(),
-                        Property::Heading => entity.properties.heading.get().into(),
-
-                        Property::Visible => entity.properties.visible.into(),
-                        Property::Size => entity.properties.size.get().into(),
-
-                        Property::PenDown => entity.properties.pen_down.into(),
-                        Property::PenSize => entity.properties.pen_size.get().into(),
-                        Property::PenColor => {
-                            let Color { a, r, g, b } = Color::from_hsva(
-                                entity.properties.pen_color_h.get() as f32,
-                                entity.properties.pen_color_s.get() as f32 / 100.0,
-                                entity.properties.pen_color_v.get() as f32 / 100.0,
-                                1.0 - entity.properties.pen_color_t.get() as f32 / 100.0
-                            );
-                            json!(u32::from_be_bytes([a, r, g, b]))
-                        }
-                        Property::PenColorH => entity.properties.pen_color_h.get().into(),
-                        Property::PenColorS => entity.properties.pen_color_s.get().into(),
-                        Property::PenColorV => entity.properties.pen_color_v.get().into(),
-                        Property::PenColorT => entity.properties.pen_color_t.get().into(),
-
-                        Property::Tempo => entity.properties.tempo.get().into(),
-                        Property::Volume => entity.properties.volume.get().into(),
-                        Property::Balance => entity.properties.balance.get().into(),
-
-                        Property::ColorH => entity.properties.effects.color_h.get().into(),
-                        Property::ColorS => entity.properties.effects.color_s.get().into(),
-                        Property::ColorV => entity.properties.effects.color_v.get().into(),
-                        Property::ColorT => entity.properties.effects.color_t.get().into(),
-                        Property::Fisheye => entity.properties.effects.fisheye.get().into(),
-                        Property::Whirl => entity.properties.effects.whirl.get().into(),
-                        Property::Pixelate => entity.properties.effects.pixelate.get().into(),
-                        Property::Mosaic => entity.properties.effects.mosaic.get().into(),
-                        Property::Negative => entity.properties.effects.negative.get().into(),
-                    };
-                    key.complete(Ok(C::Intermediate::from_json(value)));
-                    RequestStatus::Handled
-                }
-                _ => RequestStatus::UseDefault { key, request },
-            })),
+            request: None,
             command: Some(Rc::new(|_, _, key, command, entity| match command {
-                Command::SetProperty { prop, value } => {
-                    match prop {
-                        Property::XPos => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.pos.0 = value),
-                        Property::YPos => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.pos.1 = value),
-                        Property::Heading => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.heading = value),
-
-                        Property::Visible => with_value(key, value.to_bool().map_err(Into::into), entity, |entity, value| entity.properties.visible = value),
-                        Property::Size => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.size = value),
-
-                        Property::PenDown => with_value(key, value.to_bool().map_err(Into::into), entity, |entity, value| entity.properties.pen_down = value),
-                        Property::PenSize => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.pen_size = value),
-
-                        Property::PenColor => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| {
-                            let [a, r, g, b] = (value.get() as u32).to_be_bytes();
-                            let (h, s, v, a) = Color { a, r, g, b }.to_hsva();
-                            entity.properties.pen_color_h = Number::new(h as f64).unwrap();
-                            entity.properties.pen_color_s = Number::new(s as f64 * 100.0).unwrap();
-                            entity.properties.pen_color_v = Number::new(v as f64 * 100.0).unwrap();
-                            entity.properties.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
-                        }),
-
-                        Property::PenColorH => with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), entity, |entity, value| entity.properties.pen_color_h = value),
-                        Property::PenColorS => with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.pen_color_s = value),
-                        Property::PenColorV => with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.pen_color_v = value),
-                        Property::PenColorT => with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.pen_color_t = value),
-
-                        Property::Tempo => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.tempo = value),
-                        Property::Volume => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.volume = value),
-                        Property::Balance => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.balance = value),
-
-                        Property::ColorH => with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), entity, |entity, value| entity.properties.effects.color_h = value),
-                        Property::ColorS => with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.effects.color_s = value),
-                        Property::ColorV => with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.effects.color_v = value),
-                        Property::ColorT => with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.effects.color_t = value),
-
-                        Property::Fisheye => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.effects.fisheye = value),
-                        Property::Whirl => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.effects.whirl = value),
-                        Property::Pixelate => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.effects.pixelate = value),
-                        Property::Mosaic => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.effects.mosaic = value),
-                        Property::Negative => with_value(key, value.to_number().map_err(Into::into), entity, |entity, value| entity.properties.effects.negative = value),
-                    }
-                    CommandStatus::Handled
-                }
-                Command::ChangeProperty { prop, delta } => {
-                    match prop {
-                        Property::XPos => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.pos.0.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.pos.0 = value),
-                        Property::YPos => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.pos.1.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.pos.1 = value),
-                        Property::Heading => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.heading.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.heading = value),
-
-                        Property::Visible => with_value(key, delta.to_bool().map_err(Into::into), entity, |entity, value| entity.properties.visible ^= value),
-                        Property::Size => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.size.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.size = value),
-
-                        Property::PenDown => with_value(key, delta.to_bool().map_err(Into::into), entity, |entity, value| entity.properties.pen_down ^= value),
-                        Property::PenSize => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.pen_size.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.pen_size = value),
-
-                        Property::PenColor => key.complete(Err("attempt to apply relative change to a color".into())),
-
-                        Property::PenColorH => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((entity.properties.pen_color_h.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), entity, |entity, value| entity.properties.pen_color_h = value),
-                        Property::PenColorS => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((entity.properties.pen_color_s.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.pen_color_s = value),
-                        Property::PenColorV => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((entity.properties.pen_color_v.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.pen_color_v = value),
-                        Property::PenColorT => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((entity.properties.pen_color_t.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.pen_color_t = value),
-
-                        Property::Tempo => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.tempo.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.tempo = value),
-                        Property::Volume => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.volume.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.volume = value),
-                        Property::Balance => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.balance.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.balance = value),
-
-                        Property::ColorH => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((entity.properties.effects.color_h.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), entity, |entity, value| entity.properties.effects.color_h = value),
-                        Property::ColorS => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((entity.properties.effects.color_s.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.effects.color_s = value),
-                        Property::ColorV => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((entity.properties.effects.color_v.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.effects.color_v = value),
-                        Property::ColorT => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((entity.properties.effects.color_t.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), entity, |entity, value| entity.properties.effects.color_t = value),
-
-                        Property::Fisheye => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.effects.fisheye.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.effects.fisheye = value),
-                        Property::Whirl => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.effects.whirl.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.effects.whirl = value),
-                        Property::Pixelate => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.effects.pixelate.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.effects.pixelate = value),
-                        Property::Mosaic => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.effects.mosaic.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.effects.mosaic = value),
-                        Property::Negative => with_value(key, delta.to_number().map_err(Into::into).and_then(|x| entity.properties.effects.negative.add(x).map_err(Into::into)), entity, |entity, value| entity.properties.effects.negative = value),
-                    }
-                    CommandStatus::Handled
-                }
-                Command::ClearEffects => {
-                    key.complete(Ok(entity.properties.effects = Default::default()));
+                Command::SetCostume { costume } => {
+                    key.complete(Ok(entity.costume = costume));
                     CommandStatus::Handled
                 }
                 _ => CommandStatus::UseDefault { key, command },
@@ -1228,16 +1241,20 @@ pub trait IntermediateType {
 /// A collection of static settings for using custom native types.
 pub trait CustomTypes<S: System<Self>>: 'static + Sized {
     /// A native type that can be exposed directly to the VM as a value of type [`Value::Native`].
+    /// This could, for example, be used to allow a process to hold on to a file handle stored in a variable.
     /// For type checking, this is required to implement [`GetType`], which can use a custom type enum.
+    /// Native types have reference semantics in the vm.
     type NativeValue: 'static + GetType + fmt::Debug;
+
     /// An intermediate type used to produce a [`Value`] for the [`System`] under async context.
     /// The reason this is needed is that [`Value`] can only be used during the lifetime of an associated [`MutationContext`] handle,
     /// which cannot be extended into the larger lifetime required for async operations.
-    /// 
     /// Conversions are automatically performed from this type to [`Value`] via [`CustomTypes::from_intermediate`].
     type Intermediate: 'static + Send + IntermediateType;
 
-    /// The type to use for [`System::EntityState`].
+    /// Type used to represent an entity's system-specific state.
+    /// This should include any details outside of core process functionality (e.g., graphics, position, orientation).
+    /// This type should be constructable from [`EntityKind`], which is used to initialize a new entity in the runtime.
     type EntityState: 'static + for<'gc, 'a> From<EntityKind<'gc, 'a, Self, S>>;
 
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
@@ -1251,12 +1268,6 @@ pub trait CustomTypes<S: System<Self>>: 'static + Sized {
 /// When implementing [`System`] for some type, you may prefer to not support one or more features.
 /// This can be accomplished by returning the [`ErrorCause::NotSupported`] variant for the relevant [`Feature`].
 pub trait System<C: CustomTypes<Self>>: 'static + Sized {
-    /// A type representing native values that the system can operate on or return through syscalls.
-    /// This could, for example, be used to allow a process to hold on to a file handle stored in a variable.
-    /// If multiple native types are required, an enum can be used.
-    /// Native types have reference semantics in the vm, just like for entities.
-    type NativeValue: 'static + GetType + fmt::Debug;
-
     /// Key type used to await the result of an asynchronous request.
     type RequestKey: 'static + Key<Result<C::Intermediate, String>>;
     /// Key type used to await the completion of an asynchronous command.
@@ -1267,11 +1278,6 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Key type used to reply to a message that was sent to this client with the expectation of receiving a response.
     /// This type is required to be [`Clone`] because there can be multiple message handlers for the same message type.
     type InternReplyKey: 'static + Clone;
-
-    /// Type used to represent an entity's system-specific state.
-    /// This should include any details outside of core process functionality (e.g., graphics, position, orientation).
-    /// This type should be constructable from [`EntityKind`], which is used to initialize a new entity in the runtime.
-    type EntityState: 'static + for<'gc, 'a> From<EntityKind<'gc, 'a, C, Self>>;
 
     /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
     /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],
