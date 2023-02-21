@@ -60,7 +60,13 @@ impl FloatChecker<f64> for NumberChecker {
 /// The type used to represent numbers in the runtime.
 pub type Number = CheckedFloat<f64, NumberChecker>;
 
-#[derive(Clone, Copy, Debug, FromPrimitive)]
+#[derive(Debug, Clone, Copy, FromPrimitive)]
+#[repr(u8)]
+pub enum PrintStyle {
+    Say, Think,
+}
+
+#[derive(Debug, Clone, Copy, FromPrimitive)]
 #[repr(u8)]
 pub enum Property {
     XPos, YPos, Heading,
@@ -337,7 +343,7 @@ pub(crate) enum Instruction<'a> {
     Broadcast { wait: bool },
 
     /// Consumes 1 value `msg` from the value stack and prints it to the stored printer.
-    Print,
+    Print { style: PrintStyle },
     /// Consumes 1 value, `prompt`, from the value stack and uses it as a query to get input from the user.
     /// The result is NOT stored on the value stack, and instead [`Instruction::PushAnswer`] must be used to retrieve the result.
     Ask,
@@ -441,6 +447,14 @@ trait BinaryWrite: Sized {
 
 impl BinaryRead<'_> for u8 { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (code[start], start + 1) } }
 impl BinaryWrite for u8 { fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) { code.push(*val) } }
+
+impl BinaryRead<'_> for PrintStyle { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
+impl BinaryWrite for PrintStyle {
+    fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) {
+        debug_assert_eq!(mem::size_of::<Self>(), 1);
+        code.push((*val) as u8)
+    }
+}
 
 impl BinaryRead<'_> for Property { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
 impl BinaryWrite for Property {
@@ -755,31 +769,32 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             78 => read_prefixed!(Instruction::Broadcast { wait: false }),
             79 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
-            80 => read_prefixed!(Instruction::Print),
-            81 => read_prefixed!(Instruction::Ask),
-            82 => read_prefixed!(Instruction::PushAnswer),
+            80 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
+            81 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
+            82 => read_prefixed!(Instruction::Ask),
+            83 => read_prefixed!(Instruction::PushAnswer),
 
-            83 => read_prefixed!(Instruction::ResetTimer),
-            84 => read_prefixed!(Instruction::PushTimer),
-            85 => read_prefixed!(Instruction::Sleep),
+            84 => read_prefixed!(Instruction::ResetTimer),
+            85 => read_prefixed!(Instruction::PushTimer),
+            86 => read_prefixed!(Instruction::Sleep),
 
-            86 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
-            87 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
-            88 => read_prefixed!(Instruction::SendNetworkReply),
+            87 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
+            88 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
+            89 => read_prefixed!(Instruction::SendNetworkReply),
 
-            89 => read_prefixed!(Instruction::PushProperty {} : prop),
-            90 => read_prefixed!(Instruction::SetProperty {} : prop),
-            91 => read_prefixed!(Instruction::ChangeProperty {} : prop),
+            90 => read_prefixed!(Instruction::PushProperty {} : prop),
+            91 => read_prefixed!(Instruction::SetProperty {} : prop),
+            92 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
-            92 => read_prefixed!(Instruction::PushCostume),
-            93 => read_prefixed!(Instruction::PushCostumeNumber),
-            94 => read_prefixed!(Instruction::PushCostumeList),
-            95 => read_prefixed!(Instruction::SetCostume),
-            96 => read_prefixed!(Instruction::NextCostume),
+            93 => read_prefixed!(Instruction::PushCostume),
+            94 => read_prefixed!(Instruction::PushCostumeNumber),
+            95 => read_prefixed!(Instruction::PushCostumeList),
+            96 => read_prefixed!(Instruction::SetCostume),
+            97 => read_prefixed!(Instruction::NextCostume),
 
-            97 => read_prefixed!(Instruction::ClearEffects),
+            98 => read_prefixed!(Instruction::ClearEffects),
 
-            98 => read_prefixed!(Instruction::Forward),
+            99 => read_prefixed!(Instruction::Forward),
 
             _ => unreachable!(),
         }
@@ -915,31 +930,32 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::Broadcast { wait: false } => append_prefixed!(78),
             Instruction::Broadcast { wait: true } => append_prefixed!(79),
 
-            Instruction::Print => append_prefixed!(80),
-            Instruction::Ask => append_prefixed!(81),
-            Instruction::PushAnswer => append_prefixed!(82),
+            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(80),
+            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(81),
+            Instruction::Ask => append_prefixed!(82),
+            Instruction::PushAnswer => append_prefixed!(83),
 
-            Instruction::ResetTimer => append_prefixed!(83),
-            Instruction::PushTimer => append_prefixed!(84),
-            Instruction::Sleep => append_prefixed!(85),
+            Instruction::ResetTimer => append_prefixed!(84),
+            Instruction::PushTimer => append_prefixed!(85),
+            Instruction::Sleep => append_prefixed!(86),
 
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(86: move str msg_type, values),
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(87: move str msg_type, values),
-            Instruction::SendNetworkReply => append_prefixed!(88),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(87: move str msg_type, values),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(88: move str msg_type, values),
+            Instruction::SendNetworkReply => append_prefixed!(89),
 
-            Instruction::PushProperty { prop } => append_prefixed!(89: prop),
-            Instruction::SetProperty { prop } => append_prefixed!(90: prop),
-            Instruction::ChangeProperty { prop } => append_prefixed!(91: prop),
+            Instruction::PushProperty { prop } => append_prefixed!(90: prop),
+            Instruction::SetProperty { prop } => append_prefixed!(91: prop),
+            Instruction::ChangeProperty { prop } => append_prefixed!(92: prop),
 
-            Instruction::PushCostume => append_prefixed!(92),
-            Instruction::PushCostumeNumber => append_prefixed!(93),
-            Instruction::PushCostumeList => append_prefixed!(94),
-            Instruction::SetCostume => append_prefixed!(95),
-            Instruction::NextCostume => append_prefixed!(96),
+            Instruction::PushCostume => append_prefixed!(93),
+            Instruction::PushCostumeNumber => append_prefixed!(94),
+            Instruction::PushCostumeList => append_prefixed!(95),
+            Instruction::SetCostume => append_prefixed!(96),
+            Instruction::NextCostume => append_prefixed!(97),
 
-            Instruction::ClearEffects => append_prefixed!(97),
+            Instruction::ClearEffects => append_prefixed!(98),
 
-            Instruction::Forward => append_prefixed!(98),
+            Instruction::Forward => append_prefixed!(99),
         }
     }
 }
@@ -1502,12 +1518,18 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::from(UnaryOp::Neg).into());
                 self.ins.push(Instruction::ChangeProperty { prop: Property::Heading }.into());
             }
-            ast::StmtKind::Say { content, duration } | ast::StmtKind::Think { content, duration } => {
-                self.append_simple_ins(entity, &[content], Instruction::Print)?;
+            x @ (ast::StmtKind::Say { content, duration } | ast::StmtKind::Think { content, duration }) => {
+                let style = match x {
+                    ast::StmtKind::Say { .. } => PrintStyle::Say,
+                    ast::StmtKind::Think { .. } => PrintStyle::Think,
+                    _ => unreachable!(),
+                };
+
+                self.append_simple_ins(entity, &[content], Instruction::Print { style })?;
                 if let Some(t) = duration {
                     self.append_simple_ins(entity, &[t], Instruction::Sleep)?;
                     self.ins.push(Instruction::PushString { value: "" }.into());
-                    self.ins.push(Instruction::Print.into());
+                    self.ins.push(Instruction::Print { style }.into());
                 }
             }
             ast::StmtKind::DeclareLocals { vars } => {

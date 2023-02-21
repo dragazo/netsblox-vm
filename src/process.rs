@@ -934,10 +934,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 };
                 return Ok(ProcessStep::Broadcast { msg_type, barrier });
             }
-            Instruction::Print => {
+            Instruction::Print { style } => {
                 let value = self.value_stack.pop().unwrap();
                 let is_empty = match &value { Value::String(x) => x.is_empty(), _ => false };
-                perform_command!(Command::Print { value: if is_empty { None } else { Some(value) } }, aft_pos);
+                perform_command!(Command::Print { style, value: if is_empty { None } else { Some(value) } }, aft_pos);
             }
             Instruction::Ask => {
                 let prompt = self.value_stack.pop().unwrap();

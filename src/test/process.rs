@@ -565,7 +565,7 @@ fn test_proc_say() {
     let config = Config::<C, StdSystem<C>> {
         request: None,
         command: Some(Rc::new(move |_, _, key, command, _| match command {
-            Command::Print { value } => {
+            Command::Print { style: _, value } => {
                 if let Some(value) = value { writeln!(*output_cpy.borrow_mut(), "{value:?}").unwrap() }
                 key.complete(Ok(()));
                 CommandStatus::Handled

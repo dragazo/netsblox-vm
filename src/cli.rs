@@ -184,7 +184,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
         command: {
             let update_flag = update_flag.clone();
             Some(Rc::new(move |_, _, key, command, entity| match command {
-                Command::Print { value } => {
+                Command::Print { style: _, value } => {
                     if let Some(value) = value {
                         print!("{entity:?} > {value:?}\r\n");
                         update_flag.set(true);
@@ -292,7 +292,7 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
     let config = overrides.fallback(&Config {
         request: None,
         command: Some(Rc::new(move |_, _, key, command, entity| match command {
-            Command::Print { value } => {
+            Command::Print { style: _, value } => {
                 if let Some(value) = value { println!("{entity:?} > {value:?}") }
                 key.complete(Ok(()));
                 CommandStatus::Handled
@@ -377,7 +377,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
     let config = overrides.fallback(&Config {
         request: None,
         command: Some(Rc::new(move |_, _, key, command, entity| match command {
-            Command::Print { value } => {
+            Command::Print { style: _, value } => {
                 if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") }
                 key.complete(Ok(()));
                 CommandStatus::Handled

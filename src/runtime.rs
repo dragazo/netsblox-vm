@@ -1137,7 +1137,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Request<'gc, C, S> {
 /// A non-value-returning command issued from the runtime.
 pub enum Command<'gc, C: CustomTypes<S>, S: System<C>> {
     /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
-    Print { value: Option<Value<'gc, C, S>> },
+    Print { style: PrintStyle, value: Option<Value<'gc, C, S>> },
     /// Set an entity property to a specific value.
     SetProperty { prop: Property, value: Value<'gc, C, S> },
     /// Apply a relative change to the value of an entity property.
