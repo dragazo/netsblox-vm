@@ -292,6 +292,13 @@ pub(crate) enum Instruction<'a> {
     /// Equivalent to fetching the variable, performing the operation, and re-assigning the new value, but is atomic.
     BinaryOpAssign { var: &'a str, op: BinaryOp },
 
+    /// Creates or destroys a watcher for the given variable.
+    /// If `create` is true, the process will emit a request to create a new watcher.
+    /// If `create` is false, the process will emit a request to remove a watcher.
+    /// In either case, a weak alias to the watched variable is created.
+    /// It is up to the executor to deduplicate watchers to the same variable, if needed.
+    Watcher { create: bool, var: &'a str },
+
     /// Unconditionally jumps to the given location.
     Jump { to: usize },
     /// Pops a value from the value stack and jumps to the given location if its truthyness value is equal to `when`
@@ -447,6 +454,9 @@ trait BinaryWrite: Sized {
 
 impl BinaryRead<'_> for u8 { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (code[start], start + 1) } }
 impl BinaryWrite for u8 { fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) { code.push(*val) } }
+
+impl BinaryRead<'_> for bool { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (code[start] != 0, start + 1) } }
+impl BinaryWrite for bool { fn append(val: &Self, code: &mut Vec<u8>, _: &mut BinPool, _: &mut Vec<RelocateInfo>) { code.push(if *val { 1 } else { 0 }) } }
 
 impl BinaryRead<'_> for PrintStyle { fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) { (Self::from_u8(code[start]).unwrap(), start + 1) } }
 impl BinaryWrite for PrintStyle {
@@ -745,56 +755,58 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             61 => read_prefixed!(Instruction::BinaryOpAssign { op: BinaryOp::Add, } : var),
             62 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
 
-            63 => read_prefixed!(Instruction::Jump {} : to),
-            64 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
-            65 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
+            63 => read_prefixed!(Instruction::Watcher {} : create, var),
 
-            66 => read_prefixed!(Instruction::MetaPush {} : value),
+            64 => read_prefixed!(Instruction::Jump {} : to),
+            65 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
+            66 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
 
-            67 => read_prefixed!(Instruction::Call {} : pos, params),
-            68 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
-            69 => read_prefixed!(Instruction::CallClosure {} : args),
-            70 => read_prefixed!(Instruction::Return),
+            67 => read_prefixed!(Instruction::MetaPush {} : value),
 
-            71 => read_prefixed!(Instruction::PushHandler {} : pos, var),
-            72 => read_prefixed!(Instruction::PopHandler),
-            73 => read_prefixed!(Instruction::Throw),
+            68 => read_prefixed!(Instruction::Call {} : pos, params),
+            69 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
+            70 => read_prefixed!(Instruction::CallClosure {} : args),
+            71 => read_prefixed!(Instruction::Return),
 
-            74 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
-            75 => read_prefixed!(Instruction::PushRpcError),
+            72 => read_prefixed!(Instruction::PushHandler {} : pos, var),
+            73 => read_prefixed!(Instruction::PopHandler),
+            74 => read_prefixed!(Instruction::Throw),
 
-            76 => read_prefixed!(Instruction::Syscall {} : len),
-            77 => read_prefixed!(Instruction::PushSyscallError),
+            75 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
+            76 => read_prefixed!(Instruction::PushRpcError),
 
-            78 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            79 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            77 => read_prefixed!(Instruction::Syscall {} : len),
+            78 => read_prefixed!(Instruction::PushSyscallError),
 
-            80 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
-            81 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
-            82 => read_prefixed!(Instruction::Ask),
-            83 => read_prefixed!(Instruction::PushAnswer),
+            79 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            80 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
-            84 => read_prefixed!(Instruction::ResetTimer),
-            85 => read_prefixed!(Instruction::PushTimer),
-            86 => read_prefixed!(Instruction::Sleep),
+            81 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
+            82 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
+            83 => read_prefixed!(Instruction::Ask),
+            84 => read_prefixed!(Instruction::PushAnswer),
 
-            87 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
-            88 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
-            89 => read_prefixed!(Instruction::SendNetworkReply),
+            85 => read_prefixed!(Instruction::ResetTimer),
+            86 => read_prefixed!(Instruction::PushTimer),
+            87 => read_prefixed!(Instruction::Sleep),
 
-            90 => read_prefixed!(Instruction::PushProperty {} : prop),
-            91 => read_prefixed!(Instruction::SetProperty {} : prop),
-            92 => read_prefixed!(Instruction::ChangeProperty {} : prop),
+            88 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
+            89 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
+            90 => read_prefixed!(Instruction::SendNetworkReply),
 
-            93 => read_prefixed!(Instruction::PushCostume),
-            94 => read_prefixed!(Instruction::PushCostumeNumber),
-            95 => read_prefixed!(Instruction::PushCostumeList),
-            96 => read_prefixed!(Instruction::SetCostume),
-            97 => read_prefixed!(Instruction::NextCostume),
+            91 => read_prefixed!(Instruction::PushProperty {} : prop),
+            92 => read_prefixed!(Instruction::SetProperty {} : prop),
+            93 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
-            98 => read_prefixed!(Instruction::ClearEffects),
+            94 => read_prefixed!(Instruction::PushCostume),
+            95 => read_prefixed!(Instruction::PushCostumeNumber),
+            96 => read_prefixed!(Instruction::PushCostumeList),
+            97 => read_prefixed!(Instruction::SetCostume),
+            98 => read_prefixed!(Instruction::NextCostume),
 
-            99 => read_prefixed!(Instruction::Forward),
+            99 => read_prefixed!(Instruction::ClearEffects),
+
+            100 => read_prefixed!(Instruction::Forward),
 
             _ => unreachable!(),
         }
@@ -906,56 +918,58 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::BinaryOpAssign { var, op: BinaryOp::Add } => append_prefixed!(61: move str var),
             Instruction::BinaryOpAssign { var, op } => append_prefixed!(62: move str var, op),
 
-            Instruction::Jump { to } => append_prefixed!(63: move to),
-            Instruction::ConditionalJump { to, when: false } => append_prefixed!(64: move to),
-            Instruction::ConditionalJump { to, when: true } => append_prefixed!(65: move to),
+            Instruction::Watcher { create, var } => append_prefixed!(63: create, move str var),
 
-            Instruction::MetaPush { value } => append_prefixed!(66: move str value),
+            Instruction::Jump { to } => append_prefixed!(64: move to),
+            Instruction::ConditionalJump { to, when: false } => append_prefixed!(65: move to),
+            Instruction::ConditionalJump { to, when: true } => append_prefixed!(66: move to),
 
-            Instruction::Call { pos, params } => append_prefixed!(67: move pos, params),
-            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(68: move pos, params, captures),
-            Instruction::CallClosure { args } => append_prefixed!(69: args),
-            Instruction::Return => append_prefixed!(70),
+            Instruction::MetaPush { value } => append_prefixed!(67: move str value),
 
-            Instruction::PushHandler { pos, var } => append_prefixed!(71: move pos, move str var),
-            Instruction::PopHandler => append_prefixed!(72),
-            Instruction::Throw => append_prefixed!(73),
+            Instruction::Call { pos, params } => append_prefixed!(68: move pos, params),
+            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(69: move pos, params, captures),
+            Instruction::CallClosure { args } => append_prefixed!(70: args),
+            Instruction::Return => append_prefixed!(71),
 
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(74: move str service, move str rpc, args),
-            Instruction::PushRpcError => append_prefixed!(75),
+            Instruction::PushHandler { pos, var } => append_prefixed!(72: move pos, move str var),
+            Instruction::PopHandler => append_prefixed!(73),
+            Instruction::Throw => append_prefixed!(74),
 
-            Instruction::Syscall { len } => append_prefixed!(76: len),
-            Instruction::PushSyscallError => append_prefixed!(77),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(75: move str service, move str rpc, args),
+            Instruction::PushRpcError => append_prefixed!(76),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(78),
-            Instruction::Broadcast { wait: true } => append_prefixed!(79),
+            Instruction::Syscall { len } => append_prefixed!(77: len),
+            Instruction::PushSyscallError => append_prefixed!(78),
 
-            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(80),
-            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(81),
-            Instruction::Ask => append_prefixed!(82),
-            Instruction::PushAnswer => append_prefixed!(83),
+            Instruction::Broadcast { wait: false } => append_prefixed!(79),
+            Instruction::Broadcast { wait: true } => append_prefixed!(80),
 
-            Instruction::ResetTimer => append_prefixed!(84),
-            Instruction::PushTimer => append_prefixed!(85),
-            Instruction::Sleep => append_prefixed!(86),
+            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(81),
+            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(82),
+            Instruction::Ask => append_prefixed!(83),
+            Instruction::PushAnswer => append_prefixed!(84),
 
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(87: move str msg_type, values),
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(88: move str msg_type, values),
-            Instruction::SendNetworkReply => append_prefixed!(89),
+            Instruction::ResetTimer => append_prefixed!(85),
+            Instruction::PushTimer => append_prefixed!(86),
+            Instruction::Sleep => append_prefixed!(87),
 
-            Instruction::PushProperty { prop } => append_prefixed!(90: prop),
-            Instruction::SetProperty { prop } => append_prefixed!(91: prop),
-            Instruction::ChangeProperty { prop } => append_prefixed!(92: prop),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(88: move str msg_type, values),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(89: move str msg_type, values),
+            Instruction::SendNetworkReply => append_prefixed!(90),
 
-            Instruction::PushCostume => append_prefixed!(93),
-            Instruction::PushCostumeNumber => append_prefixed!(94),
-            Instruction::PushCostumeList => append_prefixed!(95),
-            Instruction::SetCostume => append_prefixed!(96),
-            Instruction::NextCostume => append_prefixed!(97),
+            Instruction::PushProperty { prop } => append_prefixed!(91: prop),
+            Instruction::SetProperty { prop } => append_prefixed!(92: prop),
+            Instruction::ChangeProperty { prop } => append_prefixed!(93: prop),
 
-            Instruction::ClearEffects => append_prefixed!(98),
+            Instruction::PushCostume => append_prefixed!(94),
+            Instruction::PushCostumeNumber => append_prefixed!(95),
+            Instruction::PushCostumeList => append_prefixed!(96),
+            Instruction::SetCostume => append_prefixed!(97),
+            Instruction::NextCostume => append_prefixed!(98),
 
-            Instruction::Forward => append_prefixed!(99),
+            Instruction::ClearEffects => append_prefixed!(99),
+
+            Instruction::Forward => append_prefixed!(100),
         }
     }
 }
@@ -1487,6 +1501,8 @@ impl<'a> ByteCodeBuilder<'a> {
         match &stmt.kind {
             ast::StmtKind::Assign { var, value } => self.append_simple_ins(entity, &[value], Instruction::Assign { var: &var.trans_name })?,
             ast::StmtKind::AddAssign { var, value } => self.append_simple_ins(entity, &[value], Instruction::BinaryOpAssign { var: &var.trans_name, op: BinaryOp::Add })?,
+            ast::StmtKind::ShowVar { var } => self.ins.push(Instruction::Watcher { create: true, var: &var.trans_name }.into()),
+            ast::StmtKind::HideVar { var } => self.ins.push(Instruction::Watcher { create: false, var: &var.trans_name }.into()),
             ast::StmtKind::ListInsert { list, value, index } => self.append_simple_ins(entity, &[value, index, list], Instruction::ListInsert)?,
             ast::StmtKind::ListInsertLast { list, value } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertLast)?,
             ast::StmtKind::ListInsertRandom { list, value } => self.append_simple_ins(entity, &[value, list], Instruction::ListInsertRandom)?,

@@ -36,7 +36,7 @@ impl IdleAction {
                     self.trigger();
                 }
             }
-            ProjectStep::Normal | ProjectStep::ProcessTerminated { .. } | ProjectStep::Error { .. } => self.count = 0,
+            ProjectStep::Normal | ProjectStep::ProcessTerminated { .. } | ProjectStep::Error { .. } | ProjectStep::Watcher { .. } => self.count = 0,
         }
     }
     /// Explicitly triggers the idle action and reset the state machine.
@@ -81,6 +81,9 @@ pub enum ProjectStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// The project had a running process, which encountered a runtime error.
     /// The dead process is returned, which can be queried for diagnostic information.
     Error { error: ExecError<C, S>, proc: Process<'gc, C, S> },
+    /// The project had a running process that requested to create or destroy a watcher.
+    /// See [`ProcessStep::Watcher`] for more details.
+    Watcher { create: bool, watcher: Watcher<'gc, C, S> },
 }
 
 #[derive(Collect)]
@@ -254,6 +257,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                 ProcessStep::Yield => {
                     self.state.process_queue.push_back(proc_key);
                     ProjectStep::Yield
+                }
+                ProcessStep::Watcher { create, watcher } => {
+                    self.state.process_queue.push_front(proc_key);
+                    ProjectStep::Watcher { create, watcher }
                 }
                 ProcessStep::Broadcast { msg_type, barrier } => {
                     for script in self.scripts.iter_mut() {

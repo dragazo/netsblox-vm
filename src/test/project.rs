@@ -32,12 +32,20 @@ fn get_running_project(xml: &str, system: Rc<StdSystem<C>>) -> EnvArena {
     })
 }
 
-fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, C, StdSystem<C>>) -> Result<(), ExecError<C, StdSystem<C>>> {
+#[derive(Educe)]
+#[educe(Debug)]
+enum SpecialEvent<'gc, C: CustomTypes<S>, S: System<C>> {
+    Watcher { create: bool, watcher: Watcher<'gc, C, S> },
+}
+
+fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, C, StdSystem<C>>) -> Result<Vec<SpecialEvent<'gc, C, StdSystem<C>>>, ExecError<C, StdSystem<C>>> {
+    let mut special_events = vec![];
     loop {
         match proj.step(mc) {
-            ProjectStep::Idle => return Ok(()),
+            ProjectStep::Idle => return Ok(special_events),
             ProjectStep::Error { error, .. } => return Err(error),
             ProjectStep::Normal | ProjectStep::ProcessTerminated { .. } | ProjectStep::Yield => (),
+            ProjectStep::Watcher { create, watcher } => special_events.push(SpecialEvent::Watcher { create, watcher }),
         }
     }
 }
@@ -106,6 +114,31 @@ fn test_proj_size_visible() {
             [4, false],
         ])).unwrap();
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-20, "res");
+    });
+}
+
+#[test]
+fn test_proj_watchers() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
+    let proj = get_running_project(include_str!("projects/watchers.xml"), system);
+    proj.mutate(|mc, proj| {
+        let events = run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+
+        let mapped = events.iter().map(|x| match x {
+            SpecialEvent::Watcher { create, watcher } => (*create, watcher.name.as_str()),
+        }).collect::<Vec<_>>();
+
+        let expected = [
+            (true, "my global"),
+            (true, "my field"),
+            (false, "my global"),
+            (false, "my local"),
+            (false, "my local"),
+            (true, "my local"),
+            (false, "my field"),
+        ];
+
+        assert_eq!(mapped, expected);
     });
 }
 

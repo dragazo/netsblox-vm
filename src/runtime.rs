@@ -707,6 +707,26 @@ impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Entity<'_, C, S> {
     }
 }
 
+/// Represents a variable whose value is being monitored.
+/// 
+/// Users can "show" or "hide" variables to create or remove watchers.
+/// These can be used by students for a number of purposes, including debugging.
+#[derive(Collect)]
+#[collect(no_drop)]
+pub struct Watcher<'gc, C: CustomTypes<S>, S: System<C>> {
+    /// The entity associated with the variable being watched.
+    pub entity: GcWeakCell<'gc, Entity<'gc, C, S>>,
+    /// The name of the variable being watched.
+    pub name: String,
+    /// The value of the variable being watched.
+    pub value: GcWeakCell<'gc, Value<'gc, C, S>>,
+}
+impl<'gc, C: CustomTypes<S>, S: System<C>> fmt::Debug for Watcher<'gc, C, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Watcher").field("name", &self.name).finish_non_exhaustive()
+    }
+}
+
 /// Represents a shared mutable resource.
 /// 
 /// This is effectively equivalent to [`GcCell<T>`] except that it performs no dynamic allocation
@@ -734,10 +754,9 @@ impl<'gc, T: 'gc + Collect> Shared<'gc, T> {
             Shared::Aliased(x) => SharedRef::Aliased(x.read()),
         }
     }
-    /// Creates an aliasing instance of [`Shared`] to the same resource as this one.
-    /// If this instance is the [`Shared::Unique`] variant, transitions to [`Shared::Aliased`] and returns a second handle.
-    /// Otherwise, this simple returns an additional handle to the aliased shared resource.
-    pub fn alias(&mut self, mc: MutationContext<'gc, '_>) -> Self {
+    /// Transitions the shared value from [`Shared::Unique`] to [`Shared::Aliased`] if it has not already,
+    /// and returns an additional alias to the underlying value.
+    pub fn alias_inner(&mut self, mc: MutationContext<'gc, '_>) -> GcCell<'gc, T> {
         take_mut::take(self, |myself| {
             match myself {
                 Shared::Unique(x) => Shared::Aliased(GcCell::allocate(mc, x)),
@@ -747,8 +766,13 @@ impl<'gc, T: 'gc + Collect> Shared<'gc, T> {
 
         match self {
             Shared::Unique(_) => unreachable!(),
-            Shared::Aliased(x) => Shared::Aliased(*x),
+            Shared::Aliased(x) => *x,
         }
+    }
+    /// Creates a new instance of [`Shared`] that references the same underlying value.
+    /// This is equivalent to constructing an instance of [`Shared::Aliased`] with the result of [`Shared::alias_inner`].
+    pub fn alias(&mut self, mc: MutationContext<'gc, '_>) -> Self {
+        Shared::Aliased(self.alias_inner(mc))
     }
 }
 impl<'gc, T: Collect> From<T> for Shared<'gc, T> { fn from(value: T) -> Self { Shared::Unique(value) } }

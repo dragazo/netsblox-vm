@@ -114,6 +114,12 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     Terminate { result: Option<Value<'gc, C, S>> },
     /// The process has requested to broadcast a message to all entities, which may trigger other code to execute.
     Broadcast { msg_type: String, barrier: Option<Barrier> },
+    /// The process has requested to create or destroy a new watcher for a variable.
+    /// If `create` is true, the process is requesting to register the given watcher.
+    /// If `create` if false, the process is requesting to remove a watcher which is equivalent to the given watcher.
+    /// In either case, it is up the handler of this step mode to deduplicate watchers to the same variable, if needed.
+    /// The existence of a watcher is invisible to a process, so it is perfectly valid for implementors to simply ignore all watcher requests.
+    Watcher { create: bool, watcher: Watcher<'gc, C, S> },
 }
 
 /// An entry in the call stack of a [`Process`].
@@ -771,6 +777,16 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let a = lookup_var!(var).get().clone();
                 context.set_or_define(mc, var, ops::binary_op(mc, &*global_context.system, &a, &b, op)?);
                 self.pos = aft_pos;
+            }
+
+            Instruction::Watcher { create, var } => {
+                let watcher = Watcher {
+                    entity: GcCell::downgrade(self.entity),
+                    name: var.to_owned(),
+                    value: GcCell::downgrade(lookup_var!(mut var).alias_inner(mc)),
+                };
+                self.pos = aft_pos;
+                return Ok(ProcessStep::Watcher { create, watcher });
             }
 
             Instruction::Jump { to } => self.pos = to,
