@@ -395,7 +395,7 @@ impl Properties {
             Property::Heading => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.heading = value),
 
             Property::Visible => self.with_value(key, value.to_bool().map_err(Into::into), |props, value| props.visible = value),
-            Property::Size => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.size = value),
+            Property::Size => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().max(0.0)).map_err(Into::into)), |props, value| props.size = value),
 
             Property::PenDown => self.with_value(key, value.to_bool().map_err(Into::into), |props, value| props.pen_down = value),
             Property::PenSize => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.pen_size = value),
@@ -438,7 +438,7 @@ impl Properties {
             Property::Heading => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.heading.add(x).map_err(Into::into)), |props, value| props.heading = value),
 
             Property::Visible => self.with_value(key, delta.to_bool().map_err(Into::into), |props, value| props.visible ^= value),
-            Property::Size => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.size.add(x).map_err(Into::into)), |props, value| props.size = value),
+            Property::Size => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.size.get() + x.get()).max(0.0)).map_err(Into::into)), |props, value| props.size = value),
 
             Property::PenDown => self.with_value(key, delta.to_bool().map_err(Into::into), |props, value| props.pen_down ^= value),
             Property::PenSize => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.pen_size.add(x).map_err(Into::into)), |props, value| props.pen_size = value),

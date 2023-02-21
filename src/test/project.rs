@@ -83,6 +83,33 @@ fn test_proj_effects() {
 }
 
 #[test]
+fn test_proj_size_visible() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
+    let proj = get_running_project(include_str!("projects/size-visible.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        let expected = Value::from_json(mc, json!([
+            [81, false],
+            [44, false],
+            [44, true],
+            [44, true],
+            [44, false],
+            [44, false],
+            [115, false],
+            [196, false],
+            [0, false],
+            [15, false],
+            [0, false],
+            [4, false],
+        ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-20, "res");
+    });
+}
+
+#[test]
 fn test_proj_costumes() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/costumes.xml"), system);

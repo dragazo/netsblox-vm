@@ -1242,6 +1242,8 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::Costume => self.ins.push(Instruction::PushCostume.into()),
             ast::ExprKind::CostumeNumber => self.ins.push(Instruction::PushCostumeNumber.into()),
             ast::ExprKind::CostumeList => self.ins.push(Instruction::PushCostumeList.into()),
+            ast::ExprKind::Size => self.ins.push(Instruction::PushProperty { prop: Property::Size }.into()),
+            ast::ExprKind::IsVisible => self.ins.push(Instruction::PushProperty { prop: Property::Visible }.into()),
             ast::ExprKind::Add { values } => self.append_variadic_op(entity, values, VariadicOp::Add)?,
             ast::ExprKind::Mul { values } => self.append_variadic_op(entity, values, VariadicOp::Mul)?,
             ast::ExprKind::Min { values } => self.append_variadic_op(entity, values, VariadicOp::Min)?,
@@ -1499,6 +1501,8 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::StmtKind::Ask { prompt } => self.append_simple_ins(entity, &[prompt], Instruction::Ask)?,
             ast::StmtKind::Sleep { seconds } => self.append_simple_ins(entity, &[seconds], Instruction::Sleep)?,
             ast::StmtKind::SendNetworkReply { value } => self.append_simple_ins(entity, &[value], Instruction::SendNetworkReply)?,
+            ast::StmtKind::SetSize { value } => self.append_simple_ins(entity, &[value], Instruction::SetProperty { prop: Property::Size })?,
+            ast::StmtKind::ChangeSize { amount } => self.append_simple_ins(entity, &[amount], Instruction::ChangeProperty { prop: Property::Size })?,
             ast::StmtKind::SetEffect { kind, value } => self.append_simple_ins(entity, &[value], Instruction::SetProperty { prop: Property::from_effect(kind) })?,
             ast::StmtKind::ChangeEffect { kind, delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeProperty { prop: Property::from_effect(kind) })?,
             ast::StmtKind::ClearEffects => self.ins.push(Instruction::ClearEffects.into()),
@@ -1512,6 +1516,10 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.ins.push(Instruction::PushString { value: "" }.into());
                     self.ins.push(Instruction::SetCostume.into());
                 }
+            }
+            ast::StmtKind::SetVisible { value } => {
+                self.ins.push(Instruction::PushBool { value: *value }.into());
+                self.ins.push(Instruction::SetProperty { prop: Property::Visible }.into());
             }
             ast::StmtKind::TurnLeft { angle } => {
                 self.append_expr(angle, entity)?;
