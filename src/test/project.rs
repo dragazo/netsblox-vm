@@ -118,6 +118,47 @@ fn test_proj_size_visible() {
 }
 
 #[test]
+fn test_proj_motion() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
+    let proj = get_running_project(include_str!("projects/motion.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        let expected = Value::from_json(mc, json!([
+            [-42, 67, 287],
+            [-48.69413329174131, 69.04660193305915, 287],
+            [-48.69413329174131, 69.04660193305915, 307],
+            [-48.69413329174131, 69.04660193305915, 227],
+            [17.859053555603275, 131.10845269874653, 227],
+            [17.859053555603275, 131.10845269874653, 33],
+            [17.859053555603275, 131.10845269874653, 93],
+            [29.842607972658175, 130.48042122383123, 93],
+            [-0.11627806997899777, 132.0504999111196, 93],
+            [-0.11627806997899777, 132.0504999111196, 42],
+            [-75, 63, 42],
+            [-54, 63, 42],
+            [-57, 63, 42],
+            [78, 63, 42],
+            [-13, 63, 42],
+            [-13, 161, 42],
+            [-13, 146, 42],
+            [-13, -64, 42],
+            [-13, 2, 42],
+            [-13, 2, 245],
+            [-13, 2, 8],
+            [-13, 2, 98.74616226255522],
+            [-13, 2, 110.74616226255603],
+            [0, 0, 110.74616226255603],
+            [31, -120, 110.74616226255603],
+            [31, -120, 355.7636052009412],
+        ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-10, "res");
+    });
+}
+
+#[test]
 fn test_proj_watchers() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
     let proj = get_running_project(include_str!("projects/watchers.xml"), system);

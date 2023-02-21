@@ -1077,6 +1077,42 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ClearEffects => {
                 perform_command!(Command::ClearEffects, aft_pos);
             }
+            Instruction::GotoXY => {
+                let y = self.value_stack.pop().unwrap().to_number()?;
+                let x = self.value_stack.pop().unwrap().to_number()?;
+                perform_command!(Command::GotoXY { x, y }, aft_pos);
+            }
+            Instruction::Goto => match self.value_stack.pop().unwrap() {
+                Value::List(target) => {
+                    let target = target.read();
+                    if target.len() != 2 { return Err(ErrorCause::InvalidListLength { expected: 2, got: target.len() }); }
+                    let (x, y) = (target[0].to_number()?, target[1].to_number()?);
+                    perform_command!(Command::GotoXY { x, y }, aft_pos);
+                }
+                Value::Entity(target) => {
+                    let target = target.read();
+                    perform_command!(Command::GotoEntity { target: &*target }, aft_pos);
+                }
+                target => return Err(ErrorCause::ConversionError { got: target.get_type(), expected: Type::Entity }),
+            }
+            Instruction::PointTowardsXY => {
+                let x = self.value_stack.pop().unwrap().to_number()?;
+                let y = self.value_stack.pop().unwrap().to_number()?;
+                perform_command!(Command::PointTowardsXY { x, y }, aft_pos);
+            }
+            Instruction::PointTowards => match self.value_stack.pop().unwrap() {
+                Value::List(target) => {
+                    let target = target.read();
+                    if target.len() != 2 { return Err(ErrorCause::InvalidListLength { expected: 2, got: target.len() }); }
+                    let (x, y) = (target[0].to_number()?, target[1].to_number()?);
+                    perform_command!(Command::PointTowardsXY { x, y }, aft_pos);
+                }
+                Value::Entity(target) => {
+                    let target = target.read();
+                    perform_command!(Command::PointTowardsEntity { target: &*target }, aft_pos);
+                }
+                target => return Err(ErrorCause::ConversionError { got: target.get_type(), expected: Type::Entity }),
+            }
             Instruction::Forward => {
                 let distance = self.value_stack.pop().unwrap().to_number()?;
                 perform_command!(Command::Forward { distance }, aft_pos);

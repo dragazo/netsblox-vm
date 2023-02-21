@@ -392,7 +392,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         })
     }
 
-    fn perform_command<'gc>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>> {
+    fn perform_command<'gc, 'a>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, 'a, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>> {
         Ok(match self.config.command.as_ref() {
             Some(handler) => {
                 let key = CommandKey(Arc::new(Mutex::new(AsyncResult::new())));

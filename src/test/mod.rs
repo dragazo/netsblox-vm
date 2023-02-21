@@ -47,6 +47,9 @@ fn default_properties_config() -> Config<C, StdSystem<C>> {
             Command::SetProperty { prop, value } => entity.state.props.perform_set_property(key, prop, value),
             Command::ChangeProperty { prop, delta } => entity.state.props.perform_change_property(key, prop, delta),
             Command::ClearEffects => entity.state.props.perform_clear_effects(key),
+            Command::GotoXY { x, y } => entity.state.props.perform_goto_xy(key, x, y),
+            Command::PointTowardsXY { x, y } => entity.state.props.perform_point_towards_xy(key, x, y),
+            Command::Forward { distance } => entity.state.props.perform_forward(key, distance),
             _ => CommandStatus::UseDefault { key, command },
         })),
     }

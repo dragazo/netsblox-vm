@@ -399,6 +399,18 @@ pub(crate) enum Instruction<'a> {
     /// Clears all graphic effects on the entity.
     ClearEffects,
 
+    /// Consumes 2 values, `y` and `x`, and asynchronously moves the entity to that position.
+    GotoXY,
+    /// Consumes 1 value, `target`, and asynchronously moves the entity to the target.
+    /// The target can be an entity or an `[x, y]` position.
+    Goto,
+
+    /// Consumes 2 values, `y` and `x`, and asynchronously points the entity toward the specified location.
+    PointTowardsXY,
+    /// Consumes 1 value, `target`, and asynchronously points the entity toward the target.
+    /// The target can be an entity or an `[x, y]` position.
+    PointTowards,
+
     /// Consumes 1 value, `dist`, and asynchronously moves the entity forward by that distance (or backwards if negative).
     Forward,
 }
@@ -806,7 +818,13 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
 
             99 => read_prefixed!(Instruction::ClearEffects),
 
-            100 => read_prefixed!(Instruction::Forward),
+            100 => read_prefixed!(Instruction::GotoXY),
+            101 => read_prefixed!(Instruction::Goto),
+
+            102 => read_prefixed!(Instruction::PointTowardsXY),
+            103 => read_prefixed!(Instruction::PointTowards),
+
+            104 => read_prefixed!(Instruction::Forward),
 
             _ => unreachable!(),
         }
@@ -969,7 +987,13 @@ impl BinaryWrite for Instruction<'_> {
 
             Instruction::ClearEffects => append_prefixed!(99),
 
-            Instruction::Forward => append_prefixed!(100),
+            Instruction::GotoXY => append_prefixed!(100),
+            Instruction::Goto => append_prefixed!(101),
+
+            Instruction::PointTowardsXY => append_prefixed!(102),
+            Instruction::PointTowards => append_prefixed!(103),
+
+            Instruction::Forward => append_prefixed!(104),
         }
     }
 }
@@ -1524,7 +1548,16 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::StmtKind::ClearEffects => self.ins.push(Instruction::ClearEffects.into()),
             ast::StmtKind::Forward { distance } => self.append_simple_ins(entity, &[distance], Instruction::Forward)?,
             ast::StmtKind::ResetTimer => self.ins.push(Instruction::ResetTimer.into()),
+            ast::StmtKind::GotoXY { x, y } => self.append_simple_ins(entity, &[x, y], Instruction::GotoXY)?,
+            ast::StmtKind::ChangeX { delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeProperty { prop: Property::XPos })?,
+            ast::StmtKind::ChangeY { delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeProperty { prop: Property::YPos })?,
+            ast::StmtKind::SetX { value } => self.append_simple_ins(entity, &[value], Instruction::SetProperty { prop: Property::XPos })?,
+            ast::StmtKind::SetY { value } => self.append_simple_ins(entity, &[value], Instruction::SetProperty { prop: Property::YPos })?,
             ast::StmtKind::TurnRight { angle } => self.append_simple_ins(entity, &[angle], Instruction::ChangeProperty { prop: Property::Heading })?,
+            ast::StmtKind::SetHeading { value } => self.append_simple_ins(entity, &[value], Instruction::SetProperty { prop: Property::Heading })?,
+            ast::StmtKind::PointTowards { target } => self.append_simple_ins(entity, &[target], Instruction::PointTowards)?,
+            ast::StmtKind::PointTowardsXY { x, y } => self.append_simple_ins(entity, &[x, y], Instruction::PointTowardsXY)?,
+            ast::StmtKind::Goto { target } => self.append_simple_ins(entity, &[target], Instruction::Goto)?,
             ast::StmtKind::NextCostume => self.ins.push(Instruction::NextCostume.into()),
             ast::StmtKind::SetCostume { costume } => match costume {
                 Some(x) => self.append_simple_ins(entity, &[x], Instruction::SetCostume)?,

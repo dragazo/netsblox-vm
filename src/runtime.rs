@@ -67,6 +67,8 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     ConversionError { got: Type<C, S>, expected: Type<C, S> },
     /// The result of a failed variadic type conversion (expected type `T` or a list of type `T`).
     VariadicConversionError { got: Type<C, S>, expected: Type<C, S> },
+    /// An operation that expected a list with a certain size received an incorrect size.
+    InvalidListLength { expected: usize, got: usize },
     /// An indexing operation on a list/string had an out of bounds index, `index`, on a list/string of size `len`. Note that Snap!/NetsBlox use 1-based indexing.
     IndexOutOfBounds { index: f64, len: usize },
     /// Attempt to index a list with a non-integer numeric value, `index`.
@@ -388,11 +390,11 @@ impl Properties {
         key.complete(Ok(C::Intermediate::from_json(value)));
         RequestStatus::Handled
     }
-    pub fn perform_set_property<'gc, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, prop: Property, value: Value<'gc, C, S>) -> CommandStatus<'gc, C, S> {
+    pub fn perform_set_property<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, prop: Property, value: Value<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S> {
         match prop {
             Property::XPos => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.pos.0 = value),
             Property::YPos => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.pos.1 = value),
-            Property::Heading => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.heading = value),
+            Property::Heading => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.heading = value),
 
             Property::Visible => self.with_value(key, value.to_bool().map_err(Into::into), |props, value| props.visible = value),
             Property::Size => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().max(0.0)).map_err(Into::into)), |props, value| props.size = value),
@@ -431,11 +433,11 @@ impl Properties {
         }
         CommandStatus::Handled
     }
-    pub fn perform_change_property<'gc, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, prop: Property, delta: Value<'gc, C, S>) -> CommandStatus<'gc, C, S> {
+    pub fn perform_change_property<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, prop: Property, delta: Value<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S> {
         match prop {
             Property::XPos => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.pos.0.add(x).map_err(Into::into)), |props, value| props.pos.0 = value),
             Property::YPos => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.pos.1.add(x).map_err(Into::into)), |props, value| props.pos.1 = value),
-            Property::Heading => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.heading.add(x).map_err(Into::into)), |props, value| props.heading = value),
+            Property::Heading => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.heading.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.heading = value),
 
             Property::Visible => self.with_value(key, delta.to_bool().map_err(Into::into), |props, value| props.visible ^= value),
             Property::Size => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.size.get() + x.get()).max(0.0)).map_err(Into::into)), |props, value| props.size = value),
@@ -467,8 +469,28 @@ impl Properties {
         }
         CommandStatus::Handled
     }
-    pub fn perform_clear_effects<'gc, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey) -> CommandStatus<'gc, C, S> {
+
+    pub fn perform_clear_effects<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey) -> CommandStatus<'gc, 'a, C, S> {
         key.complete(Ok(self.effects = Default::default()));
+        CommandStatus::Handled
+    }
+
+    pub fn perform_goto_xy<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, x: Number, y: Number) -> CommandStatus<'gc, 'a, C, S> {
+        key.complete(Ok(self.pos = (x, y)));
+        CommandStatus::Handled
+    }
+
+    pub fn perform_point_towards_xy<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, x: Number, y: Number) -> CommandStatus<'gc, 'a, C, S> {
+        let (dx, dy) = (x.get() - self.pos.0.get(), y.get() - self.pos.1.get());
+        let heading = dx.atan2(dy).to_degrees().rem_euclid(360.0);
+        self.with_value::<C, S, _>(key, Number::new(heading).map_err(Into::into), |props, value| props.heading = value);
+        CommandStatus::Handled
+    }
+
+    pub fn perform_forward<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, dist: Number) -> CommandStatus<'gc, 'a, C, S> {
+        let (sin, cos) = self.heading.get().to_radians().sin_cos();
+        let (x, y) = (self.pos.0.get() + sin * dist.get(), self.pos.1.get() + cos * dist.get());
+        self.with_value::<C, S, _>(key, Number::new(x).map_err(Into::into).and_then(|x| Number::new(y).map(|y| (x, y)).map_err(Into::into)), |props, pos| props.pos = pos);
         CommandStatus::Handled
     }
 }
@@ -1131,6 +1153,17 @@ pub enum Feature {
     SetCostume,
     /// The ability to clear all graphic effects on an entity. This is equivalent to setting all the graphic effect properties to zero.
     ClearEffects,
+
+    /// The ability of an entity to set both its x and y positions simultaneously.
+    GotoXY,
+    /// The ability of an entity to go the the same location as another entity.
+    GotoEntity,
+
+    /// The ability of an entity to turn to face a specific location.
+    PointTowardsXY,
+    /// The ability of an entity to turn to face another entity.
+    PointTowardsEntity,
+
     /// The ability of an entity to move forward or backwards by a distance.
     Forward,
 }
@@ -1159,22 +1192,36 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Request<'gc, C, S> {
 }
 
 /// A non-value-returning command issued from the runtime.
-pub enum Command<'gc, C: CustomTypes<S>, S: System<C>> {
+pub enum Command<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     /// Output [`Some`] [`Value`] or [`None`] to perform a Snap!-style clear.
     Print { style: PrintStyle, value: Option<Value<'gc, C, S>> },
+
     /// Set an entity property to a specific value.
     SetProperty { prop: Property, value: Value<'gc, C, S> },
     /// Apply a relative change to the value of an entity property.
     ChangeProperty { prop: Property, delta: Value<'gc, C, S> },
+
+    /// Clear all graphic effects on the entity. This is equivalent to setting all the graphic effect properties to zero.
+    ClearEffects,
+
     /// Sets the costume on the entity. This should essentially assigns the costume to [`Entity::costume`],
     /// but is treated as a system command so that custom code can be executed when an entity switches costumes.
     SetCostume { costume: Option<Rc<Vec<u8>>> },
-    /// Clear all graphic effects on the entity. This is equivalent to setting all the graphic effect properties to zero.
-    ClearEffects,
+
+    /// Moves the entity to a specific location.
+    GotoXY { x: Number, y: Number },
+    /// Moves the current entity to the same position as the target entity.
+    GotoEntity { target: &'a Entity<'gc, C, S> },
+
+    /// Points the entity towards a specific location.
+    PointTowardsXY { x: Number, y: Number },
+    /// Points the current entity towards a target entity.
+    PointTowardsEntity { target: &'a Entity<'gc, C, S> },
+
     /// Move forward by a given distance. If the distance is negative, move backwards instead.
     Forward { distance: Number },
 }
-impl<'gc, C: CustomTypes<S>, S: System<C>> Command<'gc, C, S> {
+impl<'gc, C: CustomTypes<S>, S: System<C>> Command<'gc, '_, C, S> {
     /// Gets the [`Feature`] associated with this command.
     pub fn feature(&self) -> Feature {
         match self {
@@ -1183,6 +1230,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Command<'gc, C, S> {
             Command::ChangeProperty { prop, .. } => Feature::ChangeProperty { prop: *prop },
             Command::SetCostume { .. } => Feature::SetCostume,
             Command::ClearEffects { .. } => Feature::ClearEffects,
+            Command::GotoXY { .. } => Feature::GotoXY,
+            Command::GotoEntity { .. } => Feature::GotoEntity,
+            Command::PointTowardsXY { .. } => Feature::PointTowardsXY,
+            Command::PointTowardsEntity { .. } => Feature::PointTowardsEntity,
             Command::Forward { .. } => Feature::Forward,
         }
     }
@@ -1197,12 +1248,12 @@ pub enum RequestStatus<'gc, C: CustomTypes<S>, S: System<C>> {
     UseDefault { key: S::RequestKey, request: Request<'gc, C, S> },
 }
 /// The status of a potentially-handled command.
-pub enum CommandStatus<'gc, C: CustomTypes<S>, S: System<C>> {
+pub enum CommandStatus<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     /// The command was handled by the overriding client.
     Handled,
     /// The command was not handled by the overriding client,
     /// and the default system implementation should be used instead.
-    UseDefault { key: S::CommandKey, command: Command<'gc, C, S> },
+    UseDefault { key: S::CommandKey, command: Command<'gc, 'a, C, S> },
 }
 
 /// A collection of implementation options that could be used for implementing a customizable [`System`].
@@ -1212,7 +1263,7 @@ pub struct Config<C: CustomTypes<S>, S: System<C>> {
     /// A function used to perform asynchronous requests that yield a value back to the runtime.
     pub request: Option<Rc<dyn for<'gc> Fn(&S, MutationContext<'gc, '_>, S::RequestKey, Request<'gc, C, S>, &mut Entity<'gc, C, S>) -> RequestStatus<'gc, C, S>>>,
     /// A function used to perform asynchronous tasks whose completion is awaited by the runtime.
-    pub command: Option<Rc<dyn for<'gc> Fn(&S, MutationContext<'gc, '_>, S::CommandKey, Command<'gc, C, S>, &mut Entity<'gc, C, S>) -> CommandStatus<'gc, C, S>>>,
+    pub command: Option<Rc<dyn for<'gc, 'a> Fn(&S, MutationContext<'gc, '_>, S::CommandKey, Command<'gc, 'a, C, S>, &mut Entity<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S>>>,
 }
 impl<C: CustomTypes<S>, S: System<C>> Default for Config<C, S> {
     fn default() -> Self {
@@ -1324,7 +1375,7 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Performs a general command which does not return a value to the system.
     /// Ideally, this function should be non-blocking, and the commander will await the task's completion asynchronously.
     /// The [`Entity`] that issued the command is provided for context.
-    fn perform_command<'gc>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>>;
+    fn perform_command<'gc, 'a>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, 'a, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>>;
     /// Poll for the completion of an asynchronous command.
     /// The [`Entity`] that issued the command is provided for context.
     fn poll_command<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::CommandKey, entity: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>>;
