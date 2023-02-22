@@ -452,6 +452,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(Number::new(value)?.into());
                 self.pos = aft_pos;
             }
+            Instruction::PushColor { value } => {
+                let Color { r, g, b, a } = value;
+                self.value_stack.push(Number::new(u32::from_be_bytes([a, r, g ,b]) as f64)?.into());
+                self.pos = aft_pos;
+            }
             Instruction::PushString { value } => {
                 self.value_stack.push(Value::String(Rc::new(value.to_owned())));
                 self.pos = aft_pos;

@@ -400,7 +400,7 @@ impl Properties {
             Property::Size => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().max(0.0)).map_err(Into::into)), |props, value| props.size = value),
 
             Property::PenDown => self.with_value(key, value.to_bool().map_err(Into::into), |props, value| props.pen_down = value),
-            Property::PenSize => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.pen_size = value),
+            Property::PenSize => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().max(0.0)).map_err(Into::into)), |props, value| props.pen_size = value),
 
             Property::PenColor => self.with_value(key, value.to_number().map_err(Into::into), |props, value| {
                 let [a, r, g, b] = (value.get() as u32).to_be_bytes();
@@ -443,7 +443,7 @@ impl Properties {
             Property::Size => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.size.get() + x.get()).max(0.0)).map_err(Into::into)), |props, value| props.size = value),
 
             Property::PenDown => self.with_value(key, delta.to_bool().map_err(Into::into), |props, value| props.pen_down ^= value),
-            Property::PenSize => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.pen_size.add(x).map_err(Into::into)), |props, value| props.pen_size = value),
+            Property::PenSize => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.pen_size.get() + x.get()).max(0.0)).map_err(Into::into)), |props, value| props.pen_size = value),
 
             Property::PenColor => key.complete(Err("attempt to apply relative change to a color".into())),
 

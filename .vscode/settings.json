@@ -26,6 +26,7 @@
     ],
     "cSpell.words": [
         "actix",
+        "argb",
         "chacha",
         "Condvar",
         "getrandom",
