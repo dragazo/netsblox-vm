@@ -444,6 +444,23 @@ fn test_proj_loop_yields() {
 }
 
 #[test]
+fn test_proj_run_call_ask_tell() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/run-call-ask-tell.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        let expected = Value::from_json(mc, json!([
+            1, 3, 6, 10, 15, 16, 18, 21, 25, 30, 31, 33, 36, 40, 45, 46, 48, 51, 55, 60, 61, 63, 66, 70, 75,
+            76, 78, 81, 85, 90, 91, 93, 96, 100, 105, 106, 108, 111, 115, 120, 121, 123, 126, 130, 135, 136, 138, 141, 145, 150
+        ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 0.01, "res");
+    });
+}
+
+#[test]
 fn test_proj_parallel_rpcs() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), system);
