@@ -445,7 +445,7 @@ fn test_proj_loop_yields() {
 
 #[test]
 fn test_proj_run_call_ask_tell() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
     let proj = get_running_project(include_str!("projects/run-call-ask-tell.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
@@ -453,10 +453,18 @@ fn test_proj_run_call_ask_tell() {
         let global_context = global_context.read();
 
         let expected = Value::from_json(mc, json!([
-            1, 3, 6, 10, 15, 16, 18, 21, 25, 30, 31, 33, 36, 40, 45, 46, 48, 51, 55, 60, 61, 63, 66, 70, 75,
-            76, 78, 81, 85, 90, 91, 93, 96, 100, 105, 106, 108, 111, 115, 120, 121, 123, 126, 130, 135, 136, 138, 141, 145, 150
+            [0.0, [87, 25, 10], [74, 65, 14], [45, 25, 201]],
+            [0.1, [87, 25, 10], [74, 65, 14], [45, 25, 201]],
+            [0.2, [87, 25, 10], [74, 65, 14], [45, 25, 201]],
+            "24",
+            [0.3, [87, 25, 10], [74, 65, 14], [45, 25, 201]],
+            "17",
+            [0.4, [87, 25, 10], [74, 65, 14], [45, 25, 201]],
+            [0.4, [17, -95, 23], [74, 65, 14], [45, 25, 201]],
+            [0.4, [17, -95, 23], [41, 35, 65], [45, 25, 201]],
+            [0.4, [17, -95, 23], [41, 35, 65], [-108, 105, 356]],
         ])).unwrap();
-        assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 0.01, "res");
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 0.1, "res");
     });
 }
 

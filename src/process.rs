@@ -58,7 +58,7 @@ pub struct ErrorSummary {
 }
 impl ErrorSummary {
     pub fn extract<C: CustomTypes<S>, S: System<C>>(error: &ExecError<C, S>, process: &Process<C, S>, locations: &Locations) -> Self {
-        let raw_entity = process.get_entity();
+        let raw_entity = process.call_stack.last().unwrap().entity;
         let entity = raw_entity.read().name.clone();
         let cause = format!("{:?}", error.cause);
 
@@ -130,6 +130,7 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
 pub struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub called_from: usize,
     #[collect(require_static)]     return_to: usize,
+                               pub entity: GcCell<'gc, Entity<'gc, C, S>>,
                                pub locals: SymbolTable<'gc, C, S>,
 
     #[collect(require_static)] warp_counter: usize,
@@ -166,7 +167,6 @@ enum RequestAction {
 #[collect(no_drop, bound = "")]
 pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
                                global_context: GcCell<'gc, GlobalContext<'gc, C, S>>,
-                               entity: GcCell<'gc, Entity<'gc, C, S>>,
     #[collect(require_static)] start_pos: usize,
     #[collect(require_static)] pos: usize,
     #[collect(require_static)] running: bool,
@@ -187,13 +187,23 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// The created process is initialized to an idle (non-running) state; use [`Process::initialize`] to begin execution.
     pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, C, S>>, entity: GcCell<'gc, Entity<'gc, C, S>>, start_pos: usize) -> Self {
         Self {
-            global_context, entity, start_pos,
+            global_context,
+            start_pos,
             running: false,
             barrier: None,
             reply_key: None,
             pos: 0,
             warp_counter: 0,
-            call_stack: vec![],
+            call_stack: vec![CallStackEntry {
+                called_from: usize::MAX,
+                return_to: usize::MAX,
+                warp_counter: 0,
+                value_stack_size: 0,
+                handler_stack_size: 0,
+                meta_stack_size: 0,
+                locals: Default::default(),
+                entity,
+            }],
             value_stack: vec![],
             handler_stack: vec![],
             meta_stack: vec![],
@@ -212,10 +222,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc, C, S>> {
         self.global_context
     }
-    /// Gets the entity that this process is tied to (see [`Process::new`]).
-    pub fn get_entity(&self) -> GcCell<'gc, Entity<'gc, C, S>> {
-        self.entity
-    }
     /// Gets a reference to the current call stack.
     /// This gives access to stack trace information including all local scopes in the call chain.
     /// Note that the call stack is never empty, and that the always-present first element (denoting the initial execution request) is a special
@@ -233,16 +239,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         self.barrier = barrier;
         self.reply_key = reply_key;
         self.warp_counter = 0;
-        self.call_stack.clear();
-        self.call_stack.push(CallStackEntry {
-            called_from: usize::MAX,
-            return_to: usize::MAX,
-            warp_counter: 0,
-            value_stack_size: 0,
-            handler_stack_size: 0,
-            meta_stack_size: 0,
-            locals,
-        });
+        self.call_stack.drain(1..);
+        self.call_stack[0].locals = locals;
         self.value_stack.clear();
         self.handler_stack.clear();
         self.meta_stack.clear();
@@ -345,9 +343,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }}
         }
 
+        let context_entity = self.call_stack.last().unwrap().entity;
+
         match &self.defer {
             None => (),
-            Some(Defer::Request { key, aft_pos, action }) => match global_context.system.poll_request(mc, key, &mut *self.entity.write(mc))? {
+            Some(Defer::Request { key, aft_pos, action }) => match global_context.system.poll_request(mc, key, &mut *context_entity.write(mc))? {
                 AsyncResult::Completed(x) => {
                     process_request!(x, action, *aft_pos);
                     self.defer = None;
@@ -355,7 +355,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 AsyncResult::Pending => return Ok(ProcessStep::Yield),
                 AsyncResult::Consumed => panic!(),
             }
-            Some(Defer::Command { key, aft_pos }) => match global_context.system.poll_command(mc, key, &mut *self.entity.write(mc))? {
+            Some(Defer::Command { key, aft_pos }) => match global_context.system.poll_command(mc, key, &mut *context_entity.write(mc))? {
                 AsyncResult::Completed(x) => {
                     process_command!(x, *aft_pos);
                     self.defer = None;
@@ -392,7 +392,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
         }
 
-        let mut entity = self.entity.write(mc);
+        let mut entity = context_entity.write(mc);
         let mut context = [&mut global_context.globals, &mut entity.fields, &mut self.call_stack.last_mut().unwrap().locals];
         let mut context = LookupGroup::new(&mut context);
 
@@ -464,6 +464,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::PushVariable { var } => {
                 self.value_stack.push(lookup_var!(var).get().clone());
                 self.pos = aft_pos;
+            }
+            Instruction::PushEntity { name } => match global_context.entities.get(name) {
+                Some(x) => {
+                    self.value_stack.push(Value::Entity(*x));
+                    self.pos = aft_pos;
+                }
+                None => return Err(ErrorCause::UndefinedEntity { name: name.into() }),
             }
             Instruction::PopValue => {
                 self.value_stack.pop().unwrap();
@@ -786,7 +793,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
             Instruction::Watcher { create, var } => {
                 let watcher = Watcher {
-                    entity: GcCell::downgrade(self.entity),
+                    entity: GcCell::downgrade(context_entity),
                     name: var.to_owned(),
                     value: GcCell::downgrade(lookup_var!(mut var).alias_inner(mc)),
                 };
@@ -810,12 +817,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     return Err(ErrorCause::CallDepthLimit { limit: global_context.settings.max_call_depth });
                 }
 
-                debug_assert!(self.meta_stack.len() >= params);
-                let params: Vec<_> = self.meta_stack.drain(self.meta_stack.len() - params..).collect();
-
                 let mut locals = SymbolTable::default();
-                for var in params.iter().rev() {
-                    locals.redefine_or_define(var, self.value_stack.pop().unwrap().into());
+                for var in self.meta_stack.drain(self.meta_stack.len() - params..).rev() {
+                    locals.redefine_or_define(&var, self.value_stack.pop().unwrap().into());
                 }
                 self.call_stack.push(CallStackEntry {
                     called_from: self.pos,
@@ -824,7 +828,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     value_stack_size: self.value_stack.len(),
                     handler_stack_size: self.handler_stack.len(),
                     meta_stack_size: self.meta_stack.len(),
-                    locals
+                    entity: context_entity,
+                    locals,
                 });
                 self.pos = pos;
             }
@@ -840,8 +845,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(GcCell::allocate(mc, Closure { pos, params, captures: caps }).into());
                 self.pos = aft_pos;
             }
-            Instruction::CallClosure { args } => {
-                let closure = self.value_stack.pop().unwrap().as_closure()?;
+            Instruction::CallClosure { new_entity, args } => {
+                let mut values = self.value_stack.drain(self.value_stack.len() - (args + 1)..);
+                let closure = values.next().unwrap().as_closure()?;
                 let mut closure = closure.write(mc);
                 if closure.params.len() != args {
                     return Err(ErrorCause::ClosureArgCount { expected: closure.params.len(), got: args });
@@ -851,9 +857,15 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 for (k, v) in closure.captures.iter_mut() {
                     locals.redefine_or_define(k, v.alias(mc));
                 }
-                for var in closure.params.iter().rev() {
-                    locals.redefine_or_define(var, self.value_stack.pop().unwrap().into());
+                for (var, value) in iter::zip(&closure.params, values) {
+                    locals.redefine_or_define(var, value.into());
                 }
+
+                let entity = match new_entity {
+                    false => context_entity,
+                    true => self.value_stack.pop().unwrap().as_entity()?,
+                };
+
                 self.call_stack.push(CallStackEntry {
                     called_from: self.pos,
                     return_to: aft_pos,
@@ -862,32 +874,35 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     handler_stack_size: self.handler_stack.len(),
                     meta_stack_size: self.meta_stack.len(),
                     locals,
+                    entity,
                 });
                 self.pos = closure.pos;
             }
             Instruction::Return => {
-                let CallStackEntry { called_from, return_to, locals: _, warp_counter, value_stack_size, handler_stack_size, meta_stack_size } = self.call_stack.pop().unwrap();
+                let CallStackEntry { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, meta_stack_size, .. } = self.call_stack.last().unwrap();
                 let return_value = self.value_stack.pop().unwrap();
 
-                self.pos = return_to;
-                self.warp_counter = warp_counter;
+                self.pos = *return_to;
+                self.warp_counter = *warp_counter;
                 self.value_stack.drain(value_stack_size..);
                 self.handler_stack.drain(handler_stack_size..);
                 self.meta_stack.drain(meta_stack_size..);
-                debug_assert_eq!(self.value_stack.len(), value_stack_size);
-                debug_assert_eq!(self.handler_stack.len(), handler_stack_size);
-                debug_assert_eq!(self.meta_stack.len(), meta_stack_size);
+                debug_assert_eq!(self.value_stack.len(), *value_stack_size);
+                debug_assert_eq!(self.handler_stack.len(), *handler_stack_size);
+                debug_assert_eq!(self.meta_stack.len(), *meta_stack_size);
 
                 self.value_stack.push(return_value);
 
-                if self.call_stack.is_empty() {
+                if self.call_stack.len() > 1 {
+                    self.call_stack.pop();
+                } else {
                     debug_assert_eq!(self.value_stack.len(), 1);
-                    debug_assert_eq!(called_from, usize::MAX);
-                    debug_assert_eq!(return_to, usize::MAX);
-                    debug_assert_eq!(warp_counter, 0);
-                    debug_assert_eq!(value_stack_size, 0);
-                    debug_assert_eq!(handler_stack_size, 0);
-                    debug_assert_eq!(meta_stack_size, 0);
+                    debug_assert_eq!(*called_from, usize::MAX);
+                    debug_assert_eq!(*return_to, usize::MAX);
+                    debug_assert_eq!(*warp_counter, 0);
+                    debug_assert_eq!(*value_stack_size, 0);
+                    debug_assert_eq!(*handler_stack_size, 0);
+                    debug_assert_eq!(*meta_stack_size, 0);
                     return Ok(ProcessStep::Terminate { result: Some(self.value_stack.pop().unwrap()) });
                 }
             }

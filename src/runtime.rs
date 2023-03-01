@@ -63,6 +63,8 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     UndefinedVariable { name: String },
     /// A name-based costume lookup operation failed.
     UndefinedCostume { name: String },
+    /// A name-based entity lookup operation failed.
+    UndefinedEntity { name: String },
     /// The result of a failed type conversion.
     ConversionError { got: Type<C, S>, expected: Type<C, S> },
     /// The result of a failed variadic type conversion (expected type `T` or a list of type `T`).

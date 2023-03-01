@@ -38,7 +38,7 @@ pub enum CompileError<'a> {
     BadKeycode { key: &'a str },
     InvalidLocation { loc: &'a str },
     BadNumber { error: NumberError },
-    UndefinedRef,
+    UndefinedRef { value: &'a ast::Value },
 }
 impl From<NumberError> for CompileError<'_> { fn from(error: NumberError) -> Self { Self::BadNumber { error } } }
 
@@ -198,6 +198,8 @@ pub(crate) enum Instruction<'a> {
     PushString { value: &'a str },
     /// Pushes 1 value to the value stack, as looked up from the current execution context.
     PushVariable { var: &'a str },
+    /// Pushes a reference to a named entity onto the value stack.
+    PushEntity { name: &'a str },
     /// Consumes `count` values from the value stack and discards them.
     PopValue,
 
@@ -327,10 +329,10 @@ pub(crate) enum Instruction<'a> {
     /// Then creates a closure object with the given information.
     /// Captures are looked up and bound immediately based on the current execution context.
     MakeClosure { pos: usize, params: usize, captures: usize },
-    /// Consumes 1 argument, `closure`, and another `args` arguments (in reverse order) from the value stack
-    /// to assign to the parameters of `closure` before executing the closure's stored code.
+    /// Consumes `args` values, and another value, `closure`, from the value stack and calls the closure with the given arguments.
+    /// If `new_entity` is true, consumes an additional value, `entity`, which is the target entity for the new execution context (otherwise the current entity is used).
     /// It is an error if the number of supplied arguments does not match the number of parameters.
-    CallClosure { args: usize },
+    CallClosure { new_entity: bool, args: usize },
     /// Pops a return address from the call stack and jumps to it.
     /// The return value is left on the top of the value stack.
     /// If the call stack is empty, this instead terminates the process
@@ -725,136 +727,139 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             9 => read_prefixed!(Instruction::PushString {} : value),
 
             10 => read_prefixed!(Instruction::PushVariable {} : var),
-            11 => read_prefixed!(Instruction::PopValue),
+            11 => read_prefixed!(Instruction::PushEntity {} : name),
 
-            12 => read_prefixed!(Instruction::DupeValue {} : top_index),
-            13 => read_prefixed!(Instruction::SwapValues {} : top_index_1, top_index_2),
+            12 => read_prefixed!(Instruction::PopValue),
 
-            14 => read_prefixed!(Instruction::ToBool),
-            15 => read_prefixed!(Instruction::ToNumber),
+            13 => read_prefixed!(Instruction::DupeValue {} : top_index),
+            14 => read_prefixed!(Instruction::SwapValues {} : top_index_1, top_index_2),
 
-            16 => read_prefixed!(Instruction::ListCons),
-            17 => read_prefixed!(Instruction::ListCdr),
+            15 => read_prefixed!(Instruction::ToBool),
+            16 => read_prefixed!(Instruction::ToNumber),
 
-            18 => read_prefixed!(Instruction::ListFind),
-            19 => read_prefixed!(Instruction::ListContains),
+            17 => read_prefixed!(Instruction::ListCons),
+            18 => read_prefixed!(Instruction::ListCdr),
 
-            20 => read_prefixed!(Instruction::ListIsEmpty),
-            21 => read_prefixed!(Instruction::ListLength),
-            22 => read_prefixed!(Instruction::ListDims),
-            23 => read_prefixed!(Instruction::ListRank),
+            19 => read_prefixed!(Instruction::ListFind),
+            20 => read_prefixed!(Instruction::ListContains),
 
-            24 => read_prefixed!(Instruction::ListRev),
-            25 => read_prefixed!(Instruction::ListFlatten),
-            26 => read_prefixed!(Instruction::ListReshape {} : len),
-            27 => read_prefixed!(Instruction::ListCartesianProduct {} : len),
+            21 => read_prefixed!(Instruction::ListIsEmpty),
+            22 => read_prefixed!(Instruction::ListLength),
+            23 => read_prefixed!(Instruction::ListDims),
+            24 => read_prefixed!(Instruction::ListRank),
 
-            28 => read_prefixed!(Instruction::ListJson),
+            25 => read_prefixed!(Instruction::ListRev),
+            26 => read_prefixed!(Instruction::ListFlatten),
+            27 => read_prefixed!(Instruction::ListReshape {} : len),
+            28 => read_prefixed!(Instruction::ListCartesianProduct {} : len),
 
-            29 => read_prefixed!(Instruction::ListInsert),
-            30 => read_prefixed!(Instruction::ListInsertLast),
-            31 => read_prefixed!(Instruction::ListInsertRandom),
+            29 => read_prefixed!(Instruction::ListJson),
 
-            32 => read_prefixed!(Instruction::ListGet),
-            33 => read_prefixed!(Instruction::ListGetLast),
-            34 => read_prefixed!(Instruction::ListGetRandom),
+            30 => read_prefixed!(Instruction::ListInsert),
+            31 => read_prefixed!(Instruction::ListInsertLast),
+            32 => read_prefixed!(Instruction::ListInsertRandom),
 
-            35 => read_prefixed!(Instruction::ListAssign),
-            36 => read_prefixed!(Instruction::ListAssignLast),
-            37 => read_prefixed!(Instruction::ListAssignRandom),
+            33 => read_prefixed!(Instruction::ListGet),
+            34 => read_prefixed!(Instruction::ListGetLast),
+            35 => read_prefixed!(Instruction::ListGetRandom),
 
-            38 => read_prefixed!(Instruction::ListRemove),
-            39 => read_prefixed!(Instruction::ListRemoveLast),
-            40 => read_prefixed!(Instruction::ListRemoveAll),
+            36 => read_prefixed!(Instruction::ListAssign),
+            37 => read_prefixed!(Instruction::ListAssignLast),
+            38 => read_prefixed!(Instruction::ListAssignRandom),
 
-            41 => read_prefixed!(Instruction::ListPopFirstOrElse {} : goto),
+            39 => read_prefixed!(Instruction::ListRemove),
+            40 => read_prefixed!(Instruction::ListRemoveLast),
+            41 => read_prefixed!(Instruction::ListRemoveAll),
 
-            42 => read_prefixed!(Instruction::Eq { negate: false }),
-            43 => read_prefixed!(Instruction::Eq { negate: true }),
-            44 => read_prefixed!(Instruction::RefEq),
+            42 => read_prefixed!(Instruction::ListPopFirstOrElse {} : goto),
 
-            45 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Add }),
-            46 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Sub }),
-            47 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Mul }),
-            48 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Div }),
-            49 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Greater }),
-            50 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Less }),
-            51 => read_prefixed!(Instruction::BinaryOp {} : op),
+            43 => read_prefixed!(Instruction::Eq { negate: false }),
+            44 => read_prefixed!(Instruction::Eq { negate: true }),
+            45 => read_prefixed!(Instruction::RefEq),
 
-            52 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::Add, } : len),
-            53 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::Mul, } : len),
-            54 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::StrCat, } : len),
-            55 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::MakeList, } : len),
-            56 => read_prefixed!(Instruction::VariadicOp {} : op, len),
+            46 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Add }),
+            47 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Sub }),
+            48 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Mul }),
+            49 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Div }),
+            50 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Greater }),
+            51 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Less }),
+            52 => read_prefixed!(Instruction::BinaryOp {} : op),
 
-            57 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Not }),
-            58 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Round }),
-            59 => read_prefixed!(Instruction::UnaryOp {} : op),
+            53 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::Add, } : len),
+            54 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::Mul, } : len),
+            55 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::StrCat, } : len),
+            56 => read_prefixed!(Instruction::VariadicOp { op: VariadicOp::MakeList, } : len),
+            57 => read_prefixed!(Instruction::VariadicOp {} : op, len),
 
-            60 => read_prefixed!(Instruction::DeclareLocal {} : var),
-            61 => read_prefixed!(Instruction::Assign {} : var),
+            58 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Not }),
+            59 => read_prefixed!(Instruction::UnaryOp { op: UnaryOp::Round }),
+            60 => read_prefixed!(Instruction::UnaryOp {} : op),
 
-            62 => read_prefixed!(Instruction::BinaryOpAssign { op: BinaryOp::Add, } : var),
-            63 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
+            61 => read_prefixed!(Instruction::DeclareLocal {} : var),
+            62 => read_prefixed!(Instruction::Assign {} : var),
 
-            64 => read_prefixed!(Instruction::Watcher {} : create, var),
+            63 => read_prefixed!(Instruction::BinaryOpAssign { op: BinaryOp::Add, } : var),
+            64 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
 
-            65 => read_prefixed!(Instruction::Jump {} : to),
-            66 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
-            67 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
+            65 => read_prefixed!(Instruction::Watcher {} : create, var),
 
-            68 => read_prefixed!(Instruction::MetaPush {} : value),
+            66 => read_prefixed!(Instruction::Jump {} : to),
+            67 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
+            68 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
 
-            69 => read_prefixed!(Instruction::Call {} : pos, params),
-            70 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
-            71 => read_prefixed!(Instruction::CallClosure {} : args),
-            72 => read_prefixed!(Instruction::Return),
+            69 => read_prefixed!(Instruction::MetaPush {} : value),
 
-            73 => read_prefixed!(Instruction::PushHandler {} : pos, var),
-            74 => read_prefixed!(Instruction::PopHandler),
-            75 => read_prefixed!(Instruction::Throw),
+            70 => read_prefixed!(Instruction::Call {} : pos, params),
+            71 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
+            72 => read_prefixed!(Instruction::CallClosure { new_entity: false, } : args),
+            73 => read_prefixed!(Instruction::CallClosure { new_entity: true, } : args),
+            74 => read_prefixed!(Instruction::Return),
 
-            76 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
-            77 => read_prefixed!(Instruction::PushRpcError),
+            75 => read_prefixed!(Instruction::PushHandler {} : pos, var),
+            76 => read_prefixed!(Instruction::PopHandler),
+            77 => read_prefixed!(Instruction::Throw),
 
-            78 => read_prefixed!(Instruction::Syscall {} : len),
-            79 => read_prefixed!(Instruction::PushSyscallError),
+            78 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
+            79 => read_prefixed!(Instruction::PushRpcError),
 
-            80 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            81 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            80 => read_prefixed!(Instruction::Syscall {} : len),
+            81 => read_prefixed!(Instruction::PushSyscallError),
 
-            82 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
-            83 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
-            84 => read_prefixed!(Instruction::Ask),
-            85 => read_prefixed!(Instruction::PushAnswer),
+            82 => read_prefixed!(Instruction::Broadcast { wait: false }),
+            83 => read_prefixed!(Instruction::Broadcast { wait: true }),
 
-            86 => read_prefixed!(Instruction::ResetTimer),
-            87 => read_prefixed!(Instruction::PushTimer),
-            88 => read_prefixed!(Instruction::Sleep),
+            84 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
+            85 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
+            86 => read_prefixed!(Instruction::Ask),
+            87 => read_prefixed!(Instruction::PushAnswer),
 
-            89 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
-            90 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
-            91 => read_prefixed!(Instruction::SendNetworkReply),
+            88 => read_prefixed!(Instruction::ResetTimer),
+            89 => read_prefixed!(Instruction::PushTimer),
+            90 => read_prefixed!(Instruction::Sleep),
 
-            92 => read_prefixed!(Instruction::PushProperty {} : prop),
-            93 => read_prefixed!(Instruction::SetProperty {} : prop),
-            94 => read_prefixed!(Instruction::ChangeProperty {} : prop),
+            91 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
+            92 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
+            93 => read_prefixed!(Instruction::SendNetworkReply),
 
-            95 => read_prefixed!(Instruction::PushCostume),
-            96 => read_prefixed!(Instruction::PushCostumeNumber),
-            97 => read_prefixed!(Instruction::PushCostumeList),
-            98 => read_prefixed!(Instruction::SetCostume),
-            99 => read_prefixed!(Instruction::NextCostume),
+            94 => read_prefixed!(Instruction::PushProperty {} : prop),
+            95 => read_prefixed!(Instruction::SetProperty {} : prop),
+            96 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
-            100 => read_prefixed!(Instruction::ClearEffects),
+            97 => read_prefixed!(Instruction::PushCostume),
+            98 => read_prefixed!(Instruction::PushCostumeNumber),
+            99 => read_prefixed!(Instruction::PushCostumeList),
+            100 => read_prefixed!(Instruction::SetCostume),
+            101 => read_prefixed!(Instruction::NextCostume),
 
-            101 => read_prefixed!(Instruction::GotoXY),
-            102 => read_prefixed!(Instruction::Goto),
+            102 => read_prefixed!(Instruction::ClearEffects),
 
-            103 => read_prefixed!(Instruction::PointTowardsXY),
-            104 => read_prefixed!(Instruction::PointTowards),
+            103 => read_prefixed!(Instruction::GotoXY),
+            104 => read_prefixed!(Instruction::Goto),
 
-            105 => read_prefixed!(Instruction::Forward),
+            105 => read_prefixed!(Instruction::PointTowardsXY),
+            106 => read_prefixed!(Instruction::PointTowards),
+
+            107 => read_prefixed!(Instruction::Forward),
 
             _ => unreachable!(),
         }
@@ -895,136 +900,139 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::PushString { value } => append_prefixed!(9: move str value),
 
             Instruction::PushVariable { var } => append_prefixed!(10: move str var),
-            Instruction::PopValue => append_prefixed!(11),
+            Instruction::PushEntity { name } => append_prefixed!(11: move str name),
 
-            Instruction::DupeValue { top_index } => append_prefixed!(12: top_index),
-            Instruction::SwapValues { top_index_1, top_index_2 } => append_prefixed!(13: top_index_1, top_index_2),
+            Instruction::PopValue => append_prefixed!(12),
 
-            Instruction::ToBool => append_prefixed!(14),
-            Instruction::ToNumber => append_prefixed!(15),
+            Instruction::DupeValue { top_index } => append_prefixed!(13: top_index),
+            Instruction::SwapValues { top_index_1, top_index_2 } => append_prefixed!(14: top_index_1, top_index_2),
 
-            Instruction::ListCons => append_prefixed!(16),
-            Instruction::ListCdr => append_prefixed!(17),
+            Instruction::ToBool => append_prefixed!(15),
+            Instruction::ToNumber => append_prefixed!(16),
 
-            Instruction::ListFind => append_prefixed!(18),
-            Instruction::ListContains => append_prefixed!(19),
+            Instruction::ListCons => append_prefixed!(17),
+            Instruction::ListCdr => append_prefixed!(18),
 
-            Instruction::ListIsEmpty => append_prefixed!(20),
-            Instruction::ListLength => append_prefixed!(21),
-            Instruction::ListDims => append_prefixed!(22),
-            Instruction::ListRank => append_prefixed!(23),
+            Instruction::ListFind => append_prefixed!(19),
+            Instruction::ListContains => append_prefixed!(20),
 
-            Instruction::ListRev => append_prefixed!(24),
-            Instruction::ListFlatten => append_prefixed!(25),
-            Instruction::ListReshape { len } => append_prefixed!(26: len),
-            Instruction::ListCartesianProduct { len } => append_prefixed!(27: len),
+            Instruction::ListIsEmpty => append_prefixed!(21),
+            Instruction::ListLength => append_prefixed!(22),
+            Instruction::ListDims => append_prefixed!(23),
+            Instruction::ListRank => append_prefixed!(24),
 
-            Instruction::ListJson => append_prefixed!(28),
+            Instruction::ListRev => append_prefixed!(25),
+            Instruction::ListFlatten => append_prefixed!(26),
+            Instruction::ListReshape { len } => append_prefixed!(27: len),
+            Instruction::ListCartesianProduct { len } => append_prefixed!(28: len),
 
-            Instruction::ListInsert => append_prefixed!(29),
-            Instruction::ListInsertLast => append_prefixed!(30),
-            Instruction::ListInsertRandom => append_prefixed!(31),
+            Instruction::ListJson => append_prefixed!(29),
 
-            Instruction::ListGet => append_prefixed!(32),
-            Instruction::ListGetLast => append_prefixed!(33),
-            Instruction::ListGetRandom => append_prefixed!(34),
+            Instruction::ListInsert => append_prefixed!(30),
+            Instruction::ListInsertLast => append_prefixed!(31),
+            Instruction::ListInsertRandom => append_prefixed!(32),
 
-            Instruction::ListAssign => append_prefixed!(35),
-            Instruction::ListAssignLast => append_prefixed!(36),
-            Instruction::ListAssignRandom => append_prefixed!(37),
+            Instruction::ListGet => append_prefixed!(33),
+            Instruction::ListGetLast => append_prefixed!(34),
+            Instruction::ListGetRandom => append_prefixed!(35),
 
-            Instruction::ListRemove => append_prefixed!(38),
-            Instruction::ListRemoveLast => append_prefixed!(39),
-            Instruction::ListRemoveAll => append_prefixed!(40),
+            Instruction::ListAssign => append_prefixed!(36),
+            Instruction::ListAssignLast => append_prefixed!(37),
+            Instruction::ListAssignRandom => append_prefixed!(38),
 
-            Instruction::ListPopFirstOrElse { goto } => append_prefixed!(41: move goto),
+            Instruction::ListRemove => append_prefixed!(39),
+            Instruction::ListRemoveLast => append_prefixed!(40),
+            Instruction::ListRemoveAll => append_prefixed!(41),
 
-            Instruction::Eq { negate: false } => append_prefixed!(42),
-            Instruction::Eq { negate: true } => append_prefixed!(43),
-            Instruction::RefEq => append_prefixed!(44),
+            Instruction::ListPopFirstOrElse { goto } => append_prefixed!(42: move goto),
 
-            Instruction::BinaryOp { op: BinaryOp::Add } => append_prefixed!(45),
-            Instruction::BinaryOp { op: BinaryOp::Sub } => append_prefixed!(46),
-            Instruction::BinaryOp { op: BinaryOp::Mul } => append_prefixed!(47),
-            Instruction::BinaryOp { op: BinaryOp::Div } => append_prefixed!(48),
-            Instruction::BinaryOp { op: BinaryOp::Greater } => append_prefixed!(49),
-            Instruction::BinaryOp { op: BinaryOp::Less } => append_prefixed!(50),
-            Instruction::BinaryOp { op } => append_prefixed!(51: op),
+            Instruction::Eq { negate: false } => append_prefixed!(43),
+            Instruction::Eq { negate: true } => append_prefixed!(44),
+            Instruction::RefEq => append_prefixed!(45),
 
-            Instruction::VariadicOp { op: VariadicOp::Add, len } => append_prefixed!(52: len),
-            Instruction::VariadicOp { op: VariadicOp::Mul, len } => append_prefixed!(53: len),
-            Instruction::VariadicOp { op: VariadicOp::StrCat, len } => append_prefixed!(54: len),
-            Instruction::VariadicOp { op: VariadicOp::MakeList, len } => append_prefixed!(55: len),
-            Instruction::VariadicOp { op, len } => append_prefixed!(56: op, len),
+            Instruction::BinaryOp { op: BinaryOp::Add } => append_prefixed!(46),
+            Instruction::BinaryOp { op: BinaryOp::Sub } => append_prefixed!(47),
+            Instruction::BinaryOp { op: BinaryOp::Mul } => append_prefixed!(48),
+            Instruction::BinaryOp { op: BinaryOp::Div } => append_prefixed!(49),
+            Instruction::BinaryOp { op: BinaryOp::Greater } => append_prefixed!(50),
+            Instruction::BinaryOp { op: BinaryOp::Less } => append_prefixed!(51),
+            Instruction::BinaryOp { op } => append_prefixed!(52: op),
 
-            Instruction::UnaryOp { op: UnaryOp::Not } => append_prefixed!(57),
-            Instruction::UnaryOp { op: UnaryOp::Round } => append_prefixed!(58),
-            Instruction::UnaryOp { op } => append_prefixed!(59: op),
+            Instruction::VariadicOp { op: VariadicOp::Add, len } => append_prefixed!(53: len),
+            Instruction::VariadicOp { op: VariadicOp::Mul, len } => append_prefixed!(54: len),
+            Instruction::VariadicOp { op: VariadicOp::StrCat, len } => append_prefixed!(55: len),
+            Instruction::VariadicOp { op: VariadicOp::MakeList, len } => append_prefixed!(56: len),
+            Instruction::VariadicOp { op, len } => append_prefixed!(57: op, len),
 
-            Instruction::DeclareLocal { var } => append_prefixed!(60: move str var),
-            Instruction::Assign { var } => append_prefixed!(61: move str var),
+            Instruction::UnaryOp { op: UnaryOp::Not } => append_prefixed!(58),
+            Instruction::UnaryOp { op: UnaryOp::Round } => append_prefixed!(59),
+            Instruction::UnaryOp { op } => append_prefixed!(60: op),
 
-            Instruction::BinaryOpAssign { var, op: BinaryOp::Add } => append_prefixed!(62: move str var),
-            Instruction::BinaryOpAssign { var, op } => append_prefixed!(63: move str var, op),
+            Instruction::DeclareLocal { var } => append_prefixed!(61: move str var),
+            Instruction::Assign { var } => append_prefixed!(62: move str var),
 
-            Instruction::Watcher { create, var } => append_prefixed!(64: create, move str var),
+            Instruction::BinaryOpAssign { var, op: BinaryOp::Add } => append_prefixed!(63: move str var),
+            Instruction::BinaryOpAssign { var, op } => append_prefixed!(64: move str var, op),
 
-            Instruction::Jump { to } => append_prefixed!(65: move to),
-            Instruction::ConditionalJump { to, when: false } => append_prefixed!(66: move to),
-            Instruction::ConditionalJump { to, when: true } => append_prefixed!(67: move to),
+            Instruction::Watcher { create, var } => append_prefixed!(65: create, move str var),
 
-            Instruction::MetaPush { value } => append_prefixed!(68: move str value),
+            Instruction::Jump { to } => append_prefixed!(66: move to),
+            Instruction::ConditionalJump { to, when: false } => append_prefixed!(67: move to),
+            Instruction::ConditionalJump { to, when: true } => append_prefixed!(68: move to),
 
-            Instruction::Call { pos, params } => append_prefixed!(69: move pos, params),
-            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(70: move pos, params, captures),
-            Instruction::CallClosure { args } => append_prefixed!(71: args),
-            Instruction::Return => append_prefixed!(72),
+            Instruction::MetaPush { value } => append_prefixed!(69: move str value),
 
-            Instruction::PushHandler { pos, var } => append_prefixed!(73: move pos, move str var),
-            Instruction::PopHandler => append_prefixed!(74),
-            Instruction::Throw => append_prefixed!(75),
+            Instruction::Call { pos, params } => append_prefixed!(70: move pos, params),
+            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(71: move pos, params, captures),
+            Instruction::CallClosure { new_entity: false, args } => append_prefixed!(72: args),
+            Instruction::CallClosure { new_entity: true, args } => append_prefixed!(73: args),
+            Instruction::Return => append_prefixed!(74),
 
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(76: move str service, move str rpc, args),
-            Instruction::PushRpcError => append_prefixed!(77),
+            Instruction::PushHandler { pos, var } => append_prefixed!(75: move pos, move str var),
+            Instruction::PopHandler => append_prefixed!(76),
+            Instruction::Throw => append_prefixed!(77),
 
-            Instruction::Syscall { len } => append_prefixed!(78: len),
-            Instruction::PushSyscallError => append_prefixed!(79),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(78: move str service, move str rpc, args),
+            Instruction::PushRpcError => append_prefixed!(79),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(80),
-            Instruction::Broadcast { wait: true } => append_prefixed!(81),
+            Instruction::Syscall { len } => append_prefixed!(80: len),
+            Instruction::PushSyscallError => append_prefixed!(81),
 
-            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(82),
-            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(83),
-            Instruction::Ask => append_prefixed!(84),
-            Instruction::PushAnswer => append_prefixed!(85),
+            Instruction::Broadcast { wait: false } => append_prefixed!(82),
+            Instruction::Broadcast { wait: true } => append_prefixed!(83),
 
-            Instruction::ResetTimer => append_prefixed!(86),
-            Instruction::PushTimer => append_prefixed!(87),
-            Instruction::Sleep => append_prefixed!(88),
+            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(84),
+            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(85),
+            Instruction::Ask => append_prefixed!(86),
+            Instruction::PushAnswer => append_prefixed!(87),
 
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(89: move str msg_type, values),
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(90: move str msg_type, values),
-            Instruction::SendNetworkReply => append_prefixed!(91),
+            Instruction::ResetTimer => append_prefixed!(88),
+            Instruction::PushTimer => append_prefixed!(89),
+            Instruction::Sleep => append_prefixed!(90),
 
-            Instruction::PushProperty { prop } => append_prefixed!(92: prop),
-            Instruction::SetProperty { prop } => append_prefixed!(93: prop),
-            Instruction::ChangeProperty { prop } => append_prefixed!(94: prop),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(91: move str msg_type, values),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(92: move str msg_type, values),
+            Instruction::SendNetworkReply => append_prefixed!(93),
 
-            Instruction::PushCostume => append_prefixed!(95),
-            Instruction::PushCostumeNumber => append_prefixed!(96),
-            Instruction::PushCostumeList => append_prefixed!(97),
-            Instruction::SetCostume => append_prefixed!(98),
-            Instruction::NextCostume => append_prefixed!(99),
+            Instruction::PushProperty { prop } => append_prefixed!(94: prop),
+            Instruction::SetProperty { prop } => append_prefixed!(95: prop),
+            Instruction::ChangeProperty { prop } => append_prefixed!(96: prop),
 
-            Instruction::ClearEffects => append_prefixed!(100),
+            Instruction::PushCostume => append_prefixed!(97),
+            Instruction::PushCostumeNumber => append_prefixed!(98),
+            Instruction::PushCostumeList => append_prefixed!(99),
+            Instruction::SetCostume => append_prefixed!(100),
+            Instruction::NextCostume => append_prefixed!(101),
 
-            Instruction::GotoXY => append_prefixed!(101),
-            Instruction::Goto => append_prefixed!(102),
+            Instruction::ClearEffects => append_prefixed!(102),
 
-            Instruction::PointTowardsXY => append_prefixed!(103),
-            Instruction::PointTowards => append_prefixed!(104),
+            Instruction::GotoXY => append_prefixed!(103),
+            Instruction::Goto => append_prefixed!(104),
 
-            Instruction::Forward => append_prefixed!(105),
+            Instruction::PointTowardsXY => append_prefixed!(105),
+            Instruction::PointTowards => append_prefixed!(106),
+
+            Instruction::Forward => append_prefixed!(107),
         }
     }
 }
@@ -1315,6 +1323,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::CostumeList => self.ins.push(Instruction::PushCostumeList.into()),
             ast::ExprKind::Size => self.ins.push(Instruction::PushProperty { prop: Property::Size }.into()),
             ast::ExprKind::IsVisible => self.ins.push(Instruction::PushProperty { prop: Property::Visible }.into()),
+            ast::ExprKind::Entity { trans_name, .. } => self.ins.push(Instruction::PushEntity { name: trans_name }.into()),
             ast::ExprKind::Add { values } => self.append_variadic_op(entity, values, VariadicOp::Add)?,
             ast::ExprKind::Mul { values } => self.append_variadic_op(entity, values, VariadicOp::Mul)?,
             ast::ExprKind::Min { values } => self.append_variadic_op(entity, values, VariadicOp::Min)?,
@@ -1382,12 +1391,15 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.call_holes.push((call_hole_pos, function, entity));
             }
-            ast::ExprKind::CallClosure { closure, args } => {
+            ast::ExprKind::CallClosure { new_entity, closure, args } => {
+                if let Some(new_entity) = new_entity {
+                    self.append_expr(new_entity, entity)?;
+                }
+                self.append_expr(closure, entity)?;
                 for arg in args {
                     self.append_expr(arg, entity)?;
                 }
-                self.append_expr(closure, entity)?;
-                self.ins.push(Instruction::CallClosure { args: args.len() }.into());
+                self.ins.push(Instruction::CallClosure { new_entity: new_entity.is_some(), args: args.len() }.into());
             }
             ast::ExprKind::CallRpc { service, rpc, args } => {
                 for (arg_name, arg) in args {
@@ -1438,11 +1450,11 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Fixed(0) }.into()); // push an empty list
 
                 let top = self.ins.len();
-                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 2 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 2 }.into());
                 let exit_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
-                self.ins.push(Instruction::DupeValue { top_index: 3 }.into());
-                self.ins.push(Instruction::CallClosure { args: 1 }.into());
+                self.ins.push(Instruction::CallClosure { new_entity: false, args: 1 }.into());
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 self.ins.push(Instruction::ListInsertLast.into());
                 self.ins.push(Instruction::Yield.into());
@@ -1451,7 +1463,8 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins[exit_jump_pos] = Instruction::ListPopFirstOrElse { goto: aft }.into();
 
-                self.ins.push(Instruction::SwapValues { top_index_1: 0, top_index_2: 2 }.into());
+                self.ins.push(Instruction::SwapValues { top_index_1: 1, top_index_2: 3 }.into());
+                self.ins.push(Instruction::PopValue.into());
                 self.ins.push(Instruction::PopValue.into());
                 self.ins.push(Instruction::PopValue.into());
             }
@@ -1465,9 +1478,9 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
                 let exit_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
-                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
-                self.ins.push(Instruction::DupeValue { top_index: 4 }.into());
-                self.ins.push(Instruction::CallClosure { args: 1 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 3 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::CallClosure { new_entity: false, args: 1 }.into());
                 let skip_append_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
                 self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
@@ -1498,9 +1511,9 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
                 let exit_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
-                self.ins.push(Instruction::DupeValue { top_index: 0 }.into());
-                self.ins.push(Instruction::DupeValue { top_index: 3 }.into());
-                self.ins.push(Instruction::CallClosure { args: 1 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 2 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::CallClosure { new_entity: false, args: 1 }.into());
                 let skip_jump_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
                 self.ins.push(Instruction::PopValue.into());
@@ -1527,13 +1540,19 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(InternalInstruction::Illegal);
 
                 let top = self.ins.len();
-                self.ins.push(Instruction::DupeValue { top_index: 2 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 1 }.into());
+                self.ins.push(Instruction::DupeValue { top_index: 3 }.into());
                 let loop_done_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
-                self.ins.push(Instruction::DupeValue { top_index: 2 }.into());
-                self.ins.push(Instruction::CallClosure { args: 2 }.into());
+                self.ins.push(Instruction::SwapValues { top_index_1: 1, top_index_2: 2 }.into());
+                self.ins.push(Instruction::CallClosure { new_entity: false, args: 2 }.into());
                 self.ins.push(Instruction::Yield.into());
                 self.ins.push(Instruction::Jump { to: top }.into());
+
+                let clean_inner = self.ins.len();
+                self.ins.push(Instruction::PopValue.into());
+                let clean_inner_ret = self.ins.len();
+                self.ins.push(InternalInstruction::Illegal);
 
                 let empty_list = self.ins.len();
                 self.ins.push(Instruction::PushInt { value: 0 }.into());
@@ -1543,7 +1562,8 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::PopValue.into());
 
                 self.ins[first_check_pos] = Instruction::ListPopFirstOrElse { goto: empty_list }.into();
-                self.ins[loop_done_pos] = Instruction::ListPopFirstOrElse { goto: ret }.into();
+                self.ins[loop_done_pos] = Instruction::ListPopFirstOrElse { goto: clean_inner }.into();
+                self.ins[clean_inner_ret] = Instruction::Jump { to: ret }.into();
             }
             kind => return Err(CompileError::UnsupportedExpr { kind }),
         }
@@ -1650,12 +1670,15 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.call_holes.push((call_hole_pos, function, entity));
             }
-            ast::StmtKind::RunClosure { closure, args } => {
+            ast::StmtKind::RunClosure { new_entity, closure, args } => {
+                if let Some(new_entity) = new_entity {
+                    self.append_expr(new_entity, entity)?;
+                }
+                self.append_expr(closure, entity)?;
                 for arg in args {
                     self.append_expr(arg, entity)?;
                 }
-                self.append_expr(closure, entity)?;
-                self.ins.push(Instruction::CallClosure { args: args.len() }.into());
+                self.ins.push(Instruction::CallClosure { new_entity: new_entity.is_some(), args: args.len() }.into());
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::StmtKind::Warp { stmts } => {
@@ -2112,24 +2135,13 @@ impl ByteCode {
         let mut string_refs = BTreeMap::new();
         let mut image_refs = BTreeMap::new();
 
-        fn register_ref_values<'a>(val: &'a ast::Value, ref_values: &mut Vec<Option<RefValue>>, refs: &mut BTreeMap<usize, usize>, string_refs: &mut BTreeMap<&'a str, usize>, image_refs: &mut BTreeMap<*const Vec<u8>, usize>) {
-            match val {
-                ast::Value::Ref(_) | ast::Value::Bool(_) | ast::Value::Number(_) | ast::Value::Constant(_) => (),
-                ast::Value::String(x) => {
-                    string_refs.entry(x).or_insert_with(|| {
-                        ref_values.push(Some(RefValue::String(x.clone()))); // we already have the value to store
-                        ref_values.len() - 1
-                    });
-                }
-                ast::Value::Image(x) => {
-                    image_refs.entry(Rc::as_ptr(x)).or_insert_with(|| {
-                        ref_values.push(Some(RefValue::Image((**x).clone()))); // we already have the value to store
-                        ref_values.len() - 1
-                    });
-                }
+        fn register_ref_values<'a>(value: &'a ast::Value, ref_values: &mut Vec<(Option<RefValue>, &'a ast::Value)>, refs: &mut BTreeMap<usize, usize>) {
+            match value {
+                ast::Value::Bool(_) | ast::Value::Number(_) | ast::Value::Constant(_) => (), // non-ref types
+                ast::Value::Ref(_) | ast::Value::String(_) | ast::Value::Image(_) => (), // lazily link
                 ast::Value::List(_, ref_id) => if let Some(ref_id) = ref_id {
                     refs.entry(ref_id.0).or_insert_with(|| {
-                        ref_values.push(None); // we don't have the value yet (might contain undefined refs, so can't be handled yet)
+                        ref_values.push((None, value)); // we don't have the value yet (might contain undefined refs, so can't be handled yet)
                         ref_values.len() - 1
                     });
                 }
@@ -2137,19 +2149,19 @@ impl ByteCode {
         }
 
         for global in role.globals.iter() {
-            register_ref_values(&global.init, &mut ref_values, &mut refs, &mut string_refs, &mut image_refs);
+            register_ref_values(&global.init, &mut ref_values, &mut refs);
         }
         for entity in role.entities.iter() {
             for field in entity.fields.iter() {
-                register_ref_values(&field.init, &mut ref_values, &mut refs, &mut string_refs, &mut image_refs);
+                register_ref_values(&field.init, &mut ref_values, &mut refs);
             }
             for costume in entity.costumes.iter() {
-                register_ref_values(&costume.init, &mut ref_values, &mut refs, &mut string_refs, &mut image_refs);
+                register_ref_values(&costume.init, &mut ref_values, &mut refs);
             }
         }
 
-        fn get_value<'a>(val: &'a ast::Value, ref_values: &mut Vec<Option<RefValue>>, refs: &BTreeMap<usize, usize>, string_refs: &BTreeMap<&'a str, usize>, image_refs: &BTreeMap<*const Vec<u8>, usize>) -> Result<InitValue, CompileError<'a>> {
-            Ok(match val {
+        fn get_value<'a>(value: &'a ast::Value, ref_values: &mut Vec<(Option<RefValue>, &'a ast::Value)>, refs: &BTreeMap<usize, usize>, string_refs: &mut BTreeMap<&'a str, usize>, image_refs: &mut BTreeMap<*const Vec<u8>, usize>) -> Result<InitValue, CompileError<'a>> {
+            Ok(match value {
                 ast::Value::Bool(x) => InitValue::Bool(*x),
                 ast::Value::Number(x) => InitValue::Number(Number::new(*x)?),
                 ast::Value::Constant(x) => match x {
@@ -2157,29 +2169,35 @@ impl ByteCode {
                     ast::Constant::Pi => InitValue::Number(Number::new(std::f64::consts::PI)?),
                 }
                 ast::Value::Ref(x) => {
-                    let idx = *refs.get(&x.0).ok_or_else(|| CompileError::UndefinedRef)?;
+                    let idx = *refs.get(&x.0).ok_or_else(|| CompileError::UndefinedRef { value })?;
                     InitValue::Ref(idx)
                 }
                 ast::Value::String(x) => {
-                    let idx = *string_refs.get(x.as_str()).ok_or_else(|| CompileError::UndefinedRef)?;
+                    let idx = *string_refs.entry(x).or_insert_with(|| {
+                        ref_values.push((Some(RefValue::String(x.clone())), value));
+                        ref_values.len() - 1
+                    });
                     InitValue::Ref(idx)
                 }
                 ast::Value::Image(x) => {
-                    let idx = *image_refs.get(&Rc::as_ptr(x)).ok_or_else(|| CompileError::UndefinedRef)?;
+                    let idx = *image_refs.entry(Rc::as_ptr(x)).or_insert_with(|| {
+                        ref_values.push((Some(RefValue::Image((**x).clone())), value));
+                        ref_values.len() - 1
+                    });
                     InitValue::Ref(idx)
                 }
                 ast::Value::List(values, ref_id) => {
                     let res = RefValue::List(values.iter().map(|x| get_value(x, ref_values, refs, string_refs, image_refs)).collect::<Result<_,_>>()?);
                     match ref_id {
                         Some(ref_id) => {
-                            let idx = *refs.get(&ref_id.0).ok_or_else(|| CompileError::UndefinedRef)?;
+                            let idx = *refs.get(&ref_id.0).ok_or_else(|| CompileError::UndefinedRef { value })?;
                             let target = &mut ref_values[idx];
-                            debug_assert!(target.is_none());
-                            *target = Some(res);
+                            debug_assert!(target.0.is_none());
+                            target.0 = Some(res);
                             InitValue::Ref(idx)
                         }
                         None => {
-                            ref_values.push(Some(res));
+                            ref_values.push((Some(res), value));
                             InitValue::Ref(ref_values.len() - 1)
                         }
                     }
@@ -2194,7 +2212,7 @@ impl ByteCode {
         let mut entities = vec![];
 
         for global in role.globals.iter() {
-            globals.push((global.def.name.clone(), get_value(&global.init, &mut ref_values, &refs, &string_refs, &image_refs)?));
+            globals.push((global.def.name.clone(), get_value(&global.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs)?));
         }
 
         for (entity, entity_info) in script_info.entities.iter() {
@@ -2211,11 +2229,11 @@ impl ByteCode {
             let heading = Number::new(entity.heading.rem_euclid(360.0))?;
 
             for field in entity.fields.iter() {
-                fields.push((field.def.name.clone(), get_value(&field.init, &mut ref_values, &refs, &string_refs, &image_refs)?));
+                fields.push((field.def.name.clone(), get_value(&field.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs)?));
             }
 
             for costume in entity.costumes.iter() {
-                costumes.push((costume.def.name.clone(), get_value(&costume.init, &mut ref_values, &refs, &string_refs, &image_refs)?));
+                costumes.push((costume.def.name.clone(), get_value(&costume.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs)?));
             }
 
             for (script, pos) in entity_info.scripts.iter().copied() {
@@ -2252,7 +2270,7 @@ impl ByteCode {
             entities.push(EntityInitInfo { name, fields, costumes, scripts, active_costume, pos, heading, size, visible, color });
         }
 
-        let ref_values = ref_values.into_iter().map(|x| x.ok_or_else(|| CompileError::UndefinedRef)).collect::<Result<_,_>>()?;
+        let ref_values = ref_values.into_iter().map(|x| x.0.ok_or_else(|| CompileError::UndefinedRef { value: x.1 })).collect::<Result<_,_>>()?;
 
         Ok(InitInfo { tag: Default::default(), proj_name, ref_values, globals, entities })
     }
