@@ -55,7 +55,7 @@ rand = { version = "0.8.5", default-features = false }
 checked-float = { version = "0.1.4", default-features = false, features = ["serde"] }
 educe = { version = "0.4.20", default-features = false, features = ["Debug", "Clone", "Copy", "PartialOrd", "Ord", "PartialEq", "Eq", "Default"] }
 libm = { version = "0.2.6", default-features = false }
-monostate = { version = "0.1.2", default-features = false }
+monostate = { version = "0.1.4", default-features = false }
 take_mut = { version = "0.2.2", default-features = false }
 superslice = { version = "1.0", default-features = false }
 
@@ -71,9 +71,9 @@ rand_chacha = { version = "0.3.1", default-features = false, optional = true }
 getrandom = { version = "0.2.8", default-features = false, optional = true }
 
 # cli deps
-clap = { version = "4.1.6", default-features = false, features = ["std", "derive"], optional = true }
-crossterm = { version = "0.26.0", default-features = false, optional = true }
-actix-web = { version = "4.3.0", default-features = false, features = ["macros"], optional = true }
+clap = { version = "4.1.8", default-features = false, features = ["std", "derive"], optional = true }
+crossterm = { version = "0.26.1", default-features = false, optional = true }
+actix-web = { version = "4.3.1", default-features = false, features = ["macros"], optional = true }
 actix-cors = { version = "0.6.4", default-features = false, optional = true }
 
 # misc deps

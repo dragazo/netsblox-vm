@@ -58,28 +58,6 @@ struct RpcRequest<C: CustomTypes<StdSystem<C>>> {
     args: Vec<(String, Json)>,
     key: RequestKey<C>,
 }
-enum OutgoingMessage {
-    Normal {
-        msg_type: String,
-        values: Vec<(String, Json)>,
-        targets: Vec<String>,
-    },
-    Blocking {
-        msg_type: String,
-        values: Vec<(String, Json)>,
-        targets: Vec<String>,
-        reply_key: ExternReplyKey,
-    },
-    Reply {
-        value: Json,
-        reply_key: InternReplyKey,
-    },
-}
-struct IncomingMessage {
-    msg_type: String,
-    values: Vec<(String, Json)>,
-    reply_key: Option<InternReplyKey>,
-}
 struct ReplyEntry {
     timestamp: Instant,
     value: Option<Json>,
@@ -163,8 +141,8 @@ pub struct StdSystem<C: CustomTypes<StdSystem<C>>> {
     rpc_request_pipe: Sender<RpcRequest<C>>,
 
     message_replies: Arc<Mutex<MessageReplies>>,
-    message_sender: Sender<OutgoingMessage>,
-    message_receiver: Receiver<IncomingMessage>,
+    message_sender: Sender<OutgoingMessage<C, Self>>,
+    message_receiver: Receiver<IncomingMessage<C, Self>>,
 }
 impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://editor.netsblox.org`).
@@ -187,7 +165,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
             let (in_sender, in_receiver) = channel();
 
             #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
-            async fn handler(base_url: String, client_id: String, project_name: String, message_replies: Arc<Mutex<MessageReplies>>, out_receiver: Receiver<OutgoingMessage>, in_sender: Sender<IncomingMessage>) {
+            async fn handler<C: CustomTypes<StdSystem<C>>>(base_url: String, client_id: String, project_name: String, message_replies: Arc<Mutex<MessageReplies>>, out_receiver: Receiver<OutgoingMessage<C, StdSystem<C>>>, in_sender: Sender<IncomingMessage<C, StdSystem<C>>>) {
                 let ws_url = if let Some(x) = base_url.strip_prefix("http") { format!("ws{}", x) } else { format!("wss://{}", base_url) };
                 let (ws, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
                 let (mut ws_sender, ws_receiver) = ws.split();

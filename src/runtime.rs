@@ -1060,6 +1060,29 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
     }
 }
 
+pub enum OutgoingMessage<C: CustomTypes<S>, S: System<C>> {
+    Normal {
+        msg_type: String,
+        values: Vec<(String, Json)>,
+        targets: Vec<String>,
+    },
+    Blocking {
+        msg_type: String,
+        values: Vec<(String, Json)>,
+        targets: Vec<String>,
+        reply_key: S::ExternReplyKey,
+    },
+    Reply {
+        value: Json,
+        reply_key: S::InternReplyKey,
+    },
+}
+pub struct IncomingMessage<C: CustomTypes<S>, S: System<C>> {
+    pub msg_type: String,
+    pub values: Vec<(String, Json)>,
+    pub reply_key: Option<S::InternReplyKey>,
+}
+
 /// A blocking handle for a [`BarrierCondition`].
 #[derive(Debug, Default, Clone)]
 pub struct Barrier(Rc<()>);
