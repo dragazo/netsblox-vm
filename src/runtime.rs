@@ -1413,10 +1413,10 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// If the client responds, a value of [`Some(x)`] is returned.
     /// The system may elect to impose a timeout for reply results, in which case [`None`] is returned instead.
     fn poll_reply(&self, key: &Self::ExternReplyKey) -> AsyncResult<Option<Json>>;
+    /// Sends a reply to the sender of a blocking message this client received.
+    fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<C, Self>>;
     /// Attempts to receive a message from the message buffer.
     /// This operation is always non-blocking and returns [`None`] if there are no messages in the buffer.
     /// If a message is received, a tuple of form `(msg_type, values, reply_key)` is returned.
-    fn receive_message(&self) -> Option<(String, Vec<(String, Json)>, Option<Self::InternReplyKey>)>;
-    /// Sends a reply to the sender of a blocking message this client received.
-    fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<C, Self>>;
+    fn receive_message(&self) -> Option<IncomingMessage<C, Self>>;
 }

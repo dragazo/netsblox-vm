@@ -414,7 +414,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         self.message_sender.send(OutgoingMessage::Reply { value, reply_key: key }).unwrap();
         Ok(())
     }
-    fn receive_message(&self) -> Option<(String, Vec<(String, Json)>, Option<Self::InternReplyKey>)> {
-        self.message_receiver.try_recv().ok().map(|x| (x.msg_type, x.values, x.reply_key))
+    fn receive_message(&self) -> Option<IncomingMessage<C, Self>> {
+        self.message_receiver.try_recv().ok()
     }
 }

@@ -224,7 +224,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
     }
     pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> ProjectStep<'gc, C, S> {
         let msg = self.state.global_context.read().system.receive_message();
-        if let Some((msg_type, values, reply_key)) = msg {
+        if let Some(IncomingMessage { msg_type, values, reply_key }) = msg {
             let values: BTreeMap<_,_> = values.into_iter().collect();
             for script in self.scripts.iter_mut() {
                 if let Event::NetworkMessage { msg_type: script_msg_type, fields } = &script.event {
