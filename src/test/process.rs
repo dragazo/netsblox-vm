@@ -798,6 +798,28 @@ fn test_proc_keep_find() {
 }
 
 #[test]
+fn test_proc_numeric_bases() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/numeric-bases.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            ["34", 34, 68, 1156],
+            ["025", 25, 50, 625],
+            ["0x43", 67, 134, 4489],
+            ["0o34", 28, 56, 784],
+            ["0b101101", 45, 90, 2025],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "numeric bases results");
+    });
+}
+
+#[test]
 fn test_proc_combine() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),

@@ -657,11 +657,19 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
     }
     /// Attempts to interpret this value as a number.
     pub fn to_number(&self) -> Result<Number, ConversionError<C, S>> {
-        Ok(match self {
-            Value::Number(x) => *x,
-            Value::String(x) => x.parse().ok().and_then(|x| Number::new(x).ok()).ok_or(ConversionError { got: Type::String, expected: Type::Number })?,
-            x => return Err(ConversionError { got: x.get_type(), expected: Type::Number }),
-        })
+        match self {
+            Value::Number(x) => Ok(*x),
+            Value::String(x) => {
+                let parsed = match x.get(..2) {
+                    Some("0x" | "0X") => i64::from_str_radix(&x[2..], 16).ok().map(|x| x as f64),
+                    Some("0o" | "0O") => i64::from_str_radix(&x[2..], 8).ok().map(|x| x as f64),
+                    Some("0b" | "0B") => i64::from_str_radix(&x[2..], 2).ok().map(|x| x as f64),
+                    _ => x.parse::<f64>().ok(),
+                };
+                parsed.and_then(|x| Number::new(x).ok()).ok_or(ConversionError { got: Type::String, expected: Type::Number })
+            }
+            x => Err(ConversionError { got: x.get_type(), expected: Type::Number }),
+        }
     }
     /// Attempts to interpret this value as a string.
     pub fn to_string(&self) -> Result<Cow<str>, ConversionError<C, S>> {
