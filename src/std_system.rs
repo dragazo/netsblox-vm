@@ -411,8 +411,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         AsyncResult::Pending
     }
     fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<C, Self>> {
-        self.message_sender.send(OutgoingMessage::Reply { value, reply_key: key }).unwrap();
-        Ok(())
+        Ok(self.message_sender.send(OutgoingMessage::Reply { value, reply_key: key }).unwrap())
     }
     fn receive_message(&self) -> Option<IncomingMessage<C, Self>> {
         self.message_receiver.try_recv().ok()
