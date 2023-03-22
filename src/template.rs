@@ -43,7 +43,7 @@ impl SyscallMenu<'_> {
                     for value in *content {
                         format_impl(value, res);
                     }
-                    res.push('}');
+                    res.push_str("},");
                 }
             }
         }
@@ -55,6 +55,14 @@ impl SyscallMenu<'_> {
         res.push('}');
         res
     }
+}
+#[test]
+fn test_syscall_menu_format() {
+    assert_eq!(SyscallMenu::format(&[]), "{}");
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo" }]), "{'foo':'foo',}");
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo" }, SyscallMenu::Entry { label: "bar" }]), "{'foo':'foo','bar':'bar',}");
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo" }, SyscallMenu::Submenu { label: "test", content: &[] }, SyscallMenu::Entry { label: "bar" }]), "{'foo':'foo','test':{},'bar':'bar',}");
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Submenu { label: "test", content: &[] }]), "{'test':{},}");
 }
 
 /// Arguments used to construct a templated extension.

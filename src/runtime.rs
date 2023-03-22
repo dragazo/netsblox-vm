@@ -8,11 +8,34 @@ use std::ops::Deref;
 use std::cell::Ref;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
+use checked_float::{FloatChecker, CheckedFloat};
+
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
 
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
 use crate::bytecode::*;
+
+/// Error type used by [`NumberChecker`].
+#[derive(Debug)]
+pub enum NumberError {
+    Nan,
+}
+
+/// [`FloatChecker`] type used for validating a [`Number`].
+pub struct NumberChecker;
+impl FloatChecker<f64> for NumberChecker {
+    type Error = NumberError;
+    fn check(value: f64) -> Result<(), Self::Error> {
+        if value.is_nan() { return Err(NumberError::Nan); }
+        Ok(())
+    }
+}
+
+/// The type used to represent numbers in the runtime.
+pub type Number = CheckedFloat<f64, NumberChecker>;
 
 #[derive(Debug)]
 pub enum FromAstError<'a> {
@@ -256,6 +279,46 @@ fn test_color_rgb_to_hsv() {
     assert_round_trip!(Color { r: 0, g: 0, b: 10, a: 0 });
 }
 
+#[derive(Debug, Clone, Copy, FromPrimitive)]
+#[repr(u8)]
+pub enum Property {
+    XPos, YPos, Heading,
+
+    Visible, Size,
+
+    PenDown, PenSize, PenColor,
+    PenColorH, PenColorS, PenColorV, PenColorT,
+
+    Tempo, Volume, Balance,
+
+    ColorH, ColorS, ColorV, ColorT,
+    Fisheye, Whirl, Pixelate, Mosaic, Negative,
+}
+impl Property {
+    pub(crate) fn from_effect(kind: &ast::EffectKind) -> Self {
+        match kind {
+            ast::EffectKind::Color => Property::ColorH,
+            ast::EffectKind::Saturation => Property::ColorS,
+            ast::EffectKind::Brightness => Property::ColorV,
+            ast::EffectKind::Ghost => Property::ColorT,
+            ast::EffectKind::Fisheye => Property::Fisheye,
+            ast::EffectKind::Whirl => Property::Whirl,
+            ast::EffectKind::Pixelate => Property::Pixelate,
+            ast::EffectKind::Mosaic => Property::Mosaic,
+            ast::EffectKind::Negative => Property::Negative,
+        }
+    }
+    pub(crate) fn from_pen_attr(attr: &ast::PenAttribute) -> Self {
+        match attr {
+            ast::PenAttribute::Size => Property::PenSize,
+            ast::PenAttribute::Hue => Property::PenColorH,
+            ast::PenAttribute::Saturation => Property::PenColorS,
+            ast::PenAttribute::Brightness => Property::PenColorV,
+            ast::PenAttribute::Transparency => Property::PenColorT,
+        }
+    }
+}
+
 /// A collection of graphical effects related to an entity
 #[derive(Clone, Copy)]
 pub struct Effects {
@@ -495,6 +558,44 @@ impl Properties {
         self.with_value::<C, S, _>(key, Number::new(x).map_err(Into::into).and_then(|x| Number::new(y).map(|y| (x, y)).map_err(Into::into)), |props, pos| props.pos = pos);
         CommandStatus::Handled
     }
+}
+
+/// A key from the keyboard.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyCode {
+    /// A normal character key, such as a letter, number, or special symbol.
+    Char(char),
+    /// The up arrow key.
+    Up,
+    /// The down arrow key.
+    Down,
+    /// The left arrow key.
+    Left,
+    /// The right arrow key.
+    Right,
+    /// Either enter/return key.
+    Enter,
+}
+
+/// An event type which can be set to trigger the execution of a script.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone)]
+pub enum Event {
+    /// Fire when a green flag click event is issued.
+    OnFlag,
+    /// Fire when a message is received locally (Control message blocks).
+    LocalMessage { msg_type: String },
+    /// Fire when a message is received over the network (Network message blocks).
+    NetworkMessage { msg_type: String, fields: Vec<String> },
+    /// Fire when a key is pressed. [`None`] is used to denote any key press.
+    OnKey { key_filter: Option<KeyCode> },
+}
+
+#[derive(Debug, Clone, Copy, FromPrimitive)]
+#[repr(u8)]
+pub enum PrintStyle {
+    Say, Think,
 }
 
 /// A value representing the identity of a [`Value`].
@@ -1121,7 +1222,7 @@ pub enum MaybeAsync<T, K> {
     /// A synchronous result with a return value of type `T`.
     Sync(T),
     /// An asynchronous result with the given async key type `K`,
-    /// which is expected to be usable to later obtain an [`AsyncPoll<T>`].
+    /// which is expected to be usable to later obtain an [`AsyncResult<T>`].
     Async(K),
 }
 

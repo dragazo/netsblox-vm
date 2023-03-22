@@ -26,7 +26,7 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
     let ast = parser.parse(xml).unwrap();
     assert_eq!(ast.roles.len(), 1);
 
-    let (code, init_info, locs, ins_locs) = ByteCode::compile(&ast.roles[0]).unwrap();
+    let (code, init_info, ins_locs, locs) = ByteCode::compile(&ast.roles[0]).unwrap();
     let main = locs.funcs.iter().find(|x| x.0.trans_name.trim() == "main").expect("no main function at global scope");
 
     (EnvArena::new(Default::default(), |mc| {
