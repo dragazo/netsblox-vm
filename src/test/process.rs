@@ -1091,6 +1091,42 @@ fn test_proc_list_columns() {
 }
 
 #[test]
+fn test_proc_compare_str() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/compare-str.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            [false, true, true, false, false, true],
+            [true, true, false, true, false, false],
+            [false, false, false, true, true, true],
+            [false, true, true, false, false, true],
+
+            [false, true, true, false, false, true],
+            [false, false, true, false, true, true],
+            [true, true, true, false, false, false],
+            [false, true, true, false, false, true],
+
+            [true, true, false, true, false, false],
+            [false, false, false, true, true, true],
+            [true, true, false, true, false, false],
+            [true, true, false, true, false, false],
+
+            [true, true, false, true, false, false],
+            [true, true, false, true, false, false],
+            [false, false, false, true, true, true],
+            [false, false, false, true, true, true],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "compare str");
+    });
+}
+
+#[test]
 fn test_proc_flatten() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
