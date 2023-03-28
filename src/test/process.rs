@@ -1052,6 +1052,45 @@ fn test_proc_atan2_new_cmp() {
 }
 
 #[test]
+fn test_proc_list_columns() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/list-columns.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            [[1,2,3,4,5,6,7,8,9,10]],
+            [
+                ["1", "2", "3", "6", "7"],
+                ["1", "2", "4", "6", "7"],
+                ["1", "2", "5", "6", "7"],
+            ],
+            [
+                ["1", "2", "3", "6", "8", "9"],
+                ["1", "2", "4", "7", "", "9"],
+                ["1", "2", "5", "", "", "9"],
+            ],
+            [
+                ["1", "2", "7", "9"],
+                ["1", ["3", "4"], "8", "9"],
+                ["1", "5", "", "9"],
+                ["1", ["6"], "", "9"],
+            ],
+            [["6"]],
+            [[""]],
+            [[[]]],
+            [],
+            false,
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "columns");
+    });
+}
+
+#[test]
 fn test_proc_flatten() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),

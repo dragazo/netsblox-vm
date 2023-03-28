@@ -597,6 +597,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(Rc::new(value.to_string()).into());
                 self.pos = aft_pos;
             }
+            Instruction::ListColumns => {
+                let value = self.value_stack.pop().unwrap();
+                self.value_stack.push(ops::columns(mc, &value)?);
+                self.pos = aft_pos;
+            }
 
             Instruction::ListInsert => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
@@ -1234,6 +1239,28 @@ mod ops {
             }
         }
         Ok(reshape_impl(mc, &mut src.iter().cycle(), dims))
+    }
+    pub(super) fn columns<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, src: &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+        let src = src.as_list()?;
+        let src = src.read();
+
+        let columns = src.iter().map(|x| match x {
+            Value::List(x) => x.read().len().max(1),
+            _ => 1,
+        }).max().unwrap_or(0);
+
+        let mut res = VecDeque::with_capacity(columns);
+        for column in 0..columns {
+            let mut inner = VecDeque::with_capacity(src.len());
+            for row in src.iter() {
+                inner.push_back(match row {
+                    Value::List(x) => x.read().get(column).cloned().unwrap_or_else(|| Value::String(empty_string())),
+                    _ => row.clone(),
+                });
+            }
+            res.push_back(Value::List(GcCell::allocate(mc, inner)));
+        }
+        Ok(Value::List(GcCell::allocate(mc, res)))
     }
     pub(super) fn cartesian_product<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, sources: &[GcCell<VecDeque<Value<'gc, C, S>>>]) -> VecDeque<Value<'gc, C, S>> {
         if sources.is_empty() { return Default::default() }
