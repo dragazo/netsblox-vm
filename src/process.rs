@@ -12,6 +12,8 @@ use std::iter::{self, Cycle};
 use std::cmp::Ordering;
 use std::rc::Rc;
 
+use unicase::UniCase;
+
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
@@ -1284,7 +1286,7 @@ mod ops {
     fn cmp_values<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> Result<Ordering, ErrorCause<C, S>> {
         Ok(match (a.to_number(), b.to_number()) {
             (Ok(a), Ok(b)) => a.cmp(&b),
-            _ => a.to_string()?.as_ref().cmp(b.to_string()?.as_ref()),
+            _ => UniCase::new(a.to_string()?.as_ref()).cmp(&UniCase::new(b.to_string()?.as_ref())),
         })
     }
 
@@ -1510,7 +1512,7 @@ mod ops {
             (Value::Bool(_), _) | (_, Value::Bool(_)) => false,
 
             (Value::Number(a), Value::Number(b)) => *a == *b,
-            (Value::String(a), Value::String(b)) => a.to_lowercase() == b.to_lowercase(),
+            (Value::String(a), Value::String(b)) =>  UniCase::new(a.as_str()) == UniCase::new(b.as_str()),
             (Value::Number(n), Value::String(s)) | (Value::String(s), Value::Number(n)) => match s.parse::<f64>().ok().and_then(|x| Number::new(x).ok()) {
                 Some(s) => s == *n,
                 None => **s == n.to_string(),

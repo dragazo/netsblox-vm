@@ -476,7 +476,7 @@ fn test_proc_str_cmp_case_insensitive() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_json(mc, json!([
-            false, true, true, true, false,
+            false, true, true, true, true,
             [
                 false, true,
                 [false, true, true, false],
@@ -1108,14 +1108,14 @@ fn test_proc_compare_str() {
             [false, true, true, false, false, true],
 
             [false, true, true, false, false, true],
-            [false, false, true, false, true, true],
-            [true, true, true, false, false, false],
+            [false, true, true, false, false, true],
+            [false, true, true, false, false, true],
             [false, true, true, false, false, true],
 
             [true, true, false, true, false, false],
+            [true, true, false, true, false, false],
             [false, false, false, true, true, true],
-            [true, true, false, true, false, false],
-            [true, true, false, true, false, false],
+            [false, false, false, true, true, true],
 
             [true, true, false, true, false, false],
             [true, true, false, true, false, false],
@@ -1537,10 +1537,10 @@ fn test_proc_string_cmp() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_json(mc, json!([
-            [true, false, false, true, true, true, false],
+            [true, false, false, true, false, false, false],
             [true, false, false, true, true, true, true],
             [false, true, true, false, false, false, false],
-            [false, true, true, false, false, false, true],
+            [false, true, true, false, true, true, true],
         ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "string cmp");
     });

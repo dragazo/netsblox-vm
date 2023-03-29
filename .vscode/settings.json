@@ -41,6 +41,7 @@
         "syscalls",
         "toks",
         "tungstenite",
+        "unicase",
         "varargs"
     ]
 }
