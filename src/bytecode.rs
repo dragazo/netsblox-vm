@@ -57,7 +57,6 @@ pub(crate) enum Relation {
 #[repr(u8)]
 pub(crate) enum BinaryOp {
     Add, Sub, Mul, Div, Mod, Pow, Log, Atan2,
-    Min, Max,
     SplitBy,
     Range, Random,
     StrGet,

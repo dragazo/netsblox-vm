@@ -94,6 +94,8 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     VariadicConversionError { got: Type<C, S>, expected: Type<C, S> },
     /// Attempt to compare incomparable types.
     Incomparable { left: Type<C, S>, right: Type<C, S> },
+    /// An operation that expected a non-empty list received an empty list as input.
+    EmptyList,
     /// An operation that expected a list with a certain size received an incorrect size.
     InvalidListLength { expected: usize, got: usize },
     /// An indexing operation on a list/string had an out of bounds index, `index`, on a list/string of size `len`. Note that Snap!/NetsBlox use 1-based indexing.

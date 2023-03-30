@@ -1021,7 +1021,7 @@ fn test_proc_variadic_min_max() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ 1, 2, 9, 17 ])).unwrap();
+        let expect = Value::from_json(mc, json!([ "1", "2", "9", "17" ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic min/max");
     });
 }
@@ -1156,6 +1156,35 @@ fn test_proc_compare_str() {
             [true, true, false, true, false, false],
         ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "compare str");
+    });
+}
+
+#[test]
+fn test_proc_new_min_max() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/new-min-max.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            ["12", "12", "23", "23"],
+            ["12", "12", "023", "023"],
+            ["12", "12", 23, 23],
+            [12, 12, "23", "23"],
+            [12, 12, "023", "023"],
+            [12, 12, 23, 23],
+            ["hello", "hello", "world", "world"],
+            ["abc", "ABC", "abc", "ABC"],
+            [[], [], ["4"], ["4"]],
+            [["4"], ["4"], ["7"], ["7"]],
+            [["4"], ["4"], ["4", "1", "2"], ["4", "1", "2"]],
+            [["4", "1", "2"], ["4", "1", "2"], ["4", "2"], ["4", "2"]],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "new min max");
     });
 }
 

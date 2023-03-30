@@ -722,13 +722,25 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     }
                     Ok(acc)
                 }
+                fn combine_by_relation<'gc, C: CustomTypes<S>, S: System<C>>(values: &mut dyn Iterator<Item = &Value<'gc, C, S>>, relation: Relation) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+                    let mut res = match values.next() {
+                        None => return Err(ErrorCause::EmptyList),
+                        Some(x) => x,
+                    };
+                    for other in values {
+                        if ops::check_relation(other, res, relation)? {
+                            res = other;
+                        }
+                    }
+                    Ok(res.clone())
+                }
 
                 type Combine<'gc, C, S, I> = fn(MutationContext<'gc, '_>, &S, I) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
                 let combine: Combine<'gc, C, S, &mut dyn Iterator<Item = &Value<'gc, C, S>>> = match op {
                     VariadicOp::Add => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(0.0)?), values, BinaryOp::Add),
                     VariadicOp::Mul => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(1.0)?), values, BinaryOp::Mul),
-                    VariadicOp::Min => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::infinity()?), values, BinaryOp::Min),
-                    VariadicOp::Max => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::neg_infinity()?), values, BinaryOp::Max),
+                    VariadicOp::Min => |_, _, values| combine_by_relation(values, Relation::Less),
+                    VariadicOp::Max => |_, _, values| combine_by_relation(values, Relation::Greater),
                     VariadicOp::StrCat => |_, _, values| {
                         let mut acc = String::new();
                         for item in values {
@@ -1338,8 +1350,6 @@ mod ops {
             BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.powf(b.to_number()?)?.into())),
             BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(b.to_number()?.log(a.to_number()?)?.into())),
             BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.atan2(b.to_number()?)?.to_degrees()?.into())),
-            BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.min(b.to_number()?).into())),
-            BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.max(b.to_number()?).into())),
 
             BinaryOp::StrGet => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
                 let string = b.to_string()?;
