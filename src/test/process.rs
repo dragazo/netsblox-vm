@@ -1043,8 +1043,8 @@ fn test_proc_atan2_new_cmp() {
             [false, true, true],
             [true, true, false],
             [true, false, true],
-            [true, false, true],
-            [false, true, true],
+            true,
+            false,
             [false, true],
         ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "atan2 and new cmp");
@@ -1121,6 +1121,39 @@ fn test_proc_compare_str() {
             [true, true, false, true, false, false],
             [false, false, false, true, true, true],
             [false, false, false, true, true, true],
+
+            [true, true, false, true, false, false],
+            [true, true, false, true, false, false],
+            [false, false, false, true, true, true],
+            [false, false, false, true, true, true],
+
+            [true, true, false, true, false, false],
+            [true, true, false, true, false, false],
+            [false, false, false, true, true, true],
+            [false, false, false, true, true, true],
+
+            [true, true, false, true, false, false],
+            [true, true, false, true, false, false],
+            [false, false, false, true, true, true],
+            [false, false, false, true, true, true],
+
+            [false, true, true, false, false, true],
+            [true, true, false, true, false, false],
+            [false, false, false, true, true, true],
+            [false, true, true, false, false, true],
+
+            [false, true, true, false, false, true],
+            [false, true, true, false, false, true],
+            [true, true, false, true, false, false],
+            [false, false, false, true, true, true],
+
+            [false, true, true, false, false, true],
+            [true, true, false, true, false, false],
+            [false, false, false, true, true, true],
+
+            [true, true, false, true, false, false],
+            [true, true, false, true, false, false],
+            [true, true, false, true, false, false],
         ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "compare str");
     });

@@ -9,7 +9,6 @@
 use std::prelude::v1::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
 use std::iter::{self, Cycle};
-use std::cmp::Ordering;
 use std::rc::Rc;
 
 use unicase::UniCase;
@@ -518,14 +517,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ListFind => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let value = self.value_stack.pop().unwrap();
-                let res = list.read().iter().enumerate().find(|(_, x)| ops::check_eq(x, &value)).map(|(i, _)| i + 1).unwrap_or(0);
+                let res = ops::find(list, &value)?.map(|i| i + 1).unwrap_or(0);
                 self.value_stack.push(Number::new(res as f64)?.into());
                 self.pos = aft_pos;
             }
             Instruction::ListContains => {
                 let value = self.value_stack.pop().unwrap();
-                let res = self.value_stack.pop().unwrap().as_list()?.read().iter().any(|x| ops::check_eq(x, &value));
-                self.value_stack.push(res.into());
+                let list = self.value_stack.pop().unwrap().as_list()?;
+                self.value_stack.push(ops::find(list, &value)?.is_some().into());
                 self.pos = aft_pos;
             }
 
@@ -764,16 +763,16 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(res);
                 self.pos = aft_pos;
             }
-            Instruction::Eq { negate } => {
+            Instruction::Cmp { relation } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push((ops::check_eq(&a, &b) ^ negate).into());
+                self.value_stack.push(ops::cmp(&a, &b)?.check(relation).into());
                 self.pos = aft_pos;
             }
             Instruction::RefEq => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::check_ref_eq(&a, &b).into());
+                self.value_stack.push(ops::ref_eq(&a, &b).into());
                 self.pos = aft_pos;
             }
             Instruction::UnaryOp { op } => {
@@ -1283,13 +1282,6 @@ mod ops {
         res
     }
 
-    fn cmp_values<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> Result<Ordering, ErrorCause<C, S>> {
-        Ok(match (a.to_number(), b.to_number()) {
-            (Ok(a), Ok(b)) => a.cmp(&b),
-            _ => UniCase::new(a.to_string()?.as_ref()).cmp(&UniCase::new(b.to_string()?.as_ref())),
-        })
-    }
-
     fn binary_op_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, C, S>, Identity<'gc, C, S>, bool), Value<'gc, C, S>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc, C, S>, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let cache_key = (a.identity(), b.identity(), matrix_mode);
         Ok(match cache.get(&cache_key) {
@@ -1345,10 +1337,6 @@ mod ops {
             BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.powf(b.to_number()?)?.into())),
             BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(b.to_number()?.log(a.to_number()?)?.into())),
             BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.atan2(b.to_number()?)?.to_degrees()?.into())),
-            BinaryOp::Greater   => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? == Ordering::Greater).into())),
-            BinaryOp::GreaterEq => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? != Ordering::Less).into())),
-            BinaryOp::Less      => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? == Ordering::Less).into())),
-            BinaryOp::LessEq    => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok((cmp_values(a, b)? != Ordering::Greater).into())),
             BinaryOp::Min       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.min(b.to_number()?).into())),
             BinaryOp::Max       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.max(b.to_number()?).into())),
 
@@ -1503,49 +1491,75 @@ mod ops {
         unary_op_impl(mc, system, index, &mut Default::default(), &|_, _, x| Ok(list[prep_index(x, list.len())?].clone()))
     }
 
-    fn check_eq_impl<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, cache: &mut BTreeSet<(Identity<'gc, C, S>, Identity<'gc, C, S>)>) -> bool {
-        // if already cached, that cmp handles overall check, so no-op with true (if we ever get a false, the whole thing is false)
-        if !cache.insert((a.identity(), b.identity())) { return true }
+    fn cmp_impl<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, cache: &mut BTreeMap<(Identity<'gc, C, S>, Identity<'gc, C, S>), Option<Cmp>>) -> Result<Cmp, ErrorCause<C, S>> {
+        let key = (a.identity(), b.identity());
+        match cache.get(&key) {
+            Some(Some(x)) => return Ok(*x),
+            Some(None) => return Err(ErrorCause::CyclicValue),
+            None => { cache.insert(key, None); }
+        }
 
-        match (a, b) {
-            (Value::Bool(a), Value::Bool(b)) => *a == *b,
-            (Value::Bool(_), _) | (_, Value::Bool(_)) => false,
+        fn parse_num(x: &str) -> Option<Number> {
+            x.parse::<f64>().ok().and_then(|x| Number::new(x).ok())
+        }
 
-            (Value::Number(a), Value::Number(b)) => *a == *b,
-            (Value::String(a), Value::String(b)) =>  UniCase::new(a.as_str()) == UniCase::new(b.as_str()),
-            (Value::Number(n), Value::String(s)) | (Value::String(s), Value::Number(n)) => match s.parse::<f64>().ok().and_then(|x| Number::new(x).ok()) {
-                Some(s) => s == *n,
-                None => **s == n.to_string(),
+        let res = match (a, b) {
+            (Value::Bool(a), Value::Bool(b)) => a.cmp(b).into(),
+            (Value::Bool(_), _) | (_, Value::Bool(_)) => Cmp::NotEqual(None),
+
+            (Value::Number(a), Value::Number(b)) => a.cmp(b).into(),
+            (Value::String(a), Value::String(b)) => match parse_num(a).and_then(|a| parse_num(b).map(|b| (a, b))) {
+                Some((a, b)) => a.cmp(&b).into(),
+                None => UniCase::new(a.as_str()).cmp(&UniCase::new(b.as_str())).into(),
             }
-            (Value::Number(_), _) | (_, Value::Number(_)) => false,
-            (Value::String(_), _) | (_, Value::String(_)) => false,
-
-            (Value::Image(a), Value::Image(b)) => Rc::ptr_eq(a, b),
-            (Value::Image(_), _) | (_, Value::Image(_)) => false,
-
-            (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),
-            (Value::Closure(_), _) | (_, Value::Closure(_)) => false,
+            (Value::Number(a), Value::String(b)) => match parse_num(b) {
+                Some(b) => a.cmp(&b).into(),
+                None => UniCase::new(&a.to_string()).cmp(&UniCase::new(b.as_ref())).into(),
+            }
+            (Value::String(a), Value::Number(b)) => match parse_num(a) {
+                Some(a) => a.cmp(b).into(),
+                None => UniCase::new(a.as_ref()).cmp(&UniCase::new(&b.to_string())).into(),
+            }
+            (Value::Number(_), _) | (_, Value::Number(_)) => Cmp::NotEqual(None),
+            (Value::String(_), _) | (_, Value::String(_)) => Cmp::NotEqual(None),
 
             (Value::List(a), Value::List(b)) => {
                 let (a, b) = (a.read(), b.read());
-                if a.len() != b.len() { return false }
-                for (a, b) in iter::zip(&*a, &*b) {
-                    if !check_eq_impl(a, b, cache) { return false }
+                let (mut a, mut b) = (a.iter(), b.iter());
+                loop {
+                    match (a.next(), b.next()) {
+                        (Some(a), Some(b)) => match cmp_impl(a, b, cache)? {
+                            Cmp::Equal => (),
+                            Cmp::NotEqual(dir) => break Cmp::NotEqual(dir),
+                        }
+                        (None, Some(_)) => break Cmp::NotEqual(Some(CmpDir::Less)),
+                        (Some(_), None) => break Cmp::NotEqual(Some(CmpDir::Greater)),
+                        (None, None) => break Cmp::Equal,
+                    }
                 }
-                true
             }
-            (Value::List(_), _) | (_, Value::List(_)) => false,
+            (Value::List(_), _) | (_, Value::List(_)) => Cmp::NotEqual(None),
 
-            (Value::Entity(a), Value::Entity(b)) => a.as_ptr() == b.as_ptr(),
-            (Value::Entity(_), _) | (_, Value::Entity(_)) => false,
+            (Value::Image(a), Value::Image(b)) => if Rc::ptr_eq(a, b) { Cmp::Equal } else { Cmp::NotEqual(None) },
+            (Value::Image(_), _) | (_, Value::Image(_)) => Cmp::NotEqual(None),
 
-            (Value::Native(a), Value::Native(b)) => Rc::ptr_eq(a, b),
-        }
+            (Value::Closure(a), Value::Closure(b)) => if a.as_ptr() == b.as_ptr() { Cmp::Equal } else { Cmp::NotEqual(None) },
+            (Value::Closure(_), _) | (_, Value::Closure(_)) => Cmp::NotEqual(None),
+
+            (Value::Entity(a), Value::Entity(b)) => if a.as_ptr() == b.as_ptr() { Cmp::Equal } else { Cmp::NotEqual(None) },
+            (Value::Entity(_), _) | (_, Value::Entity(_)) => Cmp::NotEqual(None),
+
+            (Value::Native(a), Value::Native(b)) => if Rc::ptr_eq(a, b) { Cmp::Equal } else { Cmp::NotEqual(None) },
+        };
+
+        debug_assert_eq!(cache.get(&key).cloned(), Some(None));
+        *cache.get_mut(&key).unwrap() = Some(res);
+        Ok(res)
     }
-    pub(super) fn check_eq<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> bool {
-        check_eq_impl(a, b, &mut Default::default())
+    pub(super) fn cmp<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> Result<Cmp, ErrorCause<C, S>> {
+        cmp_impl(a, b, &mut Default::default())
     }
-    pub(super) fn check_ref_eq<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> bool {
+    pub(super) fn ref_eq<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> bool {
         match (a, b) {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Bool(_), _) | (_, Value::Bool(_)) => false,
@@ -1570,5 +1584,15 @@ mod ops {
 
             (Value::Native(a), Value::Native(b)) => Rc::ptr_eq(a, b),
         }
+    }
+
+    pub(super) fn find<'gc, C: CustomTypes<S>, S: System<C>>(list: GcCell<'gc, VecDeque<Value<'gc, C, S>>>, value: &Value<'gc, C, S>) -> Result<Option<usize>, ErrorCause<C, S>> {
+        let list = list.read();
+        for (i, x) in list.iter().enumerate() {
+            if cmp(x, value)? == Cmp::Equal {
+                return Ok(Some(i));
+            }
+        }
+        Ok(None)
     }
 }
