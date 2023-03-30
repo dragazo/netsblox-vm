@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::marker::PhantomData;
 use std::{iter, fmt, mem};
 use std::rc::{Rc, Weak};
-use std::cmp::Ordering;
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::cell::Ref;
@@ -93,6 +92,8 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     ConversionError { got: Type<C, S>, expected: Type<C, S> },
     /// The result of a failed variadic type conversion (expected type `T` or a list of type `T`).
     VariadicConversionError { got: Type<C, S>, expected: Type<C, S> },
+    /// Attempt to compare incomparable types.
+    Incomparable { left: Type<C, S>, right: Type<C, S> },
     /// An operation that expected a list with a certain size received an incorrect size.
     InvalidListLength { expected: usize, got: usize },
     /// An indexing operation on a list/string had an out of bounds index, `index`, on a list/string of size `len`. Note that Snap!/NetsBlox use 1-based indexing.
@@ -128,38 +129,6 @@ impl<C: CustomTypes<S>, S: System<C>> From<ConversionError<C, S>> for ErrorCause
 impl<C: CustomTypes<S>, S: System<C>> From<ToJsonError<C, S>> for ErrorCause<C, S> { fn from(error: ToJsonError<C, S>) -> Self { Self::ToJsonError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<FromJsonError> for ErrorCause<C, S> { fn from(error: FromJsonError) -> Self { Self::FromJsonError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<NumberError> for ErrorCause<C, S> { fn from(error: NumberError) -> Self { Self::NumberError { error } } }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CmpDir {
-    Less,
-    Greater,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Cmp {
-    Equal,
-    NotEqual(Option<CmpDir>),
-}
-impl Cmp {
-    pub fn check(self, relation: Relation) -> bool {
-        match relation {
-            Relation::Equal => self == Cmp::Equal,
-            Relation::NotEqual => self == Cmp::NotEqual(None) || self == Cmp::NotEqual(Some(CmpDir::Less)) || self == Cmp::NotEqual(Some(CmpDir::Greater)),
-            Relation::Less => self == Cmp::NotEqual(Some(CmpDir::Less)),
-            Relation::LessEq => self == Cmp::Equal || self == Cmp::NotEqual(Some(CmpDir::Less)),
-            Relation::Greater => self == Cmp::NotEqual(Some(CmpDir::Greater)),
-            Relation::GreaterEq => self == Cmp::Equal || self == Cmp::NotEqual(Some(CmpDir::Greater)),
-        }
-    }
-}
-impl From<Ordering> for Cmp {
-    fn from(value: Ordering) -> Self {
-        match value {
-            Ordering::Equal => Cmp::Equal,
-            Ordering::Less => Cmp::NotEqual(Some(CmpDir::Less)),
-            Ordering::Greater => Cmp::NotEqual(Some(CmpDir::Greater)),
-        }
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Color { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }

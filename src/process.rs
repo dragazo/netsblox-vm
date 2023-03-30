@@ -9,6 +9,7 @@
 use std::prelude::v1::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
 use std::iter::{self, Cycle};
+use std::cmp::Ordering;
 use std::rc::Rc;
 
 use unicase::UniCase;
@@ -766,7 +767,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::Cmp { relation } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::cmp(&a, &b)?.check(relation).into());
+                self.value_stack.push(ops::check_relation(&a, &b, relation)?.into());
                 self.pos = aft_pos;
             }
             Instruction::RefEq => {
@@ -1491,7 +1492,7 @@ mod ops {
         unary_op_impl(mc, system, index, &mut Default::default(), &|_, _, x| Ok(list[prep_index(x, list.len())?].clone()))
     }
 
-    fn cmp_impl<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, cache: &mut BTreeMap<(Identity<'gc, C, S>, Identity<'gc, C, S>), Option<Cmp>>) -> Result<Cmp, ErrorCause<C, S>> {
+    fn cmp_impl<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, cache: &mut BTreeMap<(Identity<'gc, C, S>, Identity<'gc, C, S>), Option<Option<Ordering>>>) -> Result<Option<Ordering>, ErrorCause<C, S>> {
         let key = (a.identity(), b.identity());
         match cache.get(&key) {
             Some(Some(x)) => return Ok(*x),
@@ -1505,7 +1506,7 @@ mod ops {
 
         let res = match (a, b) {
             (Value::Bool(a), Value::Bool(b)) => a.cmp(b).into(),
-            (Value::Bool(_), _) | (_, Value::Bool(_)) => Cmp::NotEqual(None),
+            (Value::Bool(_), _) | (_, Value::Bool(_)) => None,
 
             (Value::Number(a), Value::Number(b)) => a.cmp(b).into(),
             (Value::String(a), Value::String(b)) => match parse_num(a).and_then(|a| parse_num(b).map(|b| (a, b))) {
@@ -1520,8 +1521,8 @@ mod ops {
                 Some(a) => a.cmp(b).into(),
                 None => UniCase::new(a.as_ref()).cmp(&UniCase::new(&b.to_string())).into(),
             }
-            (Value::Number(_), _) | (_, Value::Number(_)) => Cmp::NotEqual(None),
-            (Value::String(_), _) | (_, Value::String(_)) => Cmp::NotEqual(None),
+            (Value::Number(_), _) | (_, Value::Number(_)) => None,
+            (Value::String(_), _) | (_, Value::String(_)) => None,
 
             (Value::List(a), Value::List(b)) => {
                 let (a, b) = (a.read(), b.read());
@@ -1529,36 +1530,55 @@ mod ops {
                 loop {
                     match (a.next(), b.next()) {
                         (Some(a), Some(b)) => match cmp_impl(a, b, cache)? {
-                            Cmp::Equal => (),
-                            Cmp::NotEqual(dir) => break Cmp::NotEqual(dir),
+                            Some(Ordering::Equal) => (),
+                            x => break x,
                         }
-                        (None, Some(_)) => break Cmp::NotEqual(Some(CmpDir::Less)),
-                        (Some(_), None) => break Cmp::NotEqual(Some(CmpDir::Greater)),
-                        (None, None) => break Cmp::Equal,
+                        (None, Some(_)) => break Some(Ordering::Less),
+                        (Some(_), None) => break Some(Ordering::Greater),
+                        (None, None) => break Some(Ordering::Equal),
                     }
                 }
             }
-            (Value::List(_), _) | (_, Value::List(_)) => Cmp::NotEqual(None),
+            (Value::List(_), _) | (_, Value::List(_)) => None,
 
-            (Value::Image(a), Value::Image(b)) => if Rc::ptr_eq(a, b) { Cmp::Equal } else { Cmp::NotEqual(None) },
-            (Value::Image(_), _) | (_, Value::Image(_)) => Cmp::NotEqual(None),
+            (Value::Image(a), Value::Image(b)) => if Rc::ptr_eq(a, b) { Some(Ordering::Equal) } else { None },
+            (Value::Image(_), _) | (_, Value::Image(_)) => None,
 
-            (Value::Closure(a), Value::Closure(b)) => if a.as_ptr() == b.as_ptr() { Cmp::Equal } else { Cmp::NotEqual(None) },
-            (Value::Closure(_), _) | (_, Value::Closure(_)) => Cmp::NotEqual(None),
+            (Value::Closure(a), Value::Closure(b)) => if a.as_ptr() == b.as_ptr() { Some(Ordering::Equal) } else { None },
+            (Value::Closure(_), _) | (_, Value::Closure(_)) => None,
 
-            (Value::Entity(a), Value::Entity(b)) => if a.as_ptr() == b.as_ptr() { Cmp::Equal } else { Cmp::NotEqual(None) },
-            (Value::Entity(_), _) | (_, Value::Entity(_)) => Cmp::NotEqual(None),
+            (Value::Entity(a), Value::Entity(b)) => if a.as_ptr() == b.as_ptr() { Some(Ordering::Equal) } else { None },
+            (Value::Entity(_), _) | (_, Value::Entity(_)) => None,
 
-            (Value::Native(a), Value::Native(b)) => if Rc::ptr_eq(a, b) { Cmp::Equal } else { Cmp::NotEqual(None) },
+            (Value::Native(a), Value::Native(b)) => if Rc::ptr_eq(a, b) { Some(Ordering::Equal) } else { None },
         };
 
         debug_assert_eq!(cache.get(&key).cloned(), Some(None));
         *cache.get_mut(&key).unwrap() = Some(res);
         Ok(res)
     }
-    pub(super) fn cmp<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> Result<Cmp, ErrorCause<C, S>> {
+    pub(super) fn cmp<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> Result<Option<Ordering>, ErrorCause<C, S>> {
         cmp_impl(a, b, &mut Default::default())
     }
+
+    pub(super) fn check_relation<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, relation: Relation) -> Result<bool, ErrorCause<C, S>> {
+        let ord = cmp(a, b)?;
+        Ok(match relation {
+            Relation::Equal => ord == Some(Ordering::Equal),
+            Relation::NotEqual => ord != Some(Ordering::Equal),
+            _ => match ord {
+                Some(ord) => match relation {
+                    Relation::Equal | Relation::NotEqual => unreachable!(),
+                    Relation::Less => ord == Ordering::Less,
+                    Relation::LessEq => ord != Ordering::Greater,
+                    Relation::Greater => ord == Ordering::Greater,
+                    Relation::GreaterEq => ord != Ordering::Less,
+                }
+                None => return Err(ErrorCause::Incomparable { left: a.get_type(), right: b.get_type() }),
+            }
+        })
+    }
+
     pub(super) fn ref_eq<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> bool {
         match (a, b) {
             (Value::Bool(a), Value::Bool(b)) => a == b,
@@ -1589,7 +1609,7 @@ mod ops {
     pub(super) fn find<'gc, C: CustomTypes<S>, S: System<C>>(list: GcCell<'gc, VecDeque<Value<'gc, C, S>>>, value: &Value<'gc, C, S>) -> Result<Option<usize>, ErrorCause<C, S>> {
         let list = list.read();
         for (i, x) in list.iter().enumerate() {
-            if cmp(x, value)? == Cmp::Equal {
+            if cmp(x, value)? == Some(Ordering::Equal) {
                 return Ok(Some(i));
             }
         }
