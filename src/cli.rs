@@ -327,7 +327,7 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
         });
     }
 }
-fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, port: u16, overrides: Config<C, StdSystem<C>>, syscalls: &[SyscallMenu<'_>]) {
+fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, port: u16, overrides: Config<C, StdSystem<C>>, syscalls: &[SyscallMenu]) {
     println!(r#"connect from {nb_server}/?extensions=["http://{addr}:{port}/extension.js"]"#);
 
     let extension = ExtensionArgs {

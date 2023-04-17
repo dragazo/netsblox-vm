@@ -219,9 +219,9 @@ fn main() {
         command: None,
     };
     run::<C>(Mode::parse(), config, &[
-        SyscallMenu::Entry { label: "open" },
-        SyscallMenu::Entry { label: "close" },
-        SyscallMenu::Entry { label: "readLine" },
-        SyscallMenu::Entry { label: "writeLine" },
+        SyscallMenu::Entry { label: "open".into() },
+        SyscallMenu::Entry { label: "close".into() },
+        SyscallMenu::Entry { label: "readLine".into() },
+        SyscallMenu::Entry { label: "writeLine".into() },
     ]);
 }

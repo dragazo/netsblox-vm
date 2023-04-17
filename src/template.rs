@@ -27,20 +27,20 @@ pub const EMPTY_PROJECT: &'static str = include_str!("assets/empty-proj.xml");
 /// A single syscall can be listed multiple times, e.g., under different submenu categorizations.
 /// These are not checked against the syscalls actually supported by your runtime.
 /// You are responsible for implementing syscalls and ensuring they are accurately shown in the menu if desired.
-pub enum SyscallMenu<'a> {
+pub enum SyscallMenu {
     /// A syscall name.
-    Entry { label: &'a str },
+    Entry { label: String },
     /// A labeled submenu of syscalls.
-    Submenu { label: &'a str, content: &'a [SyscallMenu<'a>] },
+    Submenu { label: String, content: Vec<SyscallMenu> },
 }
-impl SyscallMenu<'_> {
+impl SyscallMenu {
     fn format(items: &[Self]) -> String {
         fn format_impl(value: &SyscallMenu, res: &mut String) {
             match value {
                 SyscallMenu::Entry { label } => write!(res, "'{label}':'{label}',").unwrap(),
                 SyscallMenu::Submenu { label, content } => {
                     write!(res, "'{label}':{{").unwrap();
-                    for value in *content {
+                    for value in content {
                         format_impl(value, res);
                     }
                     res.push_str("},");
@@ -59,10 +59,10 @@ impl SyscallMenu<'_> {
 #[test]
 fn test_syscall_menu_format() {
     assert_eq!(SyscallMenu::format(&[]), "{}");
-    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo" }]), "{'foo':'foo',}");
-    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo" }, SyscallMenu::Entry { label: "bar" }]), "{'foo':'foo','bar':'bar',}");
-    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo" }, SyscallMenu::Submenu { label: "test", content: &[] }, SyscallMenu::Entry { label: "bar" }]), "{'foo':'foo','test':{},'bar':'bar',}");
-    assert_eq!(SyscallMenu::format(&[SyscallMenu::Submenu { label: "test", content: &[] }]), "{'test':{},}");
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo".into() }]), "{'foo':'foo',}");
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo".into() }, SyscallMenu::Entry { label: "bar".into() }]), "{'foo':'foo','bar':'bar',}");
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo".into() }, SyscallMenu::Submenu { label: "test".into(), content: vec![] }, SyscallMenu::Entry { label: "bar".into() }]), "{'foo':'foo','test':{},'bar':'bar',}");
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Submenu { label: "test".into(), content: vec![] }]), "{'test':{},}");
 }
 
 /// Arguments used to construct a templated extension.
@@ -70,7 +70,7 @@ pub struct ExtensionArgs<'a> {
     /// The NetsBlox VM server to connect to.
     pub server: &'a str,
     /// The syscall menu structure to generate for syscall blocks.
-    pub syscalls: &'a [SyscallMenu<'a>],
+    pub syscalls: &'a [SyscallMenu],
     /// A list of XML element names to omit from the XML sent to the VM server.
     pub omitted_elements: &'a [&'a str],
     /// The duration between successive calls to pull status from the VM server.
