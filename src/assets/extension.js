@@ -48,7 +48,7 @@
         this.createLabel();
 
         this.minWidth = 400;
-        this.minHeight = 300;
+        this.minHeight = 200;
 
         this.defaultWidth = 700;
         this.defaultHeight = 500;
