@@ -29,17 +29,21 @@ pub const EMPTY_PROJECT: &'static str = include_str!("assets/empty-proj.xml");
 /// You are responsible for implementing syscalls and ensuring they are accurately shown in the menu if desired.
 pub enum SyscallMenu {
     /// A syscall name.
-    Entry { label: String },
+    Entry { label: String, value: String },
     /// A labeled submenu of syscalls.
     Submenu { label: String, content: Vec<SyscallMenu> },
 }
 impl SyscallMenu {
+    /// Creates an instance of [`SyscallMenu::Entry`] with the given string as both the label and value.
+    pub fn simple_entry(value: String) -> Self {
+        SyscallMenu::Entry { label: value.clone(), value }
+    }
     fn format(items: &[Self]) -> String {
         fn format_impl(value: &SyscallMenu, res: &mut String) {
             match value {
-                SyscallMenu::Entry { label } => write!(res, "'{label}':'{label}',").unwrap(),
+                SyscallMenu::Entry { label, value } => write!(res, "{label:?}:{value:?},").unwrap(),
                 SyscallMenu::Submenu { label, content } => {
-                    write!(res, "'{label}':{{").unwrap();
+                    write!(res, "{label:?}:{{").unwrap();
                     for value in content {
                         format_impl(value, res);
                     }
@@ -59,10 +63,12 @@ impl SyscallMenu {
 #[test]
 fn test_syscall_menu_format() {
     assert_eq!(SyscallMenu::format(&[]), "{}");
-    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo".into() }]), "{'foo':'foo',}");
-    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo".into() }, SyscallMenu::Entry { label: "bar".into() }]), "{'foo':'foo','bar':'bar',}");
-    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo".into() }, SyscallMenu::Submenu { label: "test".into(), content: vec![] }, SyscallMenu::Entry { label: "bar".into() }]), "{'foo':'foo','test':{},'bar':'bar',}");
-    assert_eq!(SyscallMenu::format(&[SyscallMenu::Submenu { label: "test".into(), content: vec![] }]), "{'test':{},}");
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo".into(), value: "gtr".into() }]), r#"{"foo":"gtr",}"#);
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo".into(), value: "gtr".into() }, SyscallMenu::Entry { label: "bar".into(), value: "baz".into() }]), r#"{"foo":"gtr","bar":"baz",}"#);
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::simple_entry("foo".into()), SyscallMenu::Submenu { label: "test".into(), content: vec![] }, SyscallMenu::Entry { label: "bam".into(), value: "s".into() }]), r#"{"foo":"foo","test":{},"bam":"s",}"#);
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Submenu { label: "tes\'  \' \"t\"f".into(), content: vec![] }]), r#"{"tes'  ' \"t\"f":{},}"#);
+    assert_eq!(SyscallMenu::format(&[SyscallMenu::Entry { label: "foo\"b\'ar".into(), value: "gtr\'\"test".into() }]), r#"{"foo\"b'ar":"gtr'\"test",}"#);
+
 }
 
 /// Arguments used to construct a templated extension.
