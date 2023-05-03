@@ -784,6 +784,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
             x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
         })
     }
+    /// Attempts to interpret this value as an image.
+    pub fn as_image(&self) -> Result<&Rc<Vec<u8>>, ConversionError<C, S>> {
+        match self {
+            Value::Image(x) => Ok(x),
+            x => Err(ConversionError { got: x.get_type(), expected: Type::Image }),
+        }
+    }
     /// Attempts to interpret this value as a list.
     pub fn as_list(&self) -> Result<GcCell<'gc, VecDeque<Value<'gc, C, S>>>, ConversionError<C, S>> {
         match self {
