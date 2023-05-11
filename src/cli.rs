@@ -120,7 +120,7 @@ pub enum Mode {
 
 #[derive(Debug)]
 enum OpenProjectError<'a> {
-    ParseError { error: ast::Error },
+    ParseError { error: Box<ast::Error> },
     RoleNotFound { role: &'a str },
     NoRoles,
     MultipleRoles { count: usize },

@@ -43,17 +43,14 @@ cli = [
 # core deps
 no-std-compat = { version = "0.4.1", default-features = false, features = ["alloc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
-# gc-arena = { version = "0.2.2", default-features = false }
-gc-arena = { git = "https://github.com/kyren/gc-arena", default-features = false }
-# netsblox-ast = { version = "=0.2.25", default-features = false }
-# netsblox-ast = { path = "../netsblox-ast", default-features = false }
-netsblox-ast = { git = "https://github.com/dragazo/netsblox-ast", default-features = false }
+gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "cdcb387", default-features = false }
+netsblox-ast = { version = "=0.3.0", default-features = false }
 num-traits = { version = "0.2.15", default-features = false }
 num-derive = { version = "0.3.3", default-features = false }
 bin-pool = { version = "0.1.0", default-features = false }
 rand = { version = "0.8.5", default-features = false }
 checked-float = { version = "0.1.4", default-features = false, features = ["serde"] }
-educe = { version = "0.4.20", default-features = false, features = ["Debug", "Clone", "Copy", "PartialOrd", "Ord", "PartialEq", "Eq", "Default"] }
+educe = { version = "0.4.22", default-features = false, features = ["Debug", "Clone", "Copy", "PartialOrd", "Ord", "PartialEq", "Eq", "Default"] }
 libm = { version = "0.2.6", default-features = false }
 monostate = { version = "0.1.6", default-features = false }
 take_mut = { version = "0.2.2", default-features = false }
@@ -67,12 +64,12 @@ async-channel = { version = "1.8.0", default-features = false, optional = true }
 reqwest = { version = "0.11", default-features = false, features = ["native-tls", "json"], optional = true }
 tokio-tungstenite = { version = "0.18.0", default-features = false, features = ["native-tls", "connect"], optional = true }
 names = { version = "0.14.0", default-features = false, optional = true }
-uuid = { version = "1.3.0", default-features = false, features = ["v4", "fast-rng"], optional = true }
+uuid = { version = "1.3.2", default-features = false, features = ["v4", "fast-rng"], optional = true }
 rand_chacha = { version = "0.3.1", default-features = false, optional = true }
-getrandom = { version = "0.2.8", default-features = false, optional = true }
+getrandom = { version = "0.2.9", default-features = false, optional = true }
 
 # cli deps
-clap = { version = "4.2.1", default-features = false, features = ["std", "derive"], optional = true }
+clap = { version = "4.2.7", default-features = false, features = ["std", "derive"], optional = true }
 crossterm = { version = "0.26.1", default-features = false, optional = true }
 actix-web = { version = "4.3.1", default-features = false, features = ["macros"], optional = true }
 actix-cors = { version = "0.6.4", default-features = false, optional = true }
