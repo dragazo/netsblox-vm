@@ -262,8 +262,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     self.state.process_queue.push_front(proc_key);
                     ProjectStep::Watcher { create, watcher }
                 }
-                ProcessStep::Broadcast { msg_type, barrier } => {
+                ProcessStep::Broadcast { msg_type, barrier, targets } => {
                     for script in self.scripts.iter_mut() {
+                        if let Some(targets) = &targets {
+                            if !targets.iter().any(|&target| GcCell::ptr_eq(script.entity, target)) {
+                                continue
+                            }
+                        }
                         if let Event::LocalMessage { msg_type: recv_type } = &script.event {
                             if *recv_type == *msg_type {
                                 script.stop_all(&mut self.state);

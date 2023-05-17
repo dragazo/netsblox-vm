@@ -426,6 +426,31 @@ fn test_proj_broadcast() {
 }
 
 #[test]
+fn test_proj_broadcast_to() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/broadcast-to.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        let expected = Value::from_json(mc, json!([
+            "stage 1", "stage 2", "turtle 1", "turtle 2", "duck 1", "duck 2", "dog 1", "dog 2", "---",
+            "stage 1", "stage 2", "turtle 1", "turtle 2", "duck 1", "duck 2", "dog 1", "dog 2", "---",
+            "duck 1", "duck 2", "---",
+            "dog 1", "dog 2", "---",
+            "stage 1", "stage 2", "---",
+            "turtle 1", "turtle 2", "---",
+            "duck 1", "duck 2", "---",
+            "---",
+            "dog 1", "dog 2", "---",
+            "turtle 1", "turtle 2", "duck 1", "duck 2", "---",
+        ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("log").unwrap().get().clone(), &expected, 1e-20, "log");
+    });
+}
+
+#[test]
 fn test_proj_loop_yields() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/loop-yields.xml"), system);

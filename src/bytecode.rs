@@ -306,7 +306,8 @@ pub(crate) enum Instruction<'a> {
 
     /// Consumes 1 value from the value stack, `msg_type`, and broadcasts a message to all scripts.
     /// The `wait` flag can be set to denote that the broadcasting script should wait until all receiving scripts have terminated.
-    Broadcast { wait: bool },
+    /// If `target` is `true`, an extra value, `target`, is popped from the value stack (first) and represents the target of the message.
+    Broadcast { wait: bool, target: bool },
 
     /// Consumes 1 value `msg` from the value stack and prints it to the stored printer.
     Print { style: PrintStyle },
@@ -718,41 +719,43 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             83 => read_prefixed!(Instruction::Syscall {} : len),
             84 => read_prefixed!(Instruction::PushSyscallError),
 
-            85 => read_prefixed!(Instruction::Broadcast { wait: false }),
-            86 => read_prefixed!(Instruction::Broadcast { wait: true }),
+            85 => read_prefixed!(Instruction::Broadcast { wait: false, target: false }),
+            86 => read_prefixed!(Instruction::Broadcast { wait: false, target: true }),
+            87 => read_prefixed!(Instruction::Broadcast { wait: true, target: false }),
+            88 => read_prefixed!(Instruction::Broadcast { wait: true, target: true }),
 
-            87 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
-            88 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
-            89 => read_prefixed!(Instruction::Ask),
-            90 => read_prefixed!(Instruction::PushAnswer),
+            89 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
+            90 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
+            91 => read_prefixed!(Instruction::Ask),
+            92 => read_prefixed!(Instruction::PushAnswer),
 
-            91 => read_prefixed!(Instruction::ResetTimer),
-            92 => read_prefixed!(Instruction::PushTimer),
-            93 => read_prefixed!(Instruction::Sleep),
+            93 => read_prefixed!(Instruction::ResetTimer),
+            94 => read_prefixed!(Instruction::PushTimer),
+            95 => read_prefixed!(Instruction::Sleep),
 
-            94 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
-            95 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
-            96 => read_prefixed!(Instruction::SendNetworkReply),
+            96 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
+            97 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
+            98 => read_prefixed!(Instruction::SendNetworkReply),
 
-            97 => read_prefixed!(Instruction::PushProperty {} : prop),
-            98 => read_prefixed!(Instruction::SetProperty {} : prop),
-            99 => read_prefixed!(Instruction::ChangeProperty {} : prop),
+            99 => read_prefixed!(Instruction::PushProperty {} : prop),
+            100 => read_prefixed!(Instruction::SetProperty {} : prop),
+            101 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
-            100 => read_prefixed!(Instruction::PushCostume),
-            101 => read_prefixed!(Instruction::PushCostumeNumber),
-            102 => read_prefixed!(Instruction::PushCostumeList),
-            103 => read_prefixed!(Instruction::SetCostume),
-            104 => read_prefixed!(Instruction::NextCostume),
+            102 => read_prefixed!(Instruction::PushCostume),
+            103 => read_prefixed!(Instruction::PushCostumeNumber),
+            104 => read_prefixed!(Instruction::PushCostumeList),
+            105 => read_prefixed!(Instruction::SetCostume),
+            106 => read_prefixed!(Instruction::NextCostume),
 
-            105 => read_prefixed!(Instruction::ClearEffects),
+            107 => read_prefixed!(Instruction::ClearEffects),
 
-            106 => read_prefixed!(Instruction::GotoXY),
-            107 => read_prefixed!(Instruction::Goto),
+            108 => read_prefixed!(Instruction::GotoXY),
+            109 => read_prefixed!(Instruction::Goto),
 
-            108 => read_prefixed!(Instruction::PointTowardsXY),
-            109 => read_prefixed!(Instruction::PointTowards),
+            110 => read_prefixed!(Instruction::PointTowardsXY),
+            111 => read_prefixed!(Instruction::PointTowards),
 
-            110 => read_prefixed!(Instruction::Forward),
+            112 => read_prefixed!(Instruction::Forward),
 
             _ => unreachable!(),
         }
@@ -894,41 +897,43 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::Syscall { len } => append_prefixed!(83: len),
             Instruction::PushSyscallError => append_prefixed!(84),
 
-            Instruction::Broadcast { wait: false } => append_prefixed!(85),
-            Instruction::Broadcast { wait: true } => append_prefixed!(86),
+            Instruction::Broadcast { wait: false, target: false } => append_prefixed!(85),
+            Instruction::Broadcast { wait: false, target: true } => append_prefixed!(86),
+            Instruction::Broadcast { wait: true, target: false } => append_prefixed!(87),
+            Instruction::Broadcast { wait: true, target: true } => append_prefixed!(88),
 
-            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(87),
-            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(88),
-            Instruction::Ask => append_prefixed!(89),
-            Instruction::PushAnswer => append_prefixed!(90),
+            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(89),
+            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(90),
+            Instruction::Ask => append_prefixed!(91),
+            Instruction::PushAnswer => append_prefixed!(92),
 
-            Instruction::ResetTimer => append_prefixed!(91),
-            Instruction::PushTimer => append_prefixed!(92),
-            Instruction::Sleep => append_prefixed!(93),
+            Instruction::ResetTimer => append_prefixed!(93),
+            Instruction::PushTimer => append_prefixed!(94),
+            Instruction::Sleep => append_prefixed!(95),
 
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(94: move str msg_type, values),
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(95: move str msg_type, values),
-            Instruction::SendNetworkReply => append_prefixed!(96),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(96: move str msg_type, values),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(97: move str msg_type, values),
+            Instruction::SendNetworkReply => append_prefixed!(98),
 
-            Instruction::PushProperty { prop } => append_prefixed!(97: prop),
-            Instruction::SetProperty { prop } => append_prefixed!(98: prop),
-            Instruction::ChangeProperty { prop } => append_prefixed!(99: prop),
+            Instruction::PushProperty { prop } => append_prefixed!(99: prop),
+            Instruction::SetProperty { prop } => append_prefixed!(100: prop),
+            Instruction::ChangeProperty { prop } => append_prefixed!(101: prop),
 
-            Instruction::PushCostume => append_prefixed!(100),
-            Instruction::PushCostumeNumber => append_prefixed!(101),
-            Instruction::PushCostumeList => append_prefixed!(102),
-            Instruction::SetCostume => append_prefixed!(103),
-            Instruction::NextCostume => append_prefixed!(104),
+            Instruction::PushCostume => append_prefixed!(102),
+            Instruction::PushCostumeNumber => append_prefixed!(103),
+            Instruction::PushCostumeList => append_prefixed!(104),
+            Instruction::SetCostume => append_prefixed!(105),
+            Instruction::NextCostume => append_prefixed!(106),
 
-            Instruction::ClearEffects => append_prefixed!(105),
+            Instruction::ClearEffects => append_prefixed!(107),
 
-            Instruction::GotoXY => append_prefixed!(106),
-            Instruction::Goto => append_prefixed!(107),
+            Instruction::GotoXY => append_prefixed!(108),
+            Instruction::Goto => append_prefixed!(109),
 
-            Instruction::PointTowardsXY => append_prefixed!(108),
-            Instruction::PointTowards => append_prefixed!(109),
+            Instruction::PointTowardsXY => append_prefixed!(110),
+            Instruction::PointTowards => append_prefixed!(111),
 
-            Instruction::Forward => append_prefixed!(110),
+            Instruction::Forward => append_prefixed!(112),
         }
     }
 }
@@ -1795,8 +1800,8 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins[success_end_pos] = Instruction::Jump { to: aft }.into();
             }
             ast::StmtKind::SendLocalMessage { target, msg_type, wait } => match target {
-                Some(_) => unimplemented!(),
-                None => self.append_simple_ins(entity, &[msg_type], Instruction::Broadcast { wait: *wait })?,
+                Some(target) => self.append_simple_ins(entity, &[msg_type, target], Instruction::Broadcast { wait: *wait, target: true })?,
+                None => self.append_simple_ins(entity, &[msg_type], Instruction::Broadcast { wait: *wait, target: false })?,
             }
             ast::StmtKind::RunRpc { service, rpc, args } => {
                 for (arg_name, arg) in args {

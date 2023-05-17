@@ -114,8 +114,8 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// The process has successfully terminated with the given return value, or [`None`] if terminated by an (error-less) abort,
     /// such as a stop script command or the death of the process's associated entity.
     Terminate { result: Option<Value<'gc, C, S>> },
-    /// The process has requested to broadcast a message to all entities, which may trigger other code to execute.
-    Broadcast { msg_type: String, barrier: Option<Barrier> },
+    /// The process has requested to broadcast a message to all entities (if `target` is `None`) or to a specific `target`, which may trigger other code to execute.
+    Broadcast { msg_type: String, barrier: Option<Barrier>, targets: Option<Vec<GcCell<'gc, Entity<'gc, C, S>>>> },
     /// The process has requested to create or destroy a new watcher for a variable.
     /// If `create` is true, the process is requesting to register the given watcher.
     /// If `create` if false, the process is requesting to remove a watcher which is equivalent to the given watcher.
@@ -974,7 +974,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(self.last_syscall_error.clone().unwrap_or_else(|| empty_string().into()));
                 self.pos = aft_pos;
             }
-            Instruction::Broadcast { wait } => {
+            Instruction::Broadcast { wait, target } => {
+                let targets = match target {
+                    false => None,
+                    true => Some(match self.value_stack.pop().unwrap() {
+                        Value::List(x) => x.read().iter().map(Value::as_entity).collect::<Result<_,_>>()?,
+                        x => vec![x.as_entity()?],
+                    }),
+                };
                 let msg_type = self.value_stack.pop().unwrap().to_string()?.into_owned();
                 let barrier = match wait {
                     false => {
@@ -987,7 +994,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                         Some(barrier)
                     }
                 };
-                return Ok(ProcessStep::Broadcast { msg_type, barrier });
+                return Ok(ProcessStep::Broadcast { msg_type, barrier, targets });
             }
             Instruction::Print { style } => {
                 let value = self.value_stack.pop().unwrap();
