@@ -502,14 +502,19 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
             let mut proj = env.proj.write(mc);
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
-                if let ProjectStep::Error { error, proc } = &res {
-                    if let Some(state) = weak_state.upgrade() {
+                match &res {
+                    ProjectStep::Error { error, proc } => if let Some(state) = weak_state.upgrade() {
                         let summary = ErrorSummary::extract(&error, &proc, &env.locs);
 
                         tee_println!(Some(&state) => "\n>>> runtime error in entity {:?}: {:?}\n>>> see red error comments...\n", summary.entity, summary.cause);
 
                         state.errors.lock().unwrap().push(summary);
                     }
+                    ProjectStep::Pause => if let Some(state) = weak_state.upgrade() {
+                        state.running.store(false, MemoryOrder::Relaxed);
+                        break
+                    }
+                    _ => (),
                 }
                 idle_sleeper.consume(&res);
             }
