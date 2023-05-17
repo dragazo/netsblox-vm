@@ -30,7 +30,7 @@ impl IdleAction {
     /// If the step resulting in an idle action, this may trigger the idle action to fire and reset the state machine.
     pub fn consume<C: CustomTypes<S>, S: System<C>>(&mut self, res: &ProjectStep<'_, C, S>) {
         match res {
-            ProjectStep::Idle | ProjectStep::Yield => {
+            ProjectStep::Idle | ProjectStep::Yield | ProjectStep::Pause => {
                 self.count += 1;
                 if self.count >= self.thresh {
                     self.trigger();
@@ -84,6 +84,9 @@ pub enum ProjectStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// The project had a running process that requested to create or destroy a watcher.
     /// See [`ProcessStep::Watcher`] for more details.
     Watcher { create: bool, watcher: Watcher<'gc, C, S> },
+    /// The project had a running process that requested to pause execution of the (entire) project.
+    /// See [`ProcessStep::Pause`] for more details.
+    Pause,
 }
 
 #[derive(Collect)]
@@ -261,6 +264,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                 ProcessStep::Watcher { create, watcher } => {
                     self.state.process_queue.push_front(proc_key);
                     ProjectStep::Watcher { create, watcher }
+                }
+                ProcessStep::Pause => {
+                    self.state.process_queue.push_front(proc_key);
+                    ProjectStep::Pause
                 }
                 ProcessStep::Broadcast { msg_type, barrier, targets } => {
                     for script in self.scripts.iter_mut() {

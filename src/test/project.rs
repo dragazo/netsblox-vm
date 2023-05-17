@@ -36,6 +36,7 @@ fn get_running_project(xml: &str, system: Rc<StdSystem<C>>) -> EnvArena {
 #[educe(Debug)]
 enum SpecialEvent<'gc, C: CustomTypes<S>, S: System<C>> {
     Watcher { create: bool, watcher: Watcher<'gc, C, S> },
+    Pause,
 }
 
 fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, C, StdSystem<C>>) -> Result<Vec<SpecialEvent<'gc, C, StdSystem<C>>>, ExecError<C, StdSystem<C>>> {
@@ -46,6 +47,10 @@ fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, C, S
             ProjectStep::Error { error, .. } => return Err(error),
             ProjectStep::Normal | ProjectStep::ProcessTerminated { .. } | ProjectStep::Yield => (),
             ProjectStep::Watcher { create, watcher } => special_events.push(SpecialEvent::Watcher { create, watcher }),
+            ProjectStep::Pause => {
+                special_events.push(SpecialEvent::Pause);
+                return Ok(special_events); // simulate actually pausing
+            }
         }
     }
 }
@@ -223,6 +228,7 @@ fn test_proj_watchers() {
 
         let mapped = events.iter().map(|x| match x {
             SpecialEvent::Watcher { create, watcher } => (*create, watcher.name.as_str()),
+            _ => panic!("{x:?}"),
         }).collect::<Vec<_>>();
 
         let expected = [
@@ -447,6 +453,20 @@ fn test_proj_broadcast_to() {
             "turtle 1", "turtle 2", "duck 1", "duck 2", "---",
         ])).unwrap();
         assert_values_eq(&global_context.globals.lookup("log").unwrap().get().clone(), &expected, 1e-20, "log");
+    });
+}
+
+#[test]
+fn test_proj_pause() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/pause.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        let expected = Value::from_json(mc, json!("5")).unwrap();
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 1e-20, "res");
     });
 }
 

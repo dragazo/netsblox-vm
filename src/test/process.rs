@@ -57,6 +57,7 @@ fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(Mu
                 Ok(ProcessStep::Terminate { result }) => break result,
                 Ok(ProcessStep::Broadcast { .. }) => panic!("proc tests should not broadcast"),
                 Ok(ProcessStep::Watcher { .. }) => panic!("proc tests should not use watchers"),
+                Ok(ProcessStep::Pause) => panic!("proc tests should not pause"),
                 Err(e) => return and_then(mc, env, Err(e)),
             }
         };

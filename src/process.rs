@@ -122,6 +122,9 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// In either case, it is up the handler of this step mode to deduplicate watchers to the same variable, if needed.
     /// The existence of a watcher is invisible to a process, so it is perfectly valid for implementors to simply ignore all watcher requests.
     Watcher { create: bool, watcher: Watcher<'gc, C, S> },
+    /// The process has requested to pause execution of the (entire) project.
+    /// This can be useful for student debugging (similar to breakpoints), but can be ignored by the executor if desired.
+    Pause,
 }
 
 /// An entry in the call stack of a [`Process`].
@@ -818,6 +821,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 };
                 self.pos = aft_pos;
                 return Ok(ProcessStep::Watcher { create, watcher });
+            }
+            Instruction::Pause => {
+                self.pos = aft_pos;
+                return Ok(ProcessStep::Pause);
             }
 
             Instruction::Jump { to } => self.pos = to,
