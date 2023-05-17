@@ -36,7 +36,7 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
 
         let mut proc = Process::new(glob, entity, main.1);
         assert!(!proc.is_running());
-        proc.initialize(Default::default(), None, None);
+        proc.initialize(ProcContext { locals: Default::default(), barrier: None, reply_key: None, local_message: None });
         assert!(proc.is_running());
 
         Env { glob, proc: GcCell::allocate(mc, proc) }
@@ -97,7 +97,7 @@ fn test_proc_sum_123n() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
-            env.proc.write(mc).initialize(locals, None, None);
+            env.proc.write(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         });
         run_till_term(&mut env, |mc, _, res| {
             let expect = Value::from_json(mc, expect).unwrap();
@@ -120,7 +120,7 @@ fn test_proc_recursive_factorial() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
-            env.proc.write(mc).initialize(locals, None, None);
+            env.proc.write(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         });
         run_till_term(&mut env, |mc, _, res| {
             let expect = Value::from_json(mc, expect).unwrap();
@@ -230,7 +230,7 @@ fn test_proc_sieve_of_eratosthenes() {
 
         let mut proc = env.proc.write(mc);
         assert!(proc.is_running());
-        proc.initialize(locals, None, None);
+        proc.initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         assert!(proc.is_running());
     });
 
@@ -393,7 +393,7 @@ fn test_proc_warp_yields() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("mode", Shared::Unique(Number::new(mode as f64).unwrap().into()));
-            env.proc.write(mc).initialize(locals, None, None);
+            env.proc.write(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         });
 
         run_till_term(&mut env, |mc, env, res| {
@@ -502,7 +502,7 @@ fn test_proc_rpc_call_basic() {
             let mut locals = SymbolTable::default();
             locals.redefine_or_define("lat", Shared::Unique(Number::new(lat).unwrap().into()));
             locals.redefine_or_define("long", Shared::Unique(Number::new(long).unwrap().into()));
-            env.proc.write(mc).initialize(locals, None, None);
+            env.proc.write(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         });
         run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
             Value::String(ret) => assert_eq!(&*ret, city),

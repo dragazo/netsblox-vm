@@ -164,6 +164,15 @@ enum RequestAction {
     Rpc, Syscall, Input, Push,
 }
 
+#[derive(Collect)]
+#[collect(no_drop, bound = "")]
+pub struct ProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
+                               pub locals: SymbolTable<'gc, C, S>,
+    #[collect(require_static)] pub barrier: Option<Barrier>,
+    #[collect(require_static)] pub reply_key: Option<S::InternReplyKey>,
+    #[collect(require_static)] pub local_message: Option<String>,
+}
+
 /// A [`ByteCode`] execution primitive.
 /// 
 /// A [`Process`] is a self-contained thread of execution.
@@ -186,6 +195,7 @@ pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
                                last_syscall_error: Option<Value<'gc, C, S>>,
                                last_rpc_error: Option<Value<'gc, C, S>>,
                                last_answer: Option<Value<'gc, C, S>>,
+                               last_message: Option<Value<'gc, C, S>>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity` and `system`.
@@ -216,6 +226,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             last_syscall_error: None,
             last_rpc_error: None,
             last_answer: None,
+            last_message: None,
         }
     }
     /// Checks if the process is currently running.
@@ -238,14 +249,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// A [`Barrier`] may also be set, which will be destroyed upon termination, either due to completion or an error.
     /// 
     /// Any previous process state is wiped when performing this action.
-    pub fn initialize(&mut self, locals: SymbolTable<'gc, C, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>) {
+    pub fn initialize(&mut self, context: ProcContext<'gc, C, S>) {
         self.pos = self.start_pos;
         self.running = true;
-        self.barrier = barrier;
-        self.reply_key = reply_key;
+        self.barrier = context.barrier;
+        self.reply_key = context.reply_key;
         self.warp_counter = 0;
         self.call_stack.drain(1..);
-        self.call_stack[0].locals = locals;
+        self.call_stack[0].locals = context.locals;
         self.value_stack.clear();
         self.handler_stack.clear();
         self.meta_stack.clear();
@@ -253,6 +264,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         self.last_syscall_error = None;
         self.last_rpc_error = None;
         self.last_answer = None;
+        self.last_message = context.local_message.map(|x| Rc::new(x).into());
     }
     /// Executes a single bytecode instruction.
     /// The return value can be used to determine what additional effects the script has requested,
@@ -981,7 +993,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(self.last_syscall_error.clone().unwrap_or_else(|| empty_string().into()));
                 self.pos = aft_pos;
             }
-            Instruction::Broadcast { wait, target } => {
+            Instruction::SendLocalMessage { wait, target } => {
                 let targets = match target {
                     false => None,
                     true => Some(match self.value_stack.pop().unwrap() {
@@ -1002,6 +1014,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     }
                 };
                 return Ok(ProcessStep::Broadcast { msg_type, barrier, targets });
+            }
+            Instruction::PushLocalMessage => {
+                self.value_stack.push(self.last_message.clone().unwrap_or_else(|| empty_string().into()));
+                self.pos = aft_pos;
             }
             Instruction::Print { style } => {
                 let value = self.value_stack.pop().unwrap();

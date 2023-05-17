@@ -91,27 +91,19 @@ pub enum ProjectStep<'gc, C: CustomTypes<S>, S: System<C>> {
 
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
-struct ContextEntry<'gc, C: CustomTypes<S>, S: System<C>> {
-                               locals: SymbolTable<'gc, C, S>,
-    #[collect(require_static)] barrier: Option<Barrier>,
-    #[collect(require_static)] reply_key: Option<S::InternReplyKey>,
-}
-
-#[derive(Collect)]
-#[collect(no_drop, bound = "")]
 struct Script<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] event: Event,
     #[collect(require_static)] start_pos: usize,
                                entity: GcCell<'gc, Entity<'gc, C, S>>,
     #[collect(require_static)] process: Option<ProcessKey>,
-                               context_queue: VecDeque<ContextEntry<'gc, C, S>>,
+                               context_queue: VecDeque<ProcContext<'gc, C, S>>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Script<'gc, C, S> {
     fn consume_context(&mut self, state: &mut State<'gc, C, S>) {
         let process = self.process.and_then(|key| Some((key, state.processes.get_mut(key)?)));
         if process.as_ref().map(|x| x.1.is_running()).unwrap_or(false) { return }
 
-        let ContextEntry { locals, barrier, reply_key } = match self.context_queue.pop_front() {
+        let context = match self.context_queue.pop_front() {
             Some(x) => x,
             None => return,
         };
@@ -121,12 +113,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Script<'gc, C, S> {
                 debug_assert!(!state.process_queue.contains(&key));
                 debug_assert_eq!(self.process, Some(key));
 
-                process.initialize(locals, barrier, reply_key);
+                process.initialize(context);
                 state.process_queue.push_back(key);
             }
             None => {
                 let mut process = Process::new(state.global_context, self.entity, self.start_pos);
-                process.initialize(locals, barrier, reply_key);
+                process.initialize(context);
                 let key = state.processes.insert(process);
                 state.process_queue.push_back(key);
                 self.process = Some(key);
@@ -139,8 +131,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Script<'gc, C, S> {
         }
         self.context_queue.clear();
     }
-    fn schedule(&mut self, state: &mut State<'gc, C, S>, locals: SymbolTable<'gc, C, S>, barrier: Option<Barrier>, reply_key: Option<S::InternReplyKey>, max_queue: usize) {
-        self.context_queue.push_back(ContextEntry { locals, barrier, reply_key });
+    fn schedule(&mut self, state: &mut State<'gc, C, S>, context: ProcContext<'gc, C, S>, max_queue: usize) {
+        self.context_queue.push_back(context);
         self.consume_context(state);
         if self.context_queue.len() > max_queue {
             self.context_queue.pop_back();
@@ -205,7 +197,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                 for script in self.scripts.iter_mut() {
                     if let Event::OnFlag = &script.event {
                         script.stop_all(&mut self.state);
-                        script.schedule(&mut self.state, Default::default(), None, None, 0);
+                        script.schedule(&mut self.state, ProcContext { locals: Default::default(), barrier: None, reply_key: None, local_message: None }, 0);
                     }
                 }
             }
@@ -217,7 +209,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                 for script in self.scripts.iter_mut() {
                     if let Event::OnKey { key_filter } = &script.event {
                         if key_filter.map(|x| x == input_key).unwrap_or(true) {
-                            script.schedule(&mut self.state, Default::default(), None, None, 0);
+                            script.schedule(&mut self.state, ProcContext { locals: Default::default(), barrier: None, reply_key: None, local_message: None }, 0);
                         }
                     }
                 }
@@ -232,13 +224,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
             for script in self.scripts.iter_mut() {
                 if let Event::NetworkMessage { msg_type: script_msg_type, fields } = &script.event {
                     if msg_type == *script_msg_type {
-                        let mut context = SymbolTable::default();
+                        let mut locals = SymbolTable::default();
                         for field in fields.iter() {
-                            context.redefine_or_define(field,
+                            locals.redefine_or_define(field,
                                 values.get(field).and_then(|x| Value::from_json(mc, x.clone()).ok())
                                 .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
                         }
-                        script.schedule(&mut self.state, context, None, reply_key.clone(), usize::MAX);
+                        script.schedule(&mut self.state, ProcContext { locals, barrier: None, reply_key: reply_key.clone(), local_message: None }, usize::MAX);
                     }
                 }
             }
@@ -277,9 +269,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                             }
                         }
                         if let Event::LocalMessage { msg_type: recv_type } = &script.event {
-                            if *recv_type == *msg_type {
+                            if recv_type.as_ref().map(|x| *x == *msg_type).unwrap_or(true) {
                                 script.stop_all(&mut self.state);
-                                script.schedule(&mut self.state, Default::default(), barrier.clone(), None, 0);
+                                script.schedule(&mut self.state, ProcContext { locals: Default::default(), barrier: barrier.clone(), reply_key: None, local_message: Some(msg_type.clone()) }, 0);
                             }
                         }
                     }

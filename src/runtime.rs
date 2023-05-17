@@ -588,8 +588,8 @@ pub enum KeyCode {
 pub enum Event {
     /// Fire when a green flag click event is issued.
     OnFlag,
-    /// Fire when a message is received locally (Control message blocks).
-    LocalMessage { msg_type: String },
+    /// Fire when a message is received locally (Control message blocks). `None` is used to denote any message type.
+    LocalMessage { msg_type: Option<String> },
     /// Fire when a message is received over the network (Network message blocks).
     NetworkMessage { msg_type: String, fields: Vec<String> },
     /// Fire when a key is pressed. [`None`] is used to denote any key press.

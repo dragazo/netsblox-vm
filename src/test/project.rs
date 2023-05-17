@@ -457,6 +457,51 @@ fn test_proj_broadcast_to() {
 }
 
 #[test]
+fn test_proj_any_msg() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/any-msg.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        let expected = Value::from_json(mc, json!([
+            ["initial", ""],
+            ["dog msg 1", "msg 1"],
+            ["dog any", "msg 1"],
+            ["cat msg 1", "msg 1"],
+            ["cat any", "msg 1"],
+            ["horse msg 1", "msg 1"],
+            ["horse any", "msg 1"],
+            "---",
+            ["dog msg 2", "msg 2"],
+            ["dog any", "msg 2"],
+            ["cat msg 2", "msg 2"],
+            ["cat any", "msg 2"],
+            ["horse msg 2", "msg 2"],
+            ["horse any", "msg 2"],
+            "---",
+            ["dog any", "msg 3"],
+            ["cat any", "msg 3"],
+            ["horse any", "msg 3"],
+            "---",
+            ["cat msg 1", "msg 1"],
+            ["cat any", "msg 1"],
+            "---",
+            ["dog msg 2", "msg 2"],
+            ["dog any", "msg 2"],
+            "---",
+            ["horse any", "msg 3"],
+            "---",
+            ["dog any", "msg 3"],
+            ["horse any", "msg 3"],
+            "---",
+        ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("log").unwrap().get().clone(), &expected, 1e-20, "log");
+    });
+}
+
+#[test]
 fn test_proj_pause() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/pause.xml"), system);
