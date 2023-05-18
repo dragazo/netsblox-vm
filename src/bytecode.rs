@@ -1362,7 +1362,7 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.append_expr(target, entity)?;
                 self.ins.push(Instruction::SendNetworkMessage { msg_type, values: values.len(), expect_reply: true }.into());
             }
-            ast::ExprKind::Closure { params, captures, stmts } => {
+            ast::ExprKind::Closure { kind: _, params, captures, stmts } => {
                 let closure_hole_pos = self.ins.len();
                 self.ins.push(InternalInstruction::Illegal);
                 self.closure_holes.push_back((closure_hole_pos, params, captures, stmts, entity));

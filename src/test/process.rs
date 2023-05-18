@@ -1679,3 +1679,26 @@ fn test_proc_rpc_error() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "rpc error");
     });
 }
+
+#[test]
+fn test_proc_c_rings() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/c-rings.xml"),
+        methods = "",
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            "foo 1", "foo 1", "foo 1", "foo 1", "foo 1", "foo 1", "foo 1", "foo 1", "foo 1", "---",
+            "foo 2", "foo 2", "foo 2", "foo 2", "---",
+            "bar 1", "bar 1", "bar 1", "bar 1", "bar 1", "bar 1", "bar 1", "bar 1", "---",
+            "bar 1", "---",
+            "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "---",
+            "bar 2", "---",
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "c-rings");
+    });
+}
