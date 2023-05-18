@@ -502,6 +502,44 @@ fn test_proj_any_msg() {
 }
 
 #[test]
+fn test_proj_launch() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/launch.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        let expected = Value::from_json(mc, json!([
+            ["start", 0],
+            ["run", 0.05],
+            ["run", 0.1],
+            ["run", 0.15],
+            ["run", 0.2],
+            ["run", 0.25],
+            ["run", 0.3],
+            ["run", 0.35],
+            ["run", 0.4],
+            ["run", 0.45],
+            ["run", 0.5],
+            ["mid", 0.5],
+            ["done", 0.5],
+            ["launch", 0.55],
+            ["launch", 0.55],
+            ["launch", 0.55],
+            ["launch", 0.55],
+            ["launch", 0.55],
+            ["launch", 0.55],
+            ["launch", 0.55],
+            ["launch", 0.55],
+            ["launch", 0.55],
+            ["launch", 0.55],
+        ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 0.005, "res");
+    });
+}
+
+#[test]
 fn test_proj_pause() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/pause.xml"), system);

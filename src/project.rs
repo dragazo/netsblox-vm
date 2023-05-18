@@ -261,6 +261,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     self.state.process_queue.push_front(proc_key);
                     ProjectStep::Pause
                 }
+                ProcessStep::Fork { pos, locals, entity } => {
+                    let mut proc = Process::new(self.state.global_context, entity, pos);
+                    proc.initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
+                    let fork_proc_key = self.state.processes.insert(proc);
+                    self.state.process_queue.push_back(fork_proc_key); // forked process starts at end of exec queue
+                    self.state.process_queue.push_front(proc_key); // keep executing the same process as before
+                    ProjectStep::Normal
+                }
                 ProcessStep::Broadcast { msg_type, barrier, targets } => {
                     for script in self.scripts.iter_mut() {
                         if let Some(targets) = &targets {

@@ -122,6 +122,8 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// In either case, it is up the handler of this step mode to deduplicate watchers to the same variable, if needed.
     /// The existence of a watcher is invisible to a process, so it is perfectly valid for implementors to simply ignore all watcher requests.
     Watcher { create: bool, watcher: Watcher<'gc, C, S> },
+    /// The process has requested to fork a new process that starts with the given parameters.
+    Fork { pos: usize, locals: SymbolTable<'gc, C, S>, entity: GcCell<'gc, Entity<'gc, C, S>> },
     /// The process has requested to pause execution of the (entire) project.
     /// This can be useful for student debugging (similar to breakpoints), but can be ignored by the executor if desired.
     Pause,
@@ -265,6 +267,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         self.last_rpc_error = None;
         self.last_answer = None;
         self.last_message = context.local_message.map(|x| Rc::new(x).into());
+
+        debug_assert_eq!(self.call_stack.len(), 1);
     }
     /// Executes a single bytecode instruction.
     /// The return value can be used to determine what additional effects the script has requested,
@@ -440,6 +444,25 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     MaybeAsync::Sync(res) => process_request!(res, $action, $aft_pos),
                 }
             }}
+        }
+
+        fn prep_call_closure<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, value_stack: &mut Vec<Value<'gc, C, S>>, args: usize) -> Result<(usize, SymbolTable<'gc, C, S>), ErrorCause<C, S>> {
+            let mut values = value_stack.drain(value_stack.len() - (args + 1)..);
+            let closure = values.next().unwrap().as_closure()?;
+            let mut closure = closure.write(mc);
+            if closure.params.len() != args {
+                return Err(ErrorCause::ClosureArgCount { expected: closure.params.len(), got: args });
+            }
+
+            let mut locals = SymbolTable::default();
+            for (k, v) in closure.captures.iter_mut() {
+                locals.redefine_or_define(k, v.alias(mc));
+            }
+            for (var, value) in iter::zip(&closure.params, values) {
+                locals.redefine_or_define(var, value.into());
+            }
+
+            Ok((closure.pos, locals))
         }
 
         let (ins, aft_pos) = Instruction::read(&global_context.bytecode.code, &global_context.bytecode.data, self.pos);
@@ -884,21 +907,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::CallClosure { new_entity, args } => {
-                let mut values = self.value_stack.drain(self.value_stack.len() - (args + 1)..);
-                let closure = values.next().unwrap().as_closure()?;
-                let mut closure = closure.write(mc);
-                if closure.params.len() != args {
-                    return Err(ErrorCause::ClosureArgCount { expected: closure.params.len(), got: args });
-                }
-
-                let mut locals = SymbolTable::default();
-                for (k, v) in closure.captures.iter_mut() {
-                    locals.redefine_or_define(k, v.alias(mc));
-                }
-                for (var, value) in iter::zip(&closure.params, values) {
-                    locals.redefine_or_define(var, value.into());
-                }
-
+                let (closure_pos, locals) = prep_call_closure(mc, &mut self.value_stack, args)?;
                 let entity = match new_entity {
                     false => context_entity,
                     true => self.value_stack.pop().unwrap().as_entity()?,
@@ -914,7 +923,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     locals,
                     entity,
                 });
-                self.pos = closure.pos;
+                self.pos = closure_pos;
+            }
+            Instruction::ForkClosure { args } => {
+                let (closure_pos, locals) = prep_call_closure(mc, &mut self.value_stack, args)?;
+                self.pos = aft_pos;
+                return Ok(ProcessStep::Fork { pos: closure_pos, locals, entity: context_entity });
             }
             Instruction::Return => {
                 let CallStackEntry { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, meta_stack_size, .. } = self.call_stack.last().unwrap();
