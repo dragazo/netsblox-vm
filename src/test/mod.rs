@@ -32,7 +32,7 @@ impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
     fn from(kind: EntityKind<'_, '_, C, StdSystem<C>>) -> Self {
         match kind {
             EntityKind::Stage { props } | EntityKind::Sprite { props } => EntityState { props },
-            EntityKind::SpriteClone { parent } => EntityState { props: parent.state.props },
+            EntityKind::Clone { parent } => EntityState { props: parent.state.props },
         }
     }
 }

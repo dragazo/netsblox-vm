@@ -92,8 +92,7 @@ pub enum ProjectStep<'gc, C: CustomTypes<S>, S: System<C>> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 struct Script<'gc, C: CustomTypes<S>, S: System<C>> {
-    #[collect(require_static)] event: Event,
-    #[collect(require_static)] start_pos: usize,
+    #[collect(require_static)] event: Rc<(Event, usize)>, // event and bytecode start pos
                                entity: GcCell<'gc, Entity<'gc, C, S>>,
     #[collect(require_static)] process: Option<ProcessKey>,
                                context_queue: VecDeque<ProcContext<'gc, C, S>>,
@@ -117,7 +116,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Script<'gc, C, S> {
                 state.process_queue.push_back(key);
             }
             None => {
-                let mut process = Process::new(state.global_context, self.entity, self.start_pos);
+                let mut process = Process::new(state.global_context, self.entity, self.event.1);
                 process.initialize(context);
                 let key = state.processes.insert(process);
                 state.process_queue.push_back(key);
@@ -180,7 +179,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
     pub fn add_script(&mut self, start_pos: usize, entity: GcCell<'gc, Entity<'gc, C, S>>, event: Option<Event>) {
         match event {
             Some(event) => self.scripts.push(Script {
-                start_pos, event, entity,
+                event: Rc::new((event, start_pos)),
+                entity,
                 process: None,
                 context_queue: Default::default(),
             }),
@@ -195,9 +195,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
         match input {
             Input::Start => {
                 for script in self.scripts.iter_mut() {
-                    if let Event::OnFlag = &script.event {
+                    if let Event::OnFlag = &script.event.0 {
                         script.stop_all(&mut self.state);
-                        script.schedule(&mut self.state, ProcContext { locals: Default::default(), barrier: None, reply_key: None, local_message: None }, 0);
+                        script.schedule(&mut self.state, Default::default(), 0);
                     }
                 }
             }
@@ -207,9 +207,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
             }
             Input::KeyDown(input_key) => {
                 for script in self.scripts.iter_mut() {
-                    if let Event::OnKey { key_filter } = &script.event {
+                    if let Event::OnKey { key_filter } = &script.event.0 {
                         if key_filter.map(|x| x == input_key).unwrap_or(true) {
-                            script.schedule(&mut self.state, ProcContext { locals: Default::default(), barrier: None, reply_key: None, local_message: None }, 0);
+                            script.schedule(&mut self.state, Default::default(), 0);
                         }
                     }
                 }
@@ -222,7 +222,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
         if let Some(IncomingMessage { msg_type, values, reply_key }) = msg {
             let values: BTreeMap<_,_> = values.into_iter().collect();
             for script in self.scripts.iter_mut() {
-                if let Event::NetworkMessage { msg_type: script_msg_type, fields } = &script.event {
+                if let Event::NetworkMessage { msg_type: script_msg_type, fields } = &script.event.0 {
                     if msg_type == *script_msg_type {
                         let mut locals = SymbolTable::default();
                         for field in fields.iter() {
@@ -269,15 +269,37 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     self.state.process_queue.push_front(proc_key); // keep executing the same process as before
                     ProjectStep::Normal
                 }
+                ProcessStep::CreatedClone { new_entity } => {
+                    let root = new_entity.read().root.unwrap();
+                    let mut new_scripts = vec![];
+                    for script in self.scripts.iter() {
+                        if GcCell::ptr_eq(script.entity, root) {
+                            new_scripts.push(Script {
+                                event: script.event.clone(),
+                                entity: new_entity,
+                                process: None,
+                                context_queue: Default::default(),
+                            });
+                        }
+                    }
+                    for script in new_scripts.iter_mut() {
+                        if let Event::OnClone = &script.event.0 {
+                            script.schedule(&mut self.state, ProcContext::default(), 0);
+                        }
+                    }
+                    self.scripts.extend(new_scripts);
+                    self.state.process_queue.push_front(proc_key); // keep executing the same process as before
+                    ProjectStep::Normal
+                }
                 ProcessStep::Broadcast { msg_type, barrier, targets } => {
                     for script in self.scripts.iter_mut() {
-                        if let Some(targets) = &targets {
-                            if !targets.iter().any(|&target| GcCell::ptr_eq(script.entity, target)) {
-                                continue
-                            }
-                        }
-                        if let Event::LocalMessage { msg_type: recv_type } = &script.event {
+                        if let Event::LocalMessage { msg_type: recv_type } = &script.event.0 {
                             if recv_type.as_ref().map(|x| *x == *msg_type).unwrap_or(true) {
+                                if let Some(targets) = &targets {
+                                    if !targets.iter().any(|&target| GcCell::ptr_eq(script.entity, target)) {
+                                        continue
+                                    }
+                                }
                                 script.stop_all(&mut self.state);
                                 script.schedule(&mut self.state, ProcContext { locals: Default::default(), barrier: barrier.clone(), reply_key: None, local_message: Some(msg_type.clone()) }, 0);
                             }

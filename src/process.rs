@@ -61,7 +61,7 @@ pub struct ErrorSummary {
 impl ErrorSummary {
     pub fn extract<C: CustomTypes<S>, S: System<C>>(error: &ExecError<C, S>, process: &Process<C, S>, locations: &Locations) -> Self {
         let raw_entity = process.call_stack.last().unwrap().entity;
-        let entity = raw_entity.read().name.clone();
+        let entity = raw_entity.read().name.as_str().to_owned();
         let cause = format!("{:?}", error.cause);
 
         fn summarize_symbols<C: CustomTypes<S>, S: System<C>>(symbols: &SymbolTable<'_, C, S>) -> Vec<VarEntry> {
@@ -124,6 +124,10 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     Watcher { create: bool, watcher: Watcher<'gc, C, S> },
     /// The process has requested to fork a new process that starts with the given parameters.
     Fork { pos: usize, locals: SymbolTable<'gc, C, S>, entity: GcCell<'gc, Entity<'gc, C, S>> },
+    /// The process has created a new clone of an existing entity.
+    /// The clone has already been created, so this is just an informational flag for any logging or other initialization logic.
+    /// Projects use this event to bind new scripts to the clone, which is an aspect of projects but not processes or entities.
+    CreatedClone { new_entity: GcCell<'gc, Entity<'gc, C, S>> },
     /// The process has requested to pause execution of the (entire) project.
     /// This can be useful for student debugging (similar to breakpoints), but can be ignored by the executor if desired.
     Pause,
@@ -166,8 +170,9 @@ enum RequestAction {
     Rpc, Syscall, Input, Push,
 }
 
-#[derive(Collect)]
+#[derive(Collect, Educe)]
 #[collect(no_drop, bound = "")]
+#[educe(Clone, Default)]
 pub struct ProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
                                pub locals: SymbolTable<'gc, C, S>,
     #[collect(require_static)] pub barrier: Option<Barrier>,
@@ -511,6 +516,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     self.pos = aft_pos;
                 }
                 None => return Err(ErrorCause::UndefinedEntity { name: name.into() }),
+            }
+            Instruction::PushSelf => {
+                self.value_stack.push(context_entity.into());
+                self.pos = aft_pos;
             }
             Instruction::PopValue => {
                 self.value_stack.pop().unwrap();
@@ -1156,6 +1165,23 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     }
                     None => self.pos = aft_pos,
                 }
+            }
+            Instruction::Clone => {
+                drop(entity); // drop our mutable borrow from earlier (in case target is self)
+                let target_cell = self.value_stack.pop().unwrap().as_entity()?;
+                let target = target_cell.read();
+                let new_entity = GcCell::allocate(mc, Entity {
+                    name: target.name.clone(),
+                    costume_list: target.costume_list.clone(),
+                    costume: target.costume.clone(),
+                    state: C::EntityState::from(EntityKind::Clone { parent: &*target }),
+                    alive: true,
+                    root: Some(target.root.unwrap_or(target_cell)),
+                    fields: target.fields.clone(),
+                });
+                self.value_stack.push(new_entity.into());
+                self.pos = aft_pos;
+                return Ok(ProcessStep::CreatedClone { new_entity });
             }
             Instruction::ClearEffects => {
                 perform_command!(Command::ClearEffects, aft_pos);

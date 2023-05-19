@@ -540,6 +540,22 @@ fn test_proj_launch() {
 }
 
 #[test]
+fn test_proj_cloning() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let proj = get_running_project(include_str!("projects/cloning.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let global_context = proj.proj.read().get_global_context();
+        let global_context = global_context.read();
+
+        let expected = Value::from_json(mc, json!([
+            "0", 1, 2, 3, 4, 5, 6, 7, 8,
+        ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("foo").unwrap().get().clone(), &expected, 0.005, "foo");
+    });
+}
+
+#[test]
 fn test_proj_pause() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/pause.xml"), system);

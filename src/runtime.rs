@@ -588,6 +588,8 @@ pub enum KeyCode {
 pub enum Event {
     /// Fire when a green flag click event is issued.
     OnFlag,
+    /// Fire when a new clone of this entity is created.
+    OnClone,
     /// Fire when a message is received locally (Control message blocks). `None` is used to denote any message type.
     LocalMessage { msg_type: Option<String> },
     /// Fire when a message is received over the network (Network message blocks).
@@ -832,18 +834,20 @@ impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Closure<'_, C, S> {
 pub enum EntityKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     Stage { props: Properties },
     Sprite { props: Properties },
-    SpriteClone { parent: &'a Entity<'gc, C, S> },
+    Clone { parent: &'a Entity<'gc, C, S> },
 }
 
 /// Information about an entity (sprite or stage).
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
-    #[collect(require_static)] pub name: String,
-                               pub fields: SymbolTable<'gc, C, S>,
-    #[collect(require_static)] pub costume_list: Vec<(String, Rc<Vec<u8>>)>,
+    #[collect(require_static)] pub name: Rc<String>,
+    #[collect(require_static)] pub costume_list: Rc<Vec<(String, Rc<Vec<u8>>)>>,
     #[collect(require_static)] pub costume: Option<Rc<Vec<u8>>>,
     #[collect(require_static)] pub state: C::EntityState,
+    #[collect(require_static)] pub alive: bool,
+                               pub root: Option<GcCell<'gc, Entity<'gc, C, S>>>,
+                               pub fields: SymbolTable<'gc, C, S>,
 }
 impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Entity<'_, C, S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -943,6 +947,16 @@ impl<'a, T> Deref for SharedRef<'a, T> {
 #[collect(no_drop, bound = "")]
 #[educe(Default)]
 pub struct SymbolTable<'gc, C: CustomTypes<S>, S: System<C>>(BTreeMap<String, Shared<'gc, Value<'gc, C, S>>>);
+impl<'gc, C: CustomTypes<S>, S: System<C>> Clone for SymbolTable<'gc, C, S> {
+    /// Creates a shallow (non-aliasing) copy of all variables currently stored in this symbol table.
+    fn clone(&self) -> Self {
+        let mut res = SymbolTable::default();
+        for (k, v) in self.iter() {
+            res.redefine_or_define(k, Shared::Unique(v.get().clone()));
+        }
+        res
+    }
+}
 impl<'gc, C: CustomTypes<S>, S: System<C>> SymbolTable<'gc, C, S> {
     /// Sets the value of an existing variable (as if by [`Shared::set`]) or defines it if it does not exist.
     /// If the variable does not exist, creates a [`Shared::Unique`] instance for the new `value`.
@@ -1142,14 +1156,17 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
                 fields.redefine_or_define(field, Shared::Unique(get_value(value, &allocated_refs)));
             }
 
-            let mut costume_list = Vec::with_capacity(entity_info.costumes.len());
-            for (name, value) in entity_info.costumes.iter() {
-                let image = match get_value(value, &allocated_refs) {
-                    Value::Image(x) => x.clone(),
-                    _ => unreachable!(),
-                };
-                costume_list.push((name.clone(), image));
-            }
+            let costume_list = {
+                let mut res = Vec::with_capacity(entity_info.costumes.len());
+                for (name, value) in entity_info.costumes.iter() {
+                    let image = match get_value(value, &allocated_refs) {
+                        Value::Image(x) => x.clone(),
+                        _ => unreachable!(),
+                    };
+                    res.push((name.clone(), image));
+                }
+                Rc::new(res)
+            };
 
             let costume = entity_info.active_costume.and_then(|x| costume_list.get(x)).map(|x| x.1.clone());
 
@@ -1167,10 +1184,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             props.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
 
             let kind = if i == 0 { EntityKind::Stage { props } } else { EntityKind::Sprite { props } };
-            let name = entity_info.name.clone();
+            let name = Rc::new(entity_info.name.clone());
             let state = kind.into();
 
-            entities.insert(name.clone(), GcCell::allocate(mc, Entity { name, fields, costume_list, costume, state }));
+            entities.insert(entity_info.name.clone(), GcCell::allocate(mc, Entity { alive: true, root: None, name, fields, costume_list, costume, state }));
         }
 
         let proj_name = init_info.proj_name.clone();
