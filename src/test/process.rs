@@ -341,7 +341,7 @@ fn test_proc_lambda_local_shadow_capture() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!(["1", 0, "1"])).unwrap();
+        let expect = Value::from_json(mc, json!(["1", "1", "1"])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "local shadow capture");
     });
 }

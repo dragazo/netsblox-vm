@@ -973,6 +973,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> SymbolTable<'gc, C, S> {
     pub fn redefine_or_define(&mut self, var: &str, value: Shared<'gc, Value<'gc, C, S>>) {
         self.0.insert(var.to_owned(), value);
     }
+    /// Defines a variable with an initial value if it does not already exist in this symbol table.
+    /// If a variable with the given name already exists, this is a no-op.
+    pub fn define_if_undefined<F: FnOnce() -> Shared<'gc, Value<'gc, C, S>>>(&mut self, var: &str, f: F) {
+        if !self.0.contains_key(var) {
+            self.0.insert(var.to_owned(), f());
+        }
+    }
     /// Looks up the given variable in the symbol table.
     /// If a variable with the given name does not exist, returns [`None`].
     pub fn lookup(&self, var: &str) -> Option<&Shared<'gc, Value<'gc, C, S>>> {
