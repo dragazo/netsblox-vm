@@ -1671,6 +1671,37 @@ fn test_proc_string_cmp() {
 }
 
 #[test]
+fn test_proc_variadic_params() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/variadic-params.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            [],
+            ["5"],
+            ["5", "g"],
+            ["5", "g", "q"],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [[], []],
+            [["6"], []],
+            [[], ["9"]],
+            [["34"], ["gf"]],
+            [["34", "1h"], ["gf"]],
+            [[], ["re", "ds", "w"]],
+            [["3", "1"], ["re", "ds", "w"]],
+            [["3", "1"], [1, 2, 3, 4]],
+            [["gf", "fd", "", "d"], [1, 2, 3, 4]],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic params");
+    });
+}
+
+#[test]
 fn test_proc_try_catch_throw() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),

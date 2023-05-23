@@ -1199,22 +1199,30 @@ impl<'a> ByteCodeBuilder<'a> {
             }
         })
     }
+    fn append_value(&mut self, value: &'a ast::Value, entity: Option<&'a ast::Entity>) -> Result<(), CompileError<'a>> {
+        match value {
+            ast::Value::Number(v) => self.ins.push(Instruction::PushNumber { value: *v }.into()),
+            ast::Value::String(v) => self.ins.push(Instruction::PushString { value: v }.into()),
+            ast::Value::Constant(v) => self.ins.push(Instruction::PushNumber { value: match v {
+                ast::Constant::Pi => std::f64::consts::PI,
+                ast::Constant::E => std::f64::consts::E,
+            }}.into()),
+            ast::Value::Bool(v) => self.ins.push(Instruction::PushBool { value: *v }.into()),
+            ast::Value::List(values, _) => {
+                println!("values: {values:?}");
+                for v in values {
+                    self.append_value(v, entity)?;
+                }
+                self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Fixed(values.len()) }.into());
+            }
+            ast::Value::Image(_) => unreachable!(), // Snap! doesn't have image literals
+            ast::Value::Ref(_) => unreachable!(), // Snap! doesn't have reference literals
+        }
+        Ok(())
+    }
     fn append_expr(&mut self, expr: &'a ast::Expr, entity: Option<&'a ast::Entity>) -> Result<(), CompileError<'a>> {
         match &expr.kind {
-            ast::ExprKind::Value(v) => self.ins.push(match v {
-                ast::Value::Number(v) => Instruction::PushNumber { value: *v },
-                ast::Value::String(v) => Instruction::PushString { value: v },
-                ast::Value::Constant(v) => Instruction::PushNumber {
-                    value: match v {
-                        ast::Constant::Pi => std::f64::consts::PI,
-                        ast::Constant::E => std::f64::consts::E,
-                    }
-                },
-                ast::Value::Bool(v) => Instruction::PushBool { value: *v },
-                ast::Value::Image(_) => unreachable!(), // Snap! doesn't have image literals
-                ast::Value::List(_, _) => unreachable!(), // Snap! doesn't have list literals
-                ast::Value::Ref(_) => unreachable!(), // Snap! doesn't have reference literals
-            }.into()),
+            ast::ExprKind::Value(v) => self.append_value(v, entity)?,
             ast::ExprKind::Variable { var } => self.ins.push(Instruction::PushVariable { var: &var.trans_name }.into()),
             ast::ExprKind::Atan2 { y, x } => self.append_simple_ins(entity, &[y, x], BinaryOp::Atan2.into())?,
             ast::ExprKind::Sub { left, right } => self.append_simple_ins(entity, &[left, right], BinaryOp::Sub.into())?,
