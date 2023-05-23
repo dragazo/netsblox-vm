@@ -42,6 +42,8 @@
         "toks",
         "tungstenite",
         "unicase",
+        "upvar",
+        "upvars",
         "varargs"
     ]
 }

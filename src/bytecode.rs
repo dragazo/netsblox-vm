@@ -247,6 +247,10 @@ pub(crate) enum Instruction<'a> {
     /// Note that this is not equivalent to assigning a value of zero to the variable due to the potential issue of [`Shared::Aliased`].
     /// A new, [`Shared::Unique`] local variable must be created.
     DeclareLocal { var: &'a str },
+    /// Initializes an upvar of the given name.
+    /// This should be called by a custom block, which should supply the name of its upvar parameter.
+    /// Upvar parameters are passed the name of the variable in the outer scope to link to (which this instruction does).
+    InitUpvar { var: &'a str },
     /// Consumes 1 value from the value stack and assigns it to the specified variable.
     Assign { var: &'a str },
     /// Consumes 1 value, `b` from the value stack, fetches the variable `a`, and assigns it `f(a, b)`.
@@ -703,78 +707,79 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             64 => read_prefixed!(Instruction::UnaryOp {} : op),
 
             65 => read_prefixed!(Instruction::DeclareLocal {} : var),
-            66 => read_prefixed!(Instruction::Assign {} : var),
+            66 => read_prefixed!(Instruction::InitUpvar {} : var),
+            67 => read_prefixed!(Instruction::Assign {} : var),
 
-            67 => read_prefixed!(Instruction::BinaryOpAssign { op: BinaryOp::Add, } : var),
-            68 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
+            68 => read_prefixed!(Instruction::BinaryOpAssign { op: BinaryOp::Add, } : var),
+            69 => read_prefixed!(Instruction::BinaryOpAssign {} : var, op),
 
-            69 => read_prefixed!(Instruction::Watcher {} : create, var),
-            70 => read_prefixed!(Instruction::Pause),
+            70 => read_prefixed!(Instruction::Watcher {} : create, var),
+            71 => read_prefixed!(Instruction::Pause),
 
-            71 => read_prefixed!(Instruction::Jump {} : to),
-            72 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
-            73 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
+            72 => read_prefixed!(Instruction::Jump {} : to),
+            73 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
+            74 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
 
-            74 => read_prefixed!(Instruction::MetaPush {} : value),
+            75 => read_prefixed!(Instruction::MetaPush {} : value),
 
-            75 => read_prefixed!(Instruction::Call {} : pos, params),
-            76 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
-            77 => read_prefixed!(Instruction::CallClosure { new_entity: false, } : args),
-            78 => read_prefixed!(Instruction::CallClosure { new_entity: true, } : args),
-            79 => read_prefixed!(Instruction::ForkClosure {} : args),
-            80 => read_prefixed!(Instruction::Return),
+            76 => read_prefixed!(Instruction::Call {} : pos, params),
+            77 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
+            78 => read_prefixed!(Instruction::CallClosure { new_entity: false, } : args),
+            79 => read_prefixed!(Instruction::CallClosure { new_entity: true, } : args),
+            80 => read_prefixed!(Instruction::ForkClosure {} : args),
+            81 => read_prefixed!(Instruction::Return),
 
-            81 => read_prefixed!(Instruction::PushHandler {} : pos, var),
-            82 => read_prefixed!(Instruction::PopHandler),
-            83 => read_prefixed!(Instruction::Throw),
+            82 => read_prefixed!(Instruction::PushHandler {} : pos, var),
+            83 => read_prefixed!(Instruction::PopHandler),
+            84 => read_prefixed!(Instruction::Throw),
 
-            84 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
-            85 => read_prefixed!(Instruction::PushRpcError),
+            85 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
+            86 => read_prefixed!(Instruction::PushRpcError),
 
-            86 => read_prefixed!(Instruction::Syscall {} : len),
-            87 => read_prefixed!(Instruction::PushSyscallError),
+            87 => read_prefixed!(Instruction::Syscall {} : len),
+            88 => read_prefixed!(Instruction::PushSyscallError),
 
-            88 => read_prefixed!(Instruction::SendLocalMessage { wait: false, target: false }),
-            89 => read_prefixed!(Instruction::SendLocalMessage { wait: false, target: true }),
-            90 => read_prefixed!(Instruction::SendLocalMessage { wait: true, target: false }),
-            91 => read_prefixed!(Instruction::SendLocalMessage { wait: true, target: true }),
+            89 => read_prefixed!(Instruction::SendLocalMessage { wait: false, target: false }),
+            90 => read_prefixed!(Instruction::SendLocalMessage { wait: false, target: true }),
+            91 => read_prefixed!(Instruction::SendLocalMessage { wait: true, target: false }),
+            92 => read_prefixed!(Instruction::SendLocalMessage { wait: true, target: true }),
 
-            92 => read_prefixed!(Instruction::PushLocalMessage),
+            93 => read_prefixed!(Instruction::PushLocalMessage),
 
-            93 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
-            94 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
-            95 => read_prefixed!(Instruction::Ask),
-            96 => read_prefixed!(Instruction::PushAnswer),
+            94 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
+            95 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
+            96 => read_prefixed!(Instruction::Ask),
+            97 => read_prefixed!(Instruction::PushAnswer),
 
-            97 => read_prefixed!(Instruction::ResetTimer),
-            98 => read_prefixed!(Instruction::PushTimer),
-            99 => read_prefixed!(Instruction::Sleep),
+            98 => read_prefixed!(Instruction::ResetTimer),
+            99 => read_prefixed!(Instruction::PushTimer),
+            100 => read_prefixed!(Instruction::Sleep),
 
-            100 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
-            101 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
-            102 => read_prefixed!(Instruction::SendNetworkReply),
+            101 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
+            102 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
+            103 => read_prefixed!(Instruction::SendNetworkReply),
 
-            103 => read_prefixed!(Instruction::PushProperty {} : prop),
-            104 => read_prefixed!(Instruction::SetProperty {} : prop),
-            105 => read_prefixed!(Instruction::ChangeProperty {} : prop),
+            104 => read_prefixed!(Instruction::PushProperty {} : prop),
+            105 => read_prefixed!(Instruction::SetProperty {} : prop),
+            106 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
-            106 => read_prefixed!(Instruction::PushCostume),
-            107 => read_prefixed!(Instruction::PushCostumeNumber),
-            108 => read_prefixed!(Instruction::PushCostumeList),
-            109 => read_prefixed!(Instruction::SetCostume),
-            110 => read_prefixed!(Instruction::NextCostume),
+            107 => read_prefixed!(Instruction::PushCostume),
+            108 => read_prefixed!(Instruction::PushCostumeNumber),
+            109 => read_prefixed!(Instruction::PushCostumeList),
+            110 => read_prefixed!(Instruction::SetCostume),
+            111 => read_prefixed!(Instruction::NextCostume),
 
-            111 => read_prefixed!(Instruction::Clone),
+            112 => read_prefixed!(Instruction::Clone),
 
-            112 => read_prefixed!(Instruction::ClearEffects),
+            113 => read_prefixed!(Instruction::ClearEffects),
 
-            113 => read_prefixed!(Instruction::GotoXY),
-            114 => read_prefixed!(Instruction::Goto),
+            114 => read_prefixed!(Instruction::GotoXY),
+            115 => read_prefixed!(Instruction::Goto),
 
-            115 => read_prefixed!(Instruction::PointTowardsXY),
-            116 => read_prefixed!(Instruction::PointTowards),
+            116 => read_prefixed!(Instruction::PointTowardsXY),
+            117 => read_prefixed!(Instruction::PointTowards),
 
-            117 => read_prefixed!(Instruction::Forward),
+            118 => read_prefixed!(Instruction::Forward),
 
             _ => unreachable!(),
         }
@@ -888,78 +893,79 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::UnaryOp { op } => append_prefixed!(64: op),
 
             Instruction::DeclareLocal { var } => append_prefixed!(65: move str var),
-            Instruction::Assign { var } => append_prefixed!(66: move str var),
+            Instruction::InitUpvar { var } => append_prefixed!(66: move str var),
+            Instruction::Assign { var } => append_prefixed!(67: move str var),
 
-            Instruction::BinaryOpAssign { var, op: BinaryOp::Add } => append_prefixed!(67: move str var),
-            Instruction::BinaryOpAssign { var, op } => append_prefixed!(68: move str var, op),
+            Instruction::BinaryOpAssign { var, op: BinaryOp::Add } => append_prefixed!(68: move str var),
+            Instruction::BinaryOpAssign { var, op } => append_prefixed!(69: move str var, op),
 
-            Instruction::Watcher { create, var } => append_prefixed!(69: create, move str var),
-            Instruction::Pause => append_prefixed!(70),
+            Instruction::Watcher { create, var } => append_prefixed!(70: create, move str var),
+            Instruction::Pause => append_prefixed!(71),
 
-            Instruction::Jump { to } => append_prefixed!(71: move to),
-            Instruction::ConditionalJump { to, when: false } => append_prefixed!(72: move to),
-            Instruction::ConditionalJump { to, when: true } => append_prefixed!(73: move to),
+            Instruction::Jump { to } => append_prefixed!(72: move to),
+            Instruction::ConditionalJump { to, when: false } => append_prefixed!(73: move to),
+            Instruction::ConditionalJump { to, when: true } => append_prefixed!(74: move to),
 
-            Instruction::MetaPush { value } => append_prefixed!(74: move str value),
+            Instruction::MetaPush { value } => append_prefixed!(75: move str value),
 
-            Instruction::Call { pos, params } => append_prefixed!(75: move pos, params),
-            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(76: move pos, params, captures),
-            Instruction::CallClosure { new_entity: false, args } => append_prefixed!(77: args),
-            Instruction::CallClosure { new_entity: true, args } => append_prefixed!(78: args),
-            Instruction::ForkClosure { args } => append_prefixed!(79: args),
-            Instruction::Return => append_prefixed!(80),
+            Instruction::Call { pos, params } => append_prefixed!(76: move pos, params),
+            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(77: move pos, params, captures),
+            Instruction::CallClosure { new_entity: false, args } => append_prefixed!(78: args),
+            Instruction::CallClosure { new_entity: true, args } => append_prefixed!(79: args),
+            Instruction::ForkClosure { args } => append_prefixed!(80: args),
+            Instruction::Return => append_prefixed!(81),
 
-            Instruction::PushHandler { pos, var } => append_prefixed!(81: move pos, move str var),
-            Instruction::PopHandler => append_prefixed!(82),
-            Instruction::Throw => append_prefixed!(83),
+            Instruction::PushHandler { pos, var } => append_prefixed!(82: move pos, move str var),
+            Instruction::PopHandler => append_prefixed!(83),
+            Instruction::Throw => append_prefixed!(84),
 
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(84: move str service, move str rpc, args),
-            Instruction::PushRpcError => append_prefixed!(85),
+            Instruction::CallRpc { service, rpc, args } => append_prefixed!(85: move str service, move str rpc, args),
+            Instruction::PushRpcError => append_prefixed!(86),
 
-            Instruction::Syscall { len } => append_prefixed!(86: len),
-            Instruction::PushSyscallError => append_prefixed!(87),
+            Instruction::Syscall { len } => append_prefixed!(87: len),
+            Instruction::PushSyscallError => append_prefixed!(88),
 
-            Instruction::SendLocalMessage { wait: false, target: false } => append_prefixed!(88),
-            Instruction::SendLocalMessage { wait: false, target: true } => append_prefixed!(89),
-            Instruction::SendLocalMessage { wait: true, target: false } => append_prefixed!(90),
-            Instruction::SendLocalMessage { wait: true, target: true } => append_prefixed!(91),
+            Instruction::SendLocalMessage { wait: false, target: false } => append_prefixed!(89),
+            Instruction::SendLocalMessage { wait: false, target: true } => append_prefixed!(90),
+            Instruction::SendLocalMessage { wait: true, target: false } => append_prefixed!(91),
+            Instruction::SendLocalMessage { wait: true, target: true } => append_prefixed!(92),
 
-            Instruction::PushLocalMessage => append_prefixed!(92),
+            Instruction::PushLocalMessage => append_prefixed!(93),
 
-            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(93),
-            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(94),
-            Instruction::Ask => append_prefixed!(95),
-            Instruction::PushAnswer => append_prefixed!(96),
+            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(94),
+            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(95),
+            Instruction::Ask => append_prefixed!(96),
+            Instruction::PushAnswer => append_prefixed!(97),
 
-            Instruction::ResetTimer => append_prefixed!(97),
-            Instruction::PushTimer => append_prefixed!(98),
-            Instruction::Sleep => append_prefixed!(99),
+            Instruction::ResetTimer => append_prefixed!(98),
+            Instruction::PushTimer => append_prefixed!(99),
+            Instruction::Sleep => append_prefixed!(100),
 
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(100: move str msg_type, values),
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(101: move str msg_type, values),
-            Instruction::SendNetworkReply => append_prefixed!(102),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(101: move str msg_type, values),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(102: move str msg_type, values),
+            Instruction::SendNetworkReply => append_prefixed!(103),
 
-            Instruction::PushProperty { prop } => append_prefixed!(103: prop),
-            Instruction::SetProperty { prop } => append_prefixed!(104: prop),
-            Instruction::ChangeProperty { prop } => append_prefixed!(105: prop),
+            Instruction::PushProperty { prop } => append_prefixed!(104: prop),
+            Instruction::SetProperty { prop } => append_prefixed!(105: prop),
+            Instruction::ChangeProperty { prop } => append_prefixed!(106: prop),
 
-            Instruction::PushCostume => append_prefixed!(106),
-            Instruction::PushCostumeNumber => append_prefixed!(107),
-            Instruction::PushCostumeList => append_prefixed!(108),
-            Instruction::SetCostume => append_prefixed!(109),
-            Instruction::NextCostume => append_prefixed!(110),
+            Instruction::PushCostume => append_prefixed!(107),
+            Instruction::PushCostumeNumber => append_prefixed!(108),
+            Instruction::PushCostumeList => append_prefixed!(109),
+            Instruction::SetCostume => append_prefixed!(110),
+            Instruction::NextCostume => append_prefixed!(111),
 
-            Instruction::Clone => append_prefixed!(111),
+            Instruction::Clone => append_prefixed!(112),
 
-            Instruction::ClearEffects => append_prefixed!(112),
+            Instruction::ClearEffects => append_prefixed!(113),
 
-            Instruction::GotoXY => append_prefixed!(113),
-            Instruction::Goto => append_prefixed!(114),
+            Instruction::GotoXY => append_prefixed!(114),
+            Instruction::Goto => append_prefixed!(115),
 
-            Instruction::PointTowardsXY => append_prefixed!(115),
-            Instruction::PointTowards => append_prefixed!(116),
+            Instruction::PointTowardsXY => append_prefixed!(116),
+            Instruction::PointTowards => append_prefixed!(117),
 
-            Instruction::Forward => append_prefixed!(117),
+            Instruction::Forward => append_prefixed!(118),
         }
     }
 }
@@ -1336,7 +1342,10 @@ impl<'a> ByteCodeBuilder<'a> {
 
                 self.ins.push(Instruction::ToBool.into());
             }
-            ast::ExprKind::CallFn { function, args } => {
+            ast::ExprKind::CallFn { function, args, upvars } => {
+                for upvar in upvars {
+                    self.ins.push(Instruction::DeclareLocal { var: &upvar.name }.into());
+                }
                 for arg in args {
                     self.append_expr(arg, entity)?;
                 }
@@ -1615,7 +1624,10 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.ins.push(Instruction::DeclareLocal { var: &var.trans_name }.into());
                 }
             }
-            ast::StmtKind::RunFn { function, args } => {
+            ast::StmtKind::CallFn { function, args, upvars } => {
+                for upvar in upvars {
+                    self.ins.push(Instruction::DeclareLocal { var: &upvar.name }.into());
+                }
                 for arg in args {
                     self.append_expr(arg, entity)?;
                 }
@@ -1876,7 +1888,10 @@ impl<'a> ByteCodeBuilder<'a> {
 
         Ok(())
     }
-    fn append_stmts_ret(&mut self, stmts: &'a [ast::Stmt], entity: Option<&'a ast::Entity>) -> Result<(), CompileError<'a>> {
+    fn append_stmts_ret(&mut self, upvars: &'a [ast::VariableRef], stmts: &'a [ast::Stmt], entity: Option<&'a ast::Entity>) -> Result<(), CompileError<'a>> {
+        for upvar in upvars {
+            self.ins.push(Instruction::InitUpvar { var: &upvar.name }.into());
+        }
         for stmt in stmts {
             self.append_stmt(stmt, entity)?;
         }
@@ -1890,7 +1905,7 @@ impl<'a> ByteCodeBuilder<'a> {
         let global_fn_to_info = {
             let mut res = BTreeMap::new();
             for (func, pos) in funcs.iter() {
-                res.insert(&*func.trans_name, (*pos, &*func.params));
+                res.insert(&*func.trans_name, (*pos, *func));
             }
             res
         };
@@ -1899,7 +1914,7 @@ impl<'a> ByteCodeBuilder<'a> {
             for (entity, entity_locs) in entities.iter() {
                 let mut inner = BTreeMap::new();
                 for (func, pos) in entity_locs.funcs.iter() {
-                    inner.insert(&*func.trans_name, (*pos, &*func.params));
+                    inner.insert(&*func.trans_name, (*pos, *func));
                 }
                 res.insert(*entity as *const ast::Entity, inner);
             }
@@ -1909,13 +1924,13 @@ impl<'a> ByteCodeBuilder<'a> {
         let get_ptr = |x: Option<&ast::Entity>| x.map(|x| x as *const ast::Entity).unwrap_or(std::ptr::null());
         for (hole_pos, hole_fn, hole_ent) in self.call_holes.iter() {
             let sym = &*hole_fn.trans_name;
-            let &(pos, params) = entity_fn_to_info.get(&get_ptr(*hole_ent)).and_then(|tab| tab.get(sym)).or_else(|| global_fn_to_info.get(sym)).unwrap();
+            let &(pos, fn_info) = entity_fn_to_info.get(&get_ptr(*hole_ent)).and_then(|tab| tab.get(sym)).or_else(|| global_fn_to_info.get(sym)).unwrap();
 
-            let mut ins_pack = Vec::with_capacity(params.len() + 1);
-            for param in params {
+            let mut ins_pack = Vec::with_capacity(fn_info.params.len() + 1);
+            for param in fn_info.params.iter() {
                 ins_pack.push(Instruction::MetaPush { value: &param.trans_name });
             }
-            ins_pack.push(Instruction::Call { pos, params: params.len() });
+            ins_pack.push(Instruction::Call { pos, params: fn_info.params.len() });
 
             self.ins[*hole_pos] = InternalInstruction::Packed(ins_pack);
         }
@@ -2056,7 +2071,7 @@ impl ByteCode {
         let mut funcs = Vec::with_capacity(role.funcs.len());
         for func in role.funcs.iter() {
             funcs.push((func, code.ins.len()));
-            code.append_stmts_ret(&func.stmts, None)?;
+            code.append_stmts_ret(&func.upvars, &func.stmts, None)?;
         }
 
         let mut entities = Vec::with_capacity(role.entities.len());
@@ -2064,13 +2079,13 @@ impl ByteCode {
             let mut funcs = Vec::with_capacity(entity.funcs.len());
             for func in entity.funcs.iter() {
                 funcs.push((func, code.ins.len()));
-                code.append_stmts_ret(&func.stmts, Some(entity))?;
+                code.append_stmts_ret(&func.upvars, &func.stmts, Some(entity))?;
             }
 
             let mut scripts = Vec::with_capacity(entity.scripts.len());
             for script in entity.scripts.iter() {
                 scripts.push((script, code.ins.len()));
-                code.append_stmts_ret(&script.stmts, Some(entity))?;
+                code.append_stmts_ret(&[], &script.stmts, Some(entity))?;
             }
 
             entities.push((entity, EntityScriptInfo { funcs, scripts }));
@@ -2078,7 +2093,7 @@ impl ByteCode {
 
         while let Some((hole_pos, params, captures, stmts, entity)) = code.closure_holes.pop_front() {
             let pos = code.ins.len();
-            code.append_stmts_ret(stmts, entity)?;
+            code.append_stmts_ret(&[], stmts, entity)?;
 
             let mut ins_pack = Vec::with_capacity(params.len() + captures.len() + 1);
             for param in params {

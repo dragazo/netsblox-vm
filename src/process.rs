@@ -419,7 +419,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         }
 
         let mut entity = context_entity.write(mc);
-        let mut context = [&mut global_context.globals, &mut entity.fields, &mut self.call_stack.last_mut().unwrap().locals];
+        let (parent_scope, current_scope) = match self.call_stack.as_mut_slice() {
+            [] => unreachable!(),
+            [x] => (None, &mut x.locals),
+            [.., x, y] => (Some(&mut x.locals), &mut y.locals),
+        };
+        let mut context = [&mut global_context.globals, &mut entity.fields, current_scope];
         let mut context = LookupGroup::new(&mut context);
 
         macro_rules! lookup_var {
@@ -843,6 +848,17 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
             Instruction::DeclareLocal { var } => {
                 context.locals_mut().define_if_undefined(var, || Shared::Unique(Number::new(0.0).unwrap().into()));
+                self.pos = aft_pos;
+            }
+            Instruction::InitUpvar { var } => {
+                let target = lookup_var!(var).get().clone();
+                let target = target.to_string()?;
+                let parent_scope = parent_scope.ok_or_else(|| ErrorCause::UpvarAtRoot)?;
+                let parent_def = match parent_scope.lookup_mut(target.as_ref()) {
+                    Some(x) => x,
+                    None => return Err(ErrorCause::UndefinedVariable { name: var.into() }),
+                };
+                context.locals_mut().redefine_or_define(var, parent_def.alias(mc));
                 self.pos = aft_pos;
             }
             Instruction::Assign { var } => {

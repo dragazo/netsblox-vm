@@ -88,6 +88,8 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     UndefinedCostume { name: String },
     /// A name-based entity lookup operation failed.
     UndefinedEntity { name: String },
+    /// An upvar was created at the root scope, which is not allowed (it has nothing to refer up to).
+    UpvarAtRoot,
     /// The result of a failed type conversion.
     ConversionError { got: Type<C, S>, expected: Type<C, S> },
     /// The result of a failed variadic type conversion (expected type `T` or a list of type `T`).
@@ -125,7 +127,7 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     /// A soft error (e.g., RPC or syscall failure) was promoted to a hard error.
     Promoted { error: String },
     /// A custom error generated explicitly from user code.
-    Custom { msg: String }
+    Custom { msg: String },
 }
 impl<C: CustomTypes<S>, S: System<C>> From<ConversionError<C, S>> for ErrorCause<C, S> { fn from(e: ConversionError<C, S>) -> Self { Self::ConversionError { got: e.got, expected: e.expected } } }
 impl<C: CustomTypes<S>, S: System<C>> From<ToJsonError<C, S>> for ErrorCause<C, S> { fn from(error: ToJsonError<C, S>) -> Self { Self::ToJsonError { error } } }
