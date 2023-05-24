@@ -1,4 +1,5 @@
 use std::prelude::v1::*;
+use std::collections::BTreeMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::fmt::Write;
@@ -1698,6 +1699,33 @@ fn test_proc_variadic_params() {
             [["gf", "fd", "", "d"], [1, 2, 3, 4]],
         ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic params");
+    });
+}
+
+#[test]
+fn test_proc_rand_str_char_cache() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/rand-str-char-cache.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |_, _, res| {
+        let res = res.unwrap().0.unwrap().to_string().unwrap().into_owned();
+        assert_eq!(res.len(), 8192);
+        let mut counts: BTreeMap<char, usize> = BTreeMap::new();
+        for ch in res.chars() {
+            assert!(('0'..='9').contains(&ch));
+            *counts.entry(ch).or_default() += 1;
+        }
+        for ch in "0123456789".chars() {
+            let count = *counts.entry(ch).or_default();
+            if !(600..1000).contains(&count) {
+                panic!("char count {ch:?} way out of expected range {count}");
+            }
+        }
     });
 }
 

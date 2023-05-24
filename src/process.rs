@@ -1498,6 +1498,7 @@ mod ops {
                     for x in &*x {
                         res.push_back(unary_op_impl(mc, system, x, cache, scalar_op)?);
                     }
+                    cache.remove(&cache_key);
                     real_res
                 }
                 None => scalar_op(mc, system, x)?,
