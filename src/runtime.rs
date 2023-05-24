@@ -954,25 +954,15 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Clone for SymbolTable<'gc, C, S> {
     fn clone(&self) -> Self {
         let mut res = SymbolTable::default();
         for (k, v) in self.iter() {
-            res.redefine_or_define(k, Shared::Unique(v.get().clone()));
+            res.define_or_redefine(k, Shared::Unique(v.get().clone()));
         }
         res
     }
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> SymbolTable<'gc, C, S> {
-    /// Sets the value of an existing variable (as if by [`Shared::set`]) or defines it if it does not exist.
-    /// If the variable does not exist, creates a [`Shared::Unique`] instance for the new `value`.
-    /// If you would prefer to always create a new, non-aliased value, consider using [`SymbolTable::redefine_or_define`] instead.
-    pub fn set_or_define(&mut self, mc: MutationContext<'gc, '_>, var: &str, value: Value<'gc, C, S>) {
-        match self.0.get_mut(var) {
-            Some(x) => x.set(mc, value),
-            None => { self.0.insert(var.to_owned(), value.into()); }
-        }
-    }
     /// Defines or redefines a value in the symbol table to a new instance of [`Shared<Value>`].
-    /// Note that this is not the same as [`SymbolTable::set_or_define`], which sets a value on a potentially aliased variable.
     /// If a variable named `var` already existed and was [`Shared::Aliased`], its value is not modified.
-    pub fn redefine_or_define(&mut self, var: &str, value: Shared<'gc, Value<'gc, C, S>>) {
+    pub fn define_or_redefine(&mut self, var: &str, value: Shared<'gc, Value<'gc, C, S>>) {
         self.0.insert(var.to_owned(), value);
     }
     /// Defines a variable with an initial value if it does not already exist in this symbol table.
@@ -1063,15 +1053,6 @@ impl<'gc, 'a, 'b, C: CustomTypes<S>, S: System<C>> LookupGroup<'gc, 'a, 'b, C, S
         }
         None
     }
-    /// Performs a lookup for the given variable.
-    /// If it already exists, assigns it a new value.
-    /// Otherwise, defines it in the last (most-local) context equivalently to [`SymbolTable::set_or_define`].
-    pub fn set_or_define(&mut self, mc: MutationContext<'gc, '_>, var: &str, value: Value<'gc, C, S>) {
-        match self.lookup_mut(var) {
-            Some(x) => x.set(mc, value),
-            None => self.0.last_mut().unwrap().set_or_define(mc, var, value),
-        }
-    }
     /// Gets a mutable reference to the last (most-local) context.
     pub fn locals_mut(&mut self) -> &mut SymbolTable<'gc, C, S> {
         self.0.last_mut().unwrap()
@@ -1155,14 +1136,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
 
         let mut globals = SymbolTable::default();
         for (global, value) in init_info.globals.iter() {
-            globals.redefine_or_define(global, Shared::Unique(get_value(value, &allocated_refs)));
+            globals.define_or_redefine(global, Shared::Unique(get_value(value, &allocated_refs)));
         }
 
         let mut entities = BTreeMap::new();
         for (i, entity_info) in init_info.entities.iter().enumerate() {
             let mut fields = SymbolTable::default();
             for (field, value) in entity_info.fields.iter() {
-                fields.redefine_or_define(field, Shared::Unique(get_value(value, &allocated_refs)));
+                fields.define_or_redefine(field, Shared::Unique(get_value(value, &allocated_refs)));
             }
 
             let costume_list = {

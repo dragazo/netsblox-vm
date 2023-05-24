@@ -296,7 +296,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     ErrorCause::Custom { msg } => msg.clone(),
                     _ => format!("{err:?}"),
                 };
-                self.call_stack.last_mut().unwrap().locals.redefine_or_define(var, Shared::Unique(Value::String(Rc::new(msg))));
+                self.call_stack.last_mut().unwrap().locals.define_or_redefine(var, Shared::Unique(Value::String(Rc::new(msg))));
                 self.pos = *pos;
                 res = Ok(ProcessStep::Normal);
             }
@@ -466,10 +466,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
             let mut locals = SymbolTable::default();
             for (k, v) in closure.captures.iter_mut() {
-                locals.redefine_or_define(k, v.alias(mc));
+                locals.define_or_redefine(k, v.alias(mc));
             }
             for (var, value) in iter::zip(&closure.params, values) {
-                locals.redefine_or_define(var, value.into());
+                locals.define_or_redefine(var, value.into());
             }
 
             Ok((closure.pos, locals))
@@ -858,18 +858,18 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     Some(x) => x,
                     None => return Err(ErrorCause::UndefinedVariable { name: var.into() }),
                 };
-                context.locals_mut().redefine_or_define(var, parent_def.alias(mc));
+                context.locals_mut().define_or_redefine(var, parent_def.alias(mc));
                 self.pos = aft_pos;
             }
             Instruction::Assign { var } => {
                 let value = self.value_stack.pop().unwrap();
-                context.set_or_define(mc, var, value);
+                lookup_var!(mut var).set(mc, value);
                 self.pos = aft_pos;
             }
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
                 let a = lookup_var!(var).get().clone();
-                context.set_or_define(mc, var, ops::binary_op(mc, &*global_context.system, &a, &b, op)?);
+                lookup_var!(mut var).set(mc, ops::binary_op(mc, &*global_context.system, &a, &b, op)?);
                 self.pos = aft_pos;
             }
 
@@ -905,7 +905,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 let mut locals = SymbolTable::default();
                 for var in self.meta_stack.drain(self.meta_stack.len() - params..).rev() {
-                    locals.redefine_or_define(&var, self.value_stack.pop().unwrap().into());
+                    locals.define_or_redefine(&var, self.value_stack.pop().unwrap().into());
                 }
                 self.call_stack.push(CallStackEntry {
                     called_from: self.pos,
@@ -926,7 +926,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 let mut caps = SymbolTable::default();
                 for var in captures.iter() {
-                    caps.redefine_or_define(var, lookup_var!(mut var).alias(mc));
+                    caps.define_or_redefine(var, lookup_var!(mut var).alias(mc));
                 }
                 self.value_stack.push(GcCell::allocate(mc, Closure { pos, params, captures: caps }).into());
                 self.pos = aft_pos;

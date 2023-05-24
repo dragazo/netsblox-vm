@@ -226,7 +226,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     if msg_type == *script_msg_type {
                         let mut locals = SymbolTable::default();
                         for field in fields.iter() {
-                            locals.redefine_or_define(field,
+                            locals.define_or_redefine(field,
                                 values.get(field).and_then(|x| Value::from_json(mc, x.clone()).ok())
                                 .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
                         }

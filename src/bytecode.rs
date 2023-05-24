@@ -1729,6 +1729,8 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::StmtKind::ForLoop { var, start, stop, stmts } => {
+                self.ins.push(Instruction::DeclareLocal { var: &var.name }.into());
+
                 self.append_expr(start, entity)?;
                 self.ins.push(Instruction::ToNumber.into());
                 self.append_expr(stop, entity)?;
@@ -1787,6 +1789,8 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
             }
             ast::StmtKind::ForeachLoop { var, items, stmts } => {
+                self.ins.push(Instruction::DeclareLocal { var: &var.name }.into());
+
                 self.append_expr(items, entity)?;
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Dynamic }.into()); // shallow copy the input list
 
