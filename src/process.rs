@@ -1641,6 +1641,9 @@ mod ops {
             (Value::Image(a), Value::Image(b)) => if Rc::ptr_eq(a, b) { Some(Ordering::Equal) } else { None },
             (Value::Image(_), _) | (_, Value::Image(_)) => None,
 
+            (Value::Sound(a), Value::Sound(b)) => if Rc::ptr_eq(a, b) { Some(Ordering::Equal) } else { None },
+            (Value::Sound(_), _) | (_, Value::Sound(_)) => None,
+
             (Value::Closure(a), Value::Closure(b)) => if a.as_ptr() == b.as_ptr() { Some(Ordering::Equal) } else { None },
             (Value::Closure(_), _) | (_, Value::Closure(_)) => None,
 
@@ -1689,6 +1692,9 @@ mod ops {
 
             (Value::Image(a), Value::Image(b)) => Rc::ptr_eq(a, b),
             (Value::Image(_), _) | (_, Value::Image(_)) => false,
+
+            (Value::Sound(a), Value::Sound(b)) => Rc::ptr_eq(a, b),
+            (Value::Sound(_), _) | (_, Value::Sound(_)) => false,
 
             (Value::Closure(a), Value::Closure(b)) => a.as_ptr() == b.as_ptr(),
             (Value::Closure(_), _) | (_, Value::Closure(_)) => false,

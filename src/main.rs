@@ -50,6 +50,7 @@ impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
 enum Intermediate {
     Json(Json),
     Image(Vec<u8>),
+    Sound(Vec<u8>),
     Native(NativeValue),
 }
 impl IntermediateType for Intermediate {
@@ -58,6 +59,9 @@ impl IntermediateType for Intermediate {
     }
     fn from_image(img: Vec<u8>) -> Self {
         Self::Image(img)
+    }
+    fn from_sound(sound: Vec<u8>) -> Self {
+        Self::Sound(sound)
     }
 }
 
@@ -72,6 +76,7 @@ impl CustomTypes<StdSystem<C>> for C {
         Ok(match value {
             Intermediate::Json(x) => Value::from_json(mc, x)?,
             Intermediate::Image(x) => Value::Image(Rc::new(x)),
+            Intermediate::Sound(x) => Value::Sound(Rc::new(x)),
             Intermediate::Native(x) => Value::Native(Rc::new(x)),
         })
     }

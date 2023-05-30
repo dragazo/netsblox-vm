@@ -70,7 +70,7 @@ rand_chacha = { version = "0.3.1", default-features = false, optional = true }
 getrandom = { version = "0.2.9", default-features = false, optional = true }
 
 # cli deps
-clap = { version = "4.2.7", default-features = false, features = ["std", "derive"], optional = true }
+clap = { version = "4.3.0", default-features = false, features = ["std", "derive"], optional = true }
 crossterm = { version = "0.26.1", default-features = false, optional = true }
 actix-web = { version = "4.3.1", default-features = false, features = ["macros"], optional = true }
 actix-cors = { version = "0.6.4", default-features = false, optional = true }
