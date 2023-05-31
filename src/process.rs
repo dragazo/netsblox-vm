@@ -542,6 +542,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
 
+            Instruction::TypeQuery { ty } => {
+                let val = self.value_stack.pop().unwrap();
+                self.value_stack.push((val.get_type() == ty.to_type()).into());
+                self.pos = aft_pos;
+            }
             Instruction::ToBool => {
                 let val = self.value_stack.pop().unwrap();
                 self.value_stack.push(val.to_bool()?.into());

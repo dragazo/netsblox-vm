@@ -1322,6 +1322,35 @@ fn test_proc_string_index() {
 }
 
 #[test]
+fn test_proc_type_query() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/type-query.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            [false, true, false, false, false, false, false],
+            [false, true, false, false, false, false, false],
+            [false, true, false, false, false, false, false],
+            [false, true, false, false, false, false, false],
+            [true, false, false, false, false, false, false],
+            [true, false, false, false, false, false, false],
+            [false, true, false, false, false, false, false],
+            [false, false, true, false, false, false, false],
+            [false, false, false, true, false, false, false],
+            [false, false, false, true, false, false, false],
+            [false, false, false, true, false, false, false],
+            [false, false, false, false, true, false, false],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "type query");
+    });
+}
+
+#[test]
 fn test_proc_variadic_strcat() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
