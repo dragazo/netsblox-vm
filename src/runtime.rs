@@ -67,7 +67,7 @@ pub enum ToJsonError<C: CustomTypes<S>, S: System<C>> {
 #[derive(Educe)]
 #[educe(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type<C: CustomTypes<S>, S: System<C>> {
-    Bool, Number, String, Image, Sound, List, Closure, Entity, Native(<C::NativeValue as GetType>::Output),
+    Bool, Number, String, Image, Audio, List, Closure, Entity, Native(<C::NativeValue as GetType>::Output),
 }
 
 /// A type conversion error on a [`Value`].
@@ -635,8 +635,8 @@ pub enum Value<'gc, C: CustomTypes<S>, S: System<C>> {
     String(#[collect(require_static)] Rc<String>),
     /// An image stored as a binary buffer.
     Image(#[collect(require_static)] Rc<Vec<u8>>),
-    /// A sound clip stored as as a binary buffer.
-    Sound(#[collect(require_static)] Rc<Vec<u8>>),
+    /// An audio clip stored as as a binary buffer.
+    Audio(#[collect(require_static)] Rc<Vec<u8>>),
     /// A reference to a native object handle produced by [`System`].
     Native(#[collect(require_static)] Rc<C::NativeValue>),
     /// A primitive list type, which is a mutable reference type.
@@ -655,7 +655,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GetType for Value<'gc, C, S> {
             Value::Number(_) => Type::Number,
             Value::String(_) => Type::String,
             Value::Image(_) => Type::Image,
-            Value::Sound(_) => Type::Sound,
+            Value::Audio(_) => Type::Audio,
             Value::List(_) => Type::List,
             Value::Closure(_) => Type::Closure,
             Value::Entity(_) => Type::Entity,
@@ -675,7 +675,7 @@ impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Value<'_, C, S> {
                 Value::Entity(x) => write!(f, "{:?}", &*x.read()),
                 Value::Native(x) => write!(f, "{:?}", &**x),
                 Value::Image(x) => write!(f, "[Image {:?}]", Rc::as_ptr(x)),
-                Value::Sound(x) => write!(f, "[Sound {:?}]", Rc::as_ptr(x)),
+                Value::Audio(x) => write!(f, "[Audio {:?}]", Rc::as_ptr(x)),
                 Value::List(x) => {
                     let identity = value.identity();
                     if !cache.insert(identity) { return write!(f, "[...]") }
@@ -730,7 +730,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
                 Value::Bool(x) => Json::Bool(*x),
                 Value::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).ok_or_else(|| ToJsonError::BadNumber(x.get()))?),
                 Value::String(x) => Json::String(x.as_str().to_owned()),
-                Value::Image(_) | Value::Sound(_) | Value::Closure(_) | Value::Entity(_) | Value::Native(_) => return Err(ToJsonError::ComplexType(value.get_type())),
+                Value::Image(_) | Value::Audio(_) | Value::Closure(_) | Value::Entity(_) | Value::Native(_) => return Err(ToJsonError::ComplexType(value.get_type())),
                 Value::List(x) => {
                     let identity = value.identity();
                     if !cache.insert(identity) { return Err(ToJsonError::Cyclic) }
@@ -755,7 +755,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
             Value::Number(x) => Identity(x as *const Number as *const (), PhantomData),
             Value::String(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
             Value::Image(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
-            Value::Sound(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
+            Value::Audio(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
             Value::List(x) => Identity(x.as_ptr() as *const (), PhantomData),
             Value::Closure(x) => Identity(x.as_ptr() as *const (), PhantomData),
             Value::Entity(x) => Identity(x.as_ptr() as *const (), PhantomData),
@@ -1468,7 +1468,7 @@ impl<C: CustomTypes<S>, S: System<C>> Config<C, S> {
 pub trait IntermediateType {
     fn from_json(json: Json) -> Self;
     fn from_image(img: Vec<u8>) -> Self;
-    fn from_sound(sound: Vec<u8>) -> Self;
+    fn from_audio(audio: Vec<u8>) -> Self;
 }
 
 /// A collection of static settings for using custom native types.

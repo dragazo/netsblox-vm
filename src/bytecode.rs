@@ -111,7 +111,7 @@ impl BinaryWrite for VariadicLen {
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
 pub(crate) enum BasicType {
-    Number, String, Bool, List, Entity, Image, Sound,
+    Number, String, Bool, List, Entity, Image, Audio,
 }
 impl BasicType {
     pub fn to_type<C: CustomTypes<S>, S: System<C>>(self) -> Type<C, S> {
@@ -122,7 +122,7 @@ impl BasicType {
             BasicType::List => Type::List,
             BasicType::Entity => Type::Entity,
             BasicType::Image => Type::Image,
-            BasicType::Sound => Type::Sound,
+            BasicType::Audio => Type::Audio,
         }
     }
 }
@@ -1332,7 +1332,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     ast::ValueType::List => BasicType::List,
                     ast::ValueType::Sprite => BasicType::Entity,
                     ast::ValueType::Costume => BasicType::Image,
-                    ast::ValueType::Sound => BasicType::Sound,
+                    ast::ValueType::Sound => BasicType::Audio,
                     ast::ValueType::Command | ast::ValueType::Reporter | ast::ValueType::Predicate => return Err(CompileError::CurrentlyUnsupported { info: format!("closure types are indistinguishable") }),
                 };
                 self.ins.push(Instruction::TypeQuery { ty }.into());
