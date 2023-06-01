@@ -40,6 +40,7 @@ pub enum CompileError<'a> {
     BadNumber { error: NumberError },
     UndefinedRef { value: &'a ast::Value },
     CurrentlyUnsupported { info: String },
+    InvalidBlock { loc: Option<&'a str> },
 }
 impl From<NumberError> for CompileError<'_> { fn from(error: NumberError) -> Self { Self::BadNumber { error } } }
 
@@ -1302,7 +1303,6 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::StrGet { string, index } => self.append_simple_ins(entity, &[index, string], BinaryOp::StrGet.into())?,
             ast::ExprKind::StrGetLast { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetLast.into())?,
             ast::ExprKind::StrGetRandom { string } => self.append_simple_ins(entity, &[string], UnaryOp::StrGetRandom.into())?,
-            ast::ExprKind::SyscallError => self.append_simple_ins(entity, &[], Instruction::PushSyscallError)?,
             ast::ExprKind::Effect { kind } => self.append_simple_ins(entity, &[], Instruction::PushProperty { prop: Property::from_effect(kind) })?,
             ast::ExprKind::Clone { target } => self.append_simple_ins(entity, &[target], Instruction::Clone)?,
             ast::ExprKind::This => self.ins.push(Instruction::PushSelf.into()),
@@ -1334,11 +1334,26 @@ impl<'a> ByteCodeBuilder<'a> {
                 }
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Fixed(values.len()) }.into());
             }
-            ast::ExprKind::UnknownBlock { name, args } => {
-                for arg in args {
-                    self.append_expr(arg, entity)?;
+            ast::ExprKind::UnknownBlock { name, args } => match name.as_str() {
+                "nativeCallSyscall" => {
+                    let (name, args) = match args.as_slice() {
+                        [name, args] => (name, args),
+                        _ => return Err(CompileError::InvalidBlock { loc: expr.info.location.as_deref() }),
+                    };
+                    self.append_expr(name, entity)?;
+                    let len = self.append_variadic(args, entity)?;
+                    self.ins.push(Instruction::Syscall { len }.into());
                 }
-                self.ins.push(Instruction::UnknownBlock { name: &name, args: args.len() }.into());
+                "nativeSyscallError" => {
+                    if !args.is_empty() { return Err(CompileError::InvalidBlock { loc: expr.info.location.as_deref() }) }
+                    self.ins.push(Instruction::PushSyscallError.into());
+                }
+                _ => {
+                    for arg in args {
+                        self.append_expr(arg, entity)?;
+                    }
+                    self.ins.push(Instruction::UnknownBlock { name: &name, args: args.len() }.into());
+                }
             }
             ast::ExprKind::TypeQuery { value, ty } => {
                 self.append_expr(value, entity)?;
@@ -1433,11 +1448,6 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.append_expr(arg, entity)?;
                 }
                 self.ins.push(Instruction::CallRpc { service, rpc, args: args.len() }.into());
-            }
-            ast::ExprKind::Syscall { name, args } => {
-                self.append_expr(name, entity)?;
-                let len = self.append_variadic(args, entity)?;
-                self.ins.push(Instruction::Syscall { len }.into());
             }
             ast::ExprKind::NetworkMessageReply { target, msg_type, values } => {
                 for (field, value) in values {
@@ -1935,23 +1945,29 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.append_expr(target, entity)?;
                 self.ins.push(Instruction::SendNetworkMessage { msg_type, values: values.len(), expect_reply: false }.into());
             }
-            ast::StmtKind::Syscall { name, args } => {
-                self.append_expr(name, entity)?;
-                let len = self.append_variadic(args, entity)?;
-                self.ins.push(Instruction::Syscall { len }.into());
-                self.ins.push(Instruction::PopValue.into());
-            }
             ast::StmtKind::Clone { target } => {
                 self.append_expr(target, entity)?;
                 self.ins.push(Instruction::Clone.into());
                 self.ins.push(Instruction::PopValue.into());
             }
-            ast::StmtKind::UnknownBlock { name, args } => {
-                for arg in args {
-                    self.append_expr(arg, entity)?;
+            ast::StmtKind::UnknownBlock { name, args } => match name.as_str() {
+                "nativeRunSyscall" => {
+                    let (name, args) = match args.as_slice() {
+                        [name, args] => (name, args),
+                        _ => return Err(CompileError::InvalidBlock { loc: stmt.info.location.as_deref() }),
+                    };
+                    self.append_expr(name, entity)?;
+                    let len = self.append_variadic(args, entity)?;
+                    self.ins.push(Instruction::Syscall { len }.into());
+                    self.ins.push(Instruction::PopValue.into());
                 }
-                self.ins.push(Instruction::UnknownBlock { name: &name, args: args.len() }.into());
-                self.ins.push(Instruction::PopValue.into());
+                _ => {
+                    for arg in args {
+                        self.append_expr(arg, entity)?;
+                    }
+                    self.ins.push(Instruction::UnknownBlock { name: &name, args: args.len() }.into());
+                    self.ins.push(Instruction::PopValue.into());
+                }
             }
             kind => return Err(CompileError::UnsupportedStmt { kind }),
         }
