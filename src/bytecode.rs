@@ -1195,30 +1195,27 @@ impl<'a> ByteCodeBuilder<'a> {
         self.ins.push(op.into());
         Ok(())
     }
-    fn append_variadic_op(&mut self, entity: Option<&'a ast::Entity>, varargs: &'a ast::VariadicInput, op: VariadicOp) -> Result<(), CompileError<'a>> {
-        Ok(match varargs {
-            ast::VariadicInput::Fixed(values) => {
-                for value in values {
-                    self.append_expr(value, entity)?;
-                }
-                self.ins.push(Instruction::VariadicOp { op, len: VariadicLen::Fixed(values.len()) }.into());
-            }
-            ast::VariadicInput::VarArgs(values) => {
-                self.append_expr(values, entity)?;
-                self.ins.push(Instruction::VariadicOp { op, len: VariadicLen::Dynamic }.into());
-            }
-        })
+    fn append_variadic_op(&mut self, entity: Option<&'a ast::Entity>, src: &'a ast::Expr, op: VariadicOp) -> Result<(), CompileError<'a>> {
+        let len = self.append_variadic(src, entity)?;
+        self.ins.push(Instruction::VariadicOp { op, len}.into());
+        Ok(())
     }
-    fn append_variadic(&mut self, src: &'a ast::VariadicInput, entity: Option<&'a ast::Entity>) -> Result<VariadicLen, CompileError<'a>> {
-        Ok(match src {
-            ast::VariadicInput::Fixed(values) => {
-                for value in values {
+    fn append_variadic(&mut self, src: &'a ast::Expr, entity: Option<&'a ast::Entity>) -> Result<VariadicLen, CompileError<'a>> {
+        Ok(match &src.kind {
+            ast::ExprKind::Value(ast::Value::List(values, _)) => {
+                for value in values.iter() {
+                    self.append_value(value, entity)?;
+                }
+                VariadicLen::Fixed(values.len())
+            }
+            ast::ExprKind::MakeList { values } => {
+                for value in values.iter() {
                     self.append_expr(value, entity)?;
                 }
                 VariadicLen::Fixed(values.len())
             }
-            ast::VariadicInput::VarArgs(list) => {
-                self.append_expr(list, entity)?;
+            _ => {
+                self.append_expr(src, entity)?;
                 VariadicLen::Dynamic
             }
         })
@@ -1233,7 +1230,6 @@ impl<'a> ByteCodeBuilder<'a> {
             }}.into()),
             ast::Value::Bool(v) => self.ins.push(Instruction::PushBool { value: *v }.into()),
             ast::Value::List(values, _) => {
-                println!("values: {values:?}");
                 for v in values {
                     self.append_value(v, entity)?;
                 }
@@ -1321,8 +1317,14 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::Min { values } => self.append_variadic_op(entity, values, VariadicOp::Min)?,
             ast::ExprKind::Max { values } => self.append_variadic_op(entity, values, VariadicOp::Max)?,
             ast::ExprKind::StrCat { values } => self.append_variadic_op(entity, values, VariadicOp::StrCat)?,
-            ast::ExprKind::MakeList { values } => self.append_variadic_op(entity, values, VariadicOp::MakeList)?,
             ast::ExprKind::ListCat { lists } => self.append_variadic_op(entity, lists, VariadicOp::ListCat)?,
+            ast::ExprKind::CopyList { list } => self.append_variadic_op(entity, list, VariadicOp::MakeList)?,
+            ast::ExprKind::MakeList { values } => {
+                for value in values {
+                    self.append_expr(value, entity)?;
+                }
+                self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Fixed(values.len()) }.into());
+            }
             ast::ExprKind::TypeQuery { value, ty } => {
                 self.append_expr(value, entity)?;
                 let ty = match ty {
