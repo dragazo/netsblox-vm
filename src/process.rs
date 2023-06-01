@@ -1247,6 +1247,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let distance = self.value_stack.pop().unwrap().to_number()?;
                 perform_command!(Command::Forward { distance }, aft_pos);
             }
+            Instruction::UnknownBlock { name, args } => {
+                let args = self.value_stack.drain(self.value_stack.len() - args..).collect();
+                perform_request!(Request::UnknownBlock { name: name.into(), args }, RequestAction::Push, aft_pos);
+            }
         }
 
         Ok(ProcessStep::Normal)

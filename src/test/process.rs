@@ -1866,3 +1866,92 @@ fn test_proc_c_rings() {
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "c-rings");
     });
 }
+
+#[test]
+fn test_proc_extra_blocks() {
+    let actions = Rc::new(RefCell::new(vec![]));
+    let actions_clone = actions.clone();
+    let config = Config::<C, StdSystem<C>> {
+        request: Some(Rc::new(move |_, _, key, request, _| match &request {
+            Request::UnknownBlock { name, args } => {
+                match name.as_str() {
+                    "tuneScopeSetInstrument" => {
+                        assert_eq!(args.len(), 1);
+                        let ins = args[0].to_string().unwrap();
+                        actions_clone.borrow_mut().push(vec!["set ins".to_owned(), ins.into_owned()]);
+                        key.complete(Ok(Intermediate::from_json(json!("OK"))));
+                    }
+                    "tuneScopeSetVolume" => {
+                        assert_eq!(args.len(), 1);
+                        let vol = args[0].to_number().unwrap().get();
+                        actions_clone.borrow_mut().push(vec!["set vol".to_owned(), vol.to_string()]);
+                        key.complete(Ok(Intermediate::from_json(json!("OK"))));
+                    }
+                    "tuneScopePlayChordForDuration" => {
+                        assert_eq!(args.len(), 2);
+                        let notes = args[0].to_json().unwrap();
+                        let duration = args[1].to_string().unwrap();
+                        actions_clone.borrow_mut().push(vec!["play chord".to_owned(), notes.to_string(), duration.into_owned()]);
+                        key.complete(Ok(Intermediate::from_json(json!("OK"))));
+                    }
+                    "tuneScopePlayTracks" => {
+                        assert_eq!(args.len(), 2);
+                        let time = args[0].to_string().unwrap();
+                        let tracks = args[1].to_json().unwrap();
+                        actions_clone.borrow_mut().push(vec!["play tracks".to_owned(), time.into_owned(), tracks.to_string()]);
+                        key.complete(Ok(Intermediate::from_json(json!("OK"))));
+                    }
+                    "tuneScopeNote" => {
+                        assert_eq!(args.len(), 1);
+                        let note = args[0].to_string().unwrap();
+                        actions_clone.borrow_mut().push(vec!["get note".to_owned(), note.as_ref().to_owned()]);
+                        key.complete(Ok(Intermediate::from_json(json!(format!("nte {note}")))));
+                    }
+                    "tuneScopeDuration" => {
+                        assert_eq!(args.len(), 1);
+                        let duration = args[0].to_string().unwrap();
+                        actions_clone.borrow_mut().push(vec!["get duration".to_owned(), duration.as_ref().to_owned()]);
+                        key.complete(Ok(Intermediate::from_json(json!(format!("drt {duration}")))));
+                    }
+                    "tuneScopeSection" => {
+                        assert_eq!(args.len(), 1);
+                        let items = args[0].to_json().unwrap();
+                        actions_clone.borrow_mut().push(vec!["make section".to_owned(), items.to_string()]);
+                        key.complete(Ok(Intermediate::from_json(items)));
+                    }
+                    _ => return RequestStatus::UseDefault { key, request },
+                }
+                RequestStatus::Handled
+            }
+            _ => RequestStatus::UseDefault { key, request },
+        })),
+        command: None,
+    };
+
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, config));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/extra-blocks.xml"),
+        methods = "",
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!("cool")).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "extra blocks");
+    });
+
+    let expected = vec![
+        vec!["set ins".to_owned(), "Clarinet".to_owned()],
+        vec!["set vol".to_owned(), "1337".to_owned()],
+        vec!["get note".to_owned(), "A3".to_owned()],
+        vec!["get note".to_owned(), "Fb3".to_owned()],
+        vec!["play chord".to_owned(), json!(["nte A3", "nte Fb3"]).to_string(), "Quarter".to_owned()],
+        vec!["play tracks".to_owned(), "4/4".to_owned(), json!([true, false, 3.0]).to_string()],
+        vec!["get note".to_owned(), "C4".to_owned()],
+        vec!["get duration".to_owned(), "Half".to_owned()],
+        vec!["make section".to_owned(), json!(["nte C4", "drt Half"]).to_string()],
+        vec!["play tracks".to_owned(), "6/8".to_owned(), json!(["nte C4", "drt Half"]).to_string()],
+    ];
+    assert_eq!(&*actions.borrow(), &expected);
+}

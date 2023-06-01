@@ -411,6 +411,11 @@ pub(crate) enum Instruction<'a> {
 
     /// Consumes 1 value, `dist`, and asynchronously moves the entity forward by that distance (or backwards if negative).
     Forward,
+
+    /// Consumes `args` values (in reverse order) representing arguments to an unknown function.
+    /// This is then handed over to the system to fulfill or error out.
+    /// The result of the async request is then pushed onto the value stack.
+    UnknownBlock { name: &'a str, args: usize },
 }
 
 pub(crate) enum RelocateInfo {
@@ -804,6 +809,8 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
 
             119 => read_prefixed!(Instruction::Forward),
 
+            120 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
+
             _ => unreachable!(),
         }
     }
@@ -990,6 +997,8 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::PointTowards => append_prefixed!(118),
 
             Instruction::Forward => append_prefixed!(119),
+
+            Instruction::UnknownBlock { name, args } => append_prefixed!(120: move str name, args),
         }
     }
 }
@@ -1324,6 +1333,12 @@ impl<'a> ByteCodeBuilder<'a> {
                     self.append_expr(value, entity)?;
                 }
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Fixed(values.len()) }.into());
+            }
+            ast::ExprKind::UnknownBlock { name, args } => {
+                for arg in args {
+                    self.append_expr(arg, entity)?;
+                }
+                self.ins.push(Instruction::UnknownBlock { name: &name, args: args.len() }.into());
             }
             ast::ExprKind::TypeQuery { value, ty } => {
                 self.append_expr(value, entity)?;
@@ -1929,6 +1944,13 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::StmtKind::Clone { target } => {
                 self.append_expr(target, entity)?;
                 self.ins.push(Instruction::Clone.into());
+                self.ins.push(Instruction::PopValue.into());
+            }
+            ast::StmtKind::UnknownBlock { name, args } => {
+                for arg in args {
+                    self.append_expr(arg, entity)?;
+                }
+                self.ins.push(Instruction::UnknownBlock { name: &name, args: args.len() }.into());
                 self.ins.push(Instruction::PopValue.into());
             }
             kind => return Err(CompileError::UnsupportedStmt { kind }),

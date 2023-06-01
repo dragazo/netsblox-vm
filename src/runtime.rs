@@ -1323,6 +1323,9 @@ pub enum Feature {
 
     /// The ability of an entity to move forward or backwards by a distance.
     Forward,
+
+    /// The ability of an entity to execute a specific block that was not built in to the ast parser or bytecode compiler (e.g., extension blocks).
+    UnknownBlock { name: String },
 }
 
 /// A value-returning request issued from the runtime.
@@ -1335,6 +1338,9 @@ pub enum Request<'gc, C: CustomTypes<S>, S: System<C>> {
     Rpc { service: String, rpc: String, args: Vec<(String, Value<'gc, C, S>)> },
     /// Request to get the current value of an entity property.
     Property { prop: Property },
+    /// Request to run a block which was not known by the ast parser or bytecode compiler.
+    /// This is typically used for implementing extension blocks in the VM, which cannot be handled otherwise.
+    UnknownBlock { name: String, args: Vec<Value<'gc, C, S>> },
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Request<'gc, C, S> {
     /// Gets the [`Feature`] associated with this request.
@@ -1344,6 +1350,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Request<'gc, C, S> {
             Request::Syscall { name, .. } => Feature::Syscall { name: name.clone() },
             Request::Rpc { service, rpc, .. } => Feature::Rpc { service: service.clone(), rpc: rpc.clone() },
             Request::Property { prop } => Feature::GetProperty { prop: *prop },
+            Request::UnknownBlock { name, .. } => Feature::UnknownBlock { name: name.clone() },
         }
     }
 }
