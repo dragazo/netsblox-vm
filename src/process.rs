@@ -661,6 +661,26 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(ops::columns(mc, &value)?);
                 self.pos = aft_pos;
             }
+            Instruction::ListLines => {
+                let value = self.value_stack.pop().unwrap().as_list()?;
+                let value = value.read();
+
+                let mut values = value.iter();
+                let res = match values.next() {
+                    Some(x) => {
+                        let mut res = x.to_string()?.into_owned();
+                        for x in values {
+                            res.push('\n');
+                            res.push_str(x.to_string()?.as_ref());
+                        }
+                        Rc::new(res)
+                    }
+                    None => empty_string(),
+                };
+
+                self.value_stack.push(res.into());
+                self.pos = aft_pos;
+            }
 
             Instruction::ListInsert => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
