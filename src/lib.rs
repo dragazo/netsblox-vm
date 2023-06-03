@@ -10,7 +10,7 @@ pub(crate) use educe::Educe;
 
 /// Re-exports of relevant items from `gc_arena`.
 pub mod gc {
-    pub use gc_arena::{self, Collect, Gc, GcWeak, GcCell, GcWeakCell, StaticCollect, MutationContext, Arena, Rootable};
+    pub use gc_arena::{self, Collect, Gc, GcWeak, StaticCollect, Mutation, Arena, Rootable, lock::RefLock};
 }
 
 /// Re-exports of relevant items from `serde_json`.

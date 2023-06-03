@@ -93,7 +93,7 @@ pub enum ProjectStep<'gc, C: CustomTypes<S>, S: System<C>> {
 #[collect(no_drop, bound = "")]
 struct Script<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] event: Rc<(Event, usize)>, // event and bytecode start pos
-                               entity: GcCell<'gc, Entity<'gc, C, S>>,
+                               entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
     #[collect(require_static)] process: Option<ProcessKey>,
                                context_queue: VecDeque<ProcContext<'gc, C, S>>,
 }
@@ -142,7 +142,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Script<'gc, C, S> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 struct State<'gc, C: CustomTypes<S>, S: System<C>> {
-                               global_context: GcCell<'gc, GlobalContext<'gc, C, S>>,
+                               global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>,
                                processes: SlotMap<ProcessKey, Process<'gc, C, S>>,
     #[collect(require_static)] process_queue: VecDeque<ProcessKey>,
 }
@@ -153,12 +153,12 @@ pub struct Project<'gc, C: CustomTypes<S>, S: System<C>> {
     scripts: Vec<Script<'gc, C, S>>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
-    pub fn from_init<'a>(mc: MutationContext<'gc, '_>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
+    pub fn from_init<'a>(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
         let global_context = GlobalContext::from_init(mc, init_info, bytecode, settings, system);
-        let mut project = Self::new(GcCell::allocate(mc, global_context));
+        let mut project = Self::new(Gc::new(mc, RefLock::new(global_context)));
 
         for entity_info in init_info.entities.iter() {
-            let entity = *project.state.global_context.read().entities.get(&entity_info.name).unwrap();
+            let entity = *project.state.global_context.borrow().entities.get(&entity_info.name).unwrap();
             for (event, pos) in entity_info.scripts.iter() {
                 project.add_script(*pos, entity, Some(event.clone()));
             }
@@ -166,7 +166,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
 
         project
     }
-    pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, C, S>>) -> Self {
+    pub fn new(global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>) -> Self {
         Self {
             state: State {
                 global_context,
@@ -176,7 +176,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
             scripts: Default::default(),
         }
     }
-    pub fn add_script(&mut self, start_pos: usize, entity: GcCell<'gc, Entity<'gc, C, S>>, event: Option<Event>) {
+    pub fn add_script(&mut self, start_pos: usize, entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>, event: Option<Event>) {
         match event {
             Some(event) => self.scripts.push(Script {
                 event: Rc::new((event, start_pos)),
@@ -217,8 +217,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
             Input::KeyUp(_) => unimplemented!(),
         }
     }
-    pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> ProjectStep<'gc, C, S> {
-        let msg = self.state.global_context.read().system.receive_message();
+    pub fn step(&mut self, mc: &Mutation<'gc>) -> ProjectStep<'gc, C, S> {
+        let msg = self.state.global_context.borrow().system.receive_message();
         if let Some(IncomingMessage { msg_type, values, reply_key }) = msg {
             let values: BTreeMap<_,_> = values.into_iter().collect();
             for script in self.scripts.iter_mut() {
@@ -270,10 +270,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     ProjectStep::Normal
                 }
                 ProcessStep::CreatedClone { new_entity } => {
-                    let root = new_entity.read().root.unwrap();
+                    let root = new_entity.borrow().root.unwrap();
                     let mut new_scripts = vec![];
                     for script in self.scripts.iter() {
-                        if GcCell::ptr_eq(script.entity, root) {
+                        if Gc::ptr_eq(script.entity, root) {
                             new_scripts.push(Script {
                                 event: script.event.clone(),
                                 entity: new_entity,
@@ -296,7 +296,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                         if let Event::LocalMessage { msg_type: recv_type } = &script.event.0 {
                             if recv_type.as_ref().map(|x| *x == *msg_type).unwrap_or(true) {
                                 if let Some(targets) = &targets {
-                                    if !targets.iter().any(|&target| GcCell::ptr_eq(script.entity, target)) {
+                                    if !targets.iter().any(|&target| Gc::ptr_eq(script.entity, target)) {
                                         continue
                                     }
                                 }
@@ -314,7 +314,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
             Err(error) => ProjectStep::Error { error, proc: self.state.processes.remove(proc_key).unwrap() },
         }
     }
-    pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc, C, S>> {
+    pub fn get_global_context(&self) -> Gc<'gc, RefLock<GlobalContext<'gc, C, S>>> {
         self.state.global_context
     }
 }

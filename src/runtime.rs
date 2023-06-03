@@ -640,11 +640,11 @@ pub enum Value<'gc, C: CustomTypes<S>, S: System<C>> {
     /// A reference to a native object handle produced by [`System`].
     Native(#[collect(require_static)] Rc<C::NativeValue>),
     /// A primitive list type, which is a mutable reference type.
-    List(GcCell<'gc, VecDeque<Value<'gc, C, S>>>),
+    List(Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>),
     /// A closure/lambda function. This contains information about the closure's bytecode location, parameters, and captures from the parent scope.
-    Closure(GcCell<'gc, Closure<'gc, C, S>>),
+    Closure(Gc<'gc, RefLock<Closure<'gc, C, S>>>),
     /// A reference to an [`Entity`] in the environment.
-    Entity(GcCell<'gc, Entity<'gc, C, S>>),
+    Entity(Gc<'gc, RefLock<Entity<'gc, C, S>>>),
 }
 
 impl<'gc, C: CustomTypes<S>, S: System<C>> GetType for Value<'gc, C, S> {
@@ -671,8 +671,8 @@ impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Value<'_, C, S> {
                 Value::Bool(x) => write!(f, "{x}"),
                 Value::Number(x) => write!(f, "{x}"),
                 Value::String(x) => write!(f, "{:?}", x.as_str()),
-                Value::Closure(x) => write!(f, "{:?}", &*x.read()),
-                Value::Entity(x) => write!(f, "{:?}", &*x.read()),
+                Value::Closure(x) => write!(f, "{:?}", &*x.borrow()),
+                Value::Entity(x) => write!(f, "{:?}", &*x.borrow()),
                 Value::Native(x) => write!(f, "{:?}", &**x),
                 Value::Image(x) => write!(f, "[Image {:?}]", Rc::as_ptr(x)),
                 Value::Audio(x) => write!(f, "[Audio {:?}]", Rc::as_ptr(x)),
@@ -680,7 +680,7 @@ impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Value<'_, C, S> {
                     let identity = value.identity();
                     if !cache.insert(identity) { return write!(f, "[...]") }
 
-                    let x = x.read();
+                    let x = x.borrow();
                     write!(f, "[")?;
                     for (i, val) in x.iter().enumerate() {
                         print(val, cache, f)?;
@@ -703,24 +703,24 @@ impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Value<'_, C, S> {
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<bool> for Value<'gc, C, S> { fn from(v: bool) -> Self { Value::Bool(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Number> for Value<'gc, C, S> { fn from(v: Number) -> Self { Value::Number(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Rc<String>> for Value<'gc, C, S> { fn from(v: Rc<String>) -> Self { Value::String(v) } }
-impl<'gc, C: CustomTypes<S>, S: System<C>> From<GcCell<'gc, VecDeque<Value<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: GcCell<'gc, VecDeque<Value<'gc, C, S>>>) -> Self { Value::List(v) } }
-impl<'gc, C: CustomTypes<S>, S: System<C>> From<GcCell<'gc, Closure<'gc, C, S>>> for Value<'gc, C, S> { fn from(v: GcCell<'gc, Closure<'gc, C, S>>) -> Self { Value::Closure(v) } }
-impl<'gc, C: CustomTypes<S>, S: System<C>> From<GcCell<'gc, Entity<'gc, C, S>>> for Value<'gc, C, S> { fn from(v: GcCell<'gc, Entity<'gc, C, S>>) -> Self { Value::Entity(v) } }
+impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>) -> Self { Value::List(v) } }
+impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<Closure<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<Closure<'gc, C, S>>>) -> Self { Value::Closure(v) } }
+impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<Entity<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<Entity<'gc, C, S>>>) -> Self { Value::Entity(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
     /// Create a new [`Value`] from a [`Json`] value.
-    pub fn from_json(mc: MutationContext<'gc, '_>, value: Json) -> Result<Self, FromJsonError> {
+    pub fn from_json(mc: &Mutation<'gc>, value: Json) -> Result<Self, FromJsonError> {
         Ok(match value {
             Json::Null => return Err(FromJsonError::HadNull),
             Json::Bool(x) => Value::Bool(x),
             Json::Number(x) => Value::Number(x.as_f64().and_then(|x| Number::new(x).ok()).ok_or(FromJsonError::HadBadNumber)?),
             Json::String(x) => Value::String(Rc::new(x)),
-            Json::Array(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|x| Value::from_json(mc, x)).collect::<Result<_,_>>()?)),
-            Json::Object(x) => Value::List(GcCell::allocate(mc, x.into_iter().map(|(k, v)| {
+            Json::Array(x) => Value::List(Gc::new(mc, RefLock::new(x.into_iter().map(|x| Value::from_json(mc, x)).collect::<Result<_,_>>()?))),
+            Json::Object(x) => Value::List(Gc::new(mc, RefLock::new(x.into_iter().map(|(k, v)| {
                 let mut entry = VecDeque::with_capacity(2);
                 entry.push_back(Value::String(Rc::new(k)));
                 entry.push_back(Value::from_json(mc, v)?);
-                Ok(Value::List(GcCell::allocate(mc, entry)))
-            }).collect::<Result<_,_>>()?)),
+                Ok(Value::List(Gc::new(mc, RefLock::new(entry))))
+            }).collect::<Result<_,_>>()?))),
         })
     }
     /// Converts a [`Value`] into [`Json`]. Note that not all values can be converted to json (e.g., cyclic lists or complex types).
@@ -734,7 +734,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
                 Value::List(x) => {
                     let identity = value.identity();
                     if !cache.insert(identity) { return Err(ToJsonError::Cyclic) }
-                    let res = Json::Array(x.read().iter().map(|x| simplify(x, cache)).collect::<Result<_,_>>()?);
+                    let res = Json::Array(x.borrow().iter().map(|x| simplify(x, cache)).collect::<Result<_,_>>()?);
                     debug_assert!(cache.contains(&identity));
                     cache.remove(&identity);
                     res
@@ -756,9 +756,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
             Value::String(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
             Value::Image(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
             Value::Audio(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
-            Value::List(x) => Identity(x.as_ptr() as *const (), PhantomData),
-            Value::Closure(x) => Identity(x.as_ptr() as *const (), PhantomData),
-            Value::Entity(x) => Identity(x.as_ptr() as *const (), PhantomData),
+            Value::List(x) => Identity(Gc::as_ptr(*x) as *const (), PhantomData),
+            Value::Closure(x) => Identity(Gc::as_ptr(*x) as *const (), PhantomData),
+            Value::Entity(x) => Identity(Gc::as_ptr(*x) as *const (), PhantomData),
             Value::Native(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
         }
     }
@@ -801,21 +801,21 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         }
     }
     /// Attempts to interpret this value as a list.
-    pub fn as_list(&self) -> Result<GcCell<'gc, VecDeque<Value<'gc, C, S>>>, ConversionError<C, S>> {
+    pub fn as_list(&self) -> Result<Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>, ConversionError<C, S>> {
         match self {
             Value::List(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::List }),
         }
     }
     /// Attempts to interpret this value as a closure.
-    pub fn as_closure(&self) -> Result<GcCell<'gc, Closure<'gc, C, S>>, ConversionError<C, S>> {
+    pub fn as_closure(&self) -> Result<Gc<'gc, RefLock<Closure<'gc, C, S>>>, ConversionError<C, S>> {
         match self {
             Value::Closure(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Closure }),
         }
     }
     /// Attempts to interpret this value as an entity.
-    pub fn as_entity(&self) -> Result<GcCell<'gc, Entity<'gc, C, S>>, ConversionError<C, S>> {
+    pub fn as_entity(&self) -> Result<Gc<'gc, RefLock<Entity<'gc, C, S>>>, ConversionError<C, S>> {
         match self {
             Value::Entity(x) => Ok(*x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Entity }),
@@ -853,7 +853,7 @@ pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub costume: Option<Rc<Vec<u8>>>,
     #[collect(require_static)] pub state: C::EntityState,
     #[collect(require_static)] pub alive: bool,
-                               pub root: Option<GcCell<'gc, Entity<'gc, C, S>>>,
+                               pub root: Option<Gc<'gc, RefLock<Entity<'gc, C, S>>>>,
                                pub fields: SymbolTable<'gc, C, S>,
 }
 impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Entity<'_, C, S> {
@@ -870,11 +870,11 @@ impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Entity<'_, C, S> {
 #[collect(no_drop)]
 pub struct Watcher<'gc, C: CustomTypes<S>, S: System<C>> {
     /// The entity associated with the variable being watched.
-    pub entity: GcWeakCell<'gc, Entity<'gc, C, S>>,
+    pub entity: GcWeak<'gc, RefLock<Entity<'gc, C, S>>>,
     /// The name of the variable being watched.
     pub name: String,
     /// The value of the variable being watched.
-    pub value: GcWeakCell<'gc, Value<'gc, C, S>>,
+    pub value: GcWeak<'gc, RefLock<Value<'gc, C, S>>>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> fmt::Debug for Watcher<'gc, C, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -884,7 +884,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> fmt::Debug for Watcher<'gc, C, S> {
 
 /// Represents a shared mutable resource.
 /// 
-/// This is effectively equivalent to [`GcCell<T>`] except that it performs no dynamic allocation
+/// This is effectively equivalent to [`Gc<T>`] except that it performs no dynamic allocation
 /// for the [`Shared::Unique`] case, which is assumed to be significantly more likely than [`Shared::Aliased`].
 #[derive(Collect)]
 #[collect(no_drop)]
@@ -892,29 +892,29 @@ pub enum Shared<'gc, T: 'gc + Collect> {
     /// A shared resource which has only (this) single unique handle.
     Unique(T),
     /// One of several handles to a single shared resource.
-    Aliased(GcCell<'gc, T>),
+    Aliased(Gc<'gc, RefLock<T>>),
 }
 impl<'gc, T: 'gc + Collect> Shared<'gc, T> {
     /// Sets the value of the shared resource.
-    pub fn set(&mut self, mc: MutationContext<'gc, '_>, value: T) {
+    pub fn set(&mut self, mc: &Mutation<'gc>, value: T) {
         match self {
             Shared::Unique(x) => *x = value,
-            Shared::Aliased(x) => *x.write(mc) = value,
+            Shared::Aliased(x) => *x.borrow_mut(mc) = value,
         }
     }
     /// Gets a reference to the shared resource's currently stored value.
     pub fn get(&self) -> SharedRef<T> {
         match self {
             Shared::Unique(x) => SharedRef::Unique(x),
-            Shared::Aliased(x) => SharedRef::Aliased(x.read()),
+            Shared::Aliased(x) => SharedRef::Aliased(x.borrow()),
         }
     }
     /// Transitions the shared value from [`Shared::Unique`] to [`Shared::Aliased`] if it has not already,
     /// and returns an additional alias to the underlying value.
-    pub fn alias_inner(&mut self, mc: MutationContext<'gc, '_>) -> GcCell<'gc, T> {
+    pub fn alias_inner(&mut self, mc: &Mutation<'gc>) -> Gc<'gc, RefLock<T>> {
         take_mut::take(self, |myself| {
             match myself {
-                Shared::Unique(x) => Shared::Aliased(GcCell::allocate(mc, x)),
+                Shared::Unique(x) => Shared::Aliased(Gc::new(mc, RefLock::new(x))),
                 Shared::Aliased(_) => myself,
             }
         });
@@ -926,7 +926,7 @@ impl<'gc, T: 'gc + Collect> Shared<'gc, T> {
     }
     /// Creates a new instance of [`Shared`] that references the same underlying value.
     /// This is equivalent to constructing an instance of [`Shared::Aliased`] with the result of [`Shared::alias_inner`].
-    pub fn alias(&mut self, mc: MutationContext<'gc, '_>) -> Self {
+    pub fn alias(&mut self, mc: &Mutation<'gc>) -> Self {
         Shared::Aliased(self.alias_inner(mc))
     }
 }
@@ -1105,14 +1105,14 @@ pub struct GlobalContext<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub timer_start: u64,
     #[collect(require_static)] pub proj_name: String,
                                pub globals: SymbolTable<'gc, C, S>,
-                               pub entities: BTreeMap<String, GcCell<'gc, Entity<'gc, C, S>>>,
+                               pub entities: BTreeMap<String, Gc<'gc, RefLock<Entity<'gc, C, S>>>>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
-    pub fn from_init(mc: MutationContext<'gc, '_>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
+    pub fn from_init(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
         let allocated_refs = init_info.ref_values.iter().map(|ref_value| match ref_value {
             RefValue::String(value) => Value::String(Rc::new(value.clone())),
             RefValue::Image(content) => Value::Image(Rc::new(content.clone())),
-            RefValue::List(_) => Value::List(GcCell::allocate(mc, Default::default())),
+            RefValue::List(_) => Value::List(Gc::new(mc, Default::default())),
         }).collect::<Vec<_>>();
 
         fn get_value<'gc, C: CustomTypes<S>, S: System<C>>(value: &InitValue, allocated_refs: &Vec<Value<'gc, C, S>>) -> Value<'gc, C, S> {
@@ -1131,7 +1131,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
                         Value::List(x) => x,
                         _ => unreachable!(),
                     };
-                    let mut allocated_ref = allocated_ref.write(mc);
+                    let mut allocated_ref = allocated_ref.borrow_mut(mc);
                     for value in values {
                         allocated_ref.push_back(get_value(value, &allocated_refs));
                     }
@@ -1182,7 +1182,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             let name = Rc::new(entity_info.name.clone());
             let state = kind.into();
 
-            entities.insert(entity_info.name.clone(), GcCell::allocate(mc, Entity { alive: true, root: None, name, fields, costume_list, costume, state }));
+            entities.insert(entity_info.name.clone(), Gc::new(mc, RefLock::new(Entity { alive: true, root: None, name, fields, costume_list, costume, state })));
         }
 
         let proj_name = init_info.proj_name.clone();
@@ -1425,9 +1425,9 @@ pub enum CommandStatus<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
 #[educe(Clone)]
 pub struct Config<C: CustomTypes<S>, S: System<C>> {
     /// A function used to perform asynchronous requests that yield a value back to the runtime.
-    pub request: Option<Rc<dyn for<'gc> Fn(&S, MutationContext<'gc, '_>, S::RequestKey, Request<'gc, C, S>, &mut Entity<'gc, C, S>) -> RequestStatus<'gc, C, S>>>,
+    pub request: Option<Rc<dyn for<'gc> Fn(&S, &Mutation<'gc>, S::RequestKey, Request<'gc, C, S>, &mut Entity<'gc, C, S>) -> RequestStatus<'gc, C, S>>>,
     /// A function used to perform asynchronous tasks whose completion is awaited by the runtime.
-    pub command: Option<Rc<dyn for<'gc, 'a> Fn(&S, MutationContext<'gc, '_>, S::CommandKey, Command<'gc, 'a, C, S>, &mut Entity<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S>>>,
+    pub command: Option<Rc<dyn for<'gc, 'a> Fn(&S, &Mutation<'gc>, S::CommandKey, Command<'gc, 'a, C, S>, &mut Entity<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S>>>,
 }
 impl<C: CustomTypes<S>, S: System<C>> Default for Config<C, S> {
     fn default() -> Self {
@@ -1487,7 +1487,7 @@ pub trait CustomTypes<S: System<Self>>: 'static + Sized {
     type NativeValue: 'static + GetType + fmt::Debug;
 
     /// An intermediate type used to produce a [`Value`] for the [`System`] under async context.
-    /// The reason this is needed is that [`Value`] can only be used during the lifetime of an associated [`MutationContext`] handle,
+    /// The reason this is needed is that [`Value`] can only be used during the lifetime of an associated [`Mutation`] handle,
     /// which cannot be extended into the larger lifetime required for async operations.
     /// Conversions are automatically performed from this type to [`Value`] via [`CustomTypes::from_intermediate`].
     type Intermediate: 'static + Send + IntermediateType;
@@ -1498,7 +1498,7 @@ pub trait CustomTypes<S: System<Self>>: 'static + Sized {
     type EntityState: 'static + for<'gc, 'a> From<EntityKind<'gc, 'a, Self, S>>;
 
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
-    fn from_intermediate<'gc>(mc: MutationContext<'gc, '_>, value: Self::Intermediate) -> Result<Value<'gc, Self, S>, ErrorCause<Self, S>>;
+    fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Result<Value<'gc, Self, S>, ErrorCause<Self, S>>;
 }
 
 /// Represents all the features of an implementing system.
@@ -1532,18 +1532,18 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Performs a general request which returns a value to the system.
     /// Ideally, this function should be non-blocking, and the requestor will await the result asynchronously.
     /// The [`Entity`] that made the request is provided for context.
-    fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<Value<'gc, C, Self>, String>, Self::RequestKey>, ErrorCause<C, Self>>;
+    fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<Value<'gc, C, Self>, String>, Self::RequestKey>, ErrorCause<C, Self>>;
     /// Poll for the completion of an asynchronous request.
     /// The [`Entity`] that made the request is provided for context.
-    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, entity: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>>;
+    fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, entity: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>>;
 
     /// Performs a general command which does not return a value to the system.
     /// Ideally, this function should be non-blocking, and the commander will await the task's completion asynchronously.
     /// The [`Entity`] that issued the command is provided for context.
-    fn perform_command<'gc, 'a>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, 'a, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>>;
+    fn perform_command<'gc, 'a>(&self, mc: &Mutation<'gc>, command: Command<'gc, 'a, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>>;
     /// Poll for the completion of an asynchronous command.
     /// The [`Entity`] that issued the command is provided for context.
-    fn poll_command<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::CommandKey, entity: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>>;
+    fn poll_command<'gc>(&self, mc: &Mutation<'gc>, key: &Self::CommandKey, entity: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>>;
 
     /// Sends a message containing a set of named `values` to each of the specified `targets`.
     /// The `expect_reply` value controls whether or not to use a reply mechanism to asynchronously receive a response from the target(s).

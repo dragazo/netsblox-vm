@@ -351,7 +351,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         Ok(self.start_time.elapsed().as_millis() as u64)
     }
 
-    fn perform_request<'gc>(&self, mc: MutationContext<'gc, '_>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<Value<'gc, C, Self>, String>, Self::RequestKey>, ErrorCause<C, Self>> {
+    fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<Value<'gc, C, Self>, String>, Self::RequestKey>, ErrorCause<C, Self>> {
         Ok(match self.config.request.as_ref() {
             Some(handler) => {
                 let key = RequestKey(Arc::new(Mutex::new(AsyncResult::new())));
@@ -363,7 +363,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
             None => return Err(ErrorCause::NotSupported { feature: request.feature() }),
         })
     }
-    fn poll_request<'gc>(&self, mc: MutationContext<'gc, '_>, key: &Self::RequestKey, _: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>> {
+    fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, _: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>> {
         Ok(match key.poll() {
             AsyncResult::Completed(Ok(x)) => AsyncResult::Completed(Ok(C::from_intermediate(mc, x)?)),
             AsyncResult::Completed(Err(x)) => AsyncResult::Completed(Err(x)),
@@ -372,7 +372,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         })
     }
 
-    fn perform_command<'gc, 'a>(&self, mc: MutationContext<'gc, '_>, command: Command<'gc, 'a, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>> {
+    fn perform_command<'gc, 'a>(&self, mc: &Mutation<'gc>, command: Command<'gc, 'a, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>> {
         Ok(match self.config.command.as_ref() {
             Some(handler) => {
                 let key = CommandKey(Arc::new(Mutex::new(AsyncResult::new())));
@@ -384,7 +384,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
             None => return Err(ErrorCause::NotSupported { feature: command.feature() }),
         })
     }
-    fn poll_command<'gc>(&self, _: MutationContext<'gc, '_>, key: &Self::CommandKey, _: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>> {
+    fn poll_command<'gc>(&self, _: &Mutation<'gc>, key: &Self::CommandKey, _: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>> {
         Ok(key.poll())
     }
 

@@ -1,6 +1,6 @@
 [package]
 name = "netsblox-vm"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Devin Jean <emailcruzjean@yahoo.com>"]
@@ -43,8 +43,7 @@ cli = [
 # core deps
 no-std-compat = { version = "0.4.1", default-features = false, features = ["alloc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
-gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "cdcb387", default-features = false }
-# netsblox-ast = { path = "../netsblox-ast", default-features = false }
+gc-arena = { version = "=0.3.0", default-features = false }
 netsblox-ast = { version = "=0.3.2", default-features = false }
 num-traits = { version = "0.2.15", default-features = false }
 num-derive = { version = "0.3.3", default-features = false }
@@ -70,7 +69,7 @@ rand_chacha = { version = "0.3.1", default-features = false, optional = true }
 getrandom = { version = "0.2.9", default-features = false, optional = true }
 
 # cli deps
-clap = { version = "4.3.0", default-features = false, features = ["std", "derive"], optional = true }
+clap = { version = "4.3.1", default-features = false, features = ["std", "derive"], optional = true }
 crossterm = { version = "0.26.1", default-features = false, optional = true }
 actix-web = { version = "4.3.1", default-features = false, features = ["macros"], optional = true }
 actix-cors = { version = "0.6.4", default-features = false, optional = true }

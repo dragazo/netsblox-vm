@@ -17,10 +17,10 @@ use super::*;
 #[derive(Collect)]
 #[collect(no_drop)]
 struct Env<'gc> {
-    proc: GcCell<'gc, Process<'gc, C, StdSystem<C>>>,
-    glob: GcCell<'gc, GlobalContext<'gc, C, StdSystem<C>>>,
+    proc: Gc<'gc, RefLock<Process<'gc, C, StdSystem<C>>>>,
+    glob: Gc<'gc, RefLock<GlobalContext<'gc, C, StdSystem<C>>>>,
 }
-type EnvArena = Arena<Rootable![Env<'gc>]>;
+type EnvArena = Arena<Rootable![Env<'_>]>;
 
 fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>) -> (EnvArena, Locations) {
     let parser = ast::Parser::default();
@@ -33,20 +33,20 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
     (EnvArena::new(Default::default(), |mc| {
         let glob = GlobalContext::from_init(mc, &init_info, Rc::new(code), settings, system);
         let entity = *glob.entities.iter().next().unwrap().1;
-        let glob = GcCell::allocate(mc, glob);
+        let glob = Gc::new(mc, RefLock::new(glob));
 
         let mut proc = Process::new(glob, entity, main.1);
         assert!(!proc.is_running());
         proc.initialize(ProcContext { locals: Default::default(), barrier: None, reply_key: None, local_message: None });
         assert!(proc.is_running());
 
-        Env { glob, proc: GcCell::allocate(mc, proc) }
+        Env { glob, proc: Gc::new(mc, RefLock::new(proc)) }
     }), ins_locs)
 }
 
-fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(MutationContext<'gc, '_>, &Env, Result<(Option<Value<'gc, C, StdSystem<C>>>, usize), ExecError<C, StdSystem<C>>>) {
+fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(&Mutation<'gc>, &Env, Result<(Option<Value<'gc, C, StdSystem<C>>>, usize), ExecError<C, StdSystem<C>>>) {
     env.mutate(|mc, env| {
-        let mut proc = env.proc.write(mc);
+        let mut proc = env.proc.borrow_mut(mc);
         assert!(proc.is_running());
 
         let mut yields = 0;
@@ -100,7 +100,7 @@ fn test_proc_sum_123n() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.define_or_redefine("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
-            env.proc.write(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
+            env.proc.borrow_mut(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         });
         run_till_term(&mut env, |mc, _, res| {
             let expect = Value::from_json(mc, expect).unwrap();
@@ -123,7 +123,7 @@ fn test_proc_recursive_factorial() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.define_or_redefine("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
-            env.proc.write(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
+            env.proc.borrow_mut(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         });
         run_till_term(&mut env, |mc, _, res| {
             let expect = Value::from_json(mc, expect).unwrap();
@@ -184,21 +184,21 @@ fn test_proc_recursively_self_containing_lists() {
 
     run_till_term(&mut env, |mc, _, res| match res.unwrap().0.unwrap() {
         Value::List(res) => {
-            let res = res.read();
+            let res = res.borrow();
             assert_eq!(res.len(), 4);
 
-            fn check<'gc>(name: &str, mc: MutationContext<'gc, '_>, got: &Value<'gc, C, StdSystem<C>>, expected_basic: &Value<'gc, C, StdSystem<C>>) {
+            fn check<'gc>(name: &str, mc: &Mutation<'gc>, got: &Value<'gc, C, StdSystem<C>>, expected_basic: &Value<'gc, C, StdSystem<C>>) {
                 let orig_got = got;
                 match got {
                     Value::List(got) => {
                         let top_weak = got;
-                        let got = got.read();
+                        let got = got.borrow();
                         if got.len() != 11 { panic!("{} - len error - got {} expected 11", name, got.len()) }
-                        let basic = Value::List(GcCell::allocate(mc, got.iter().take(10).cloned().collect()));
+                        let basic = Value::List(Gc::new(mc, RefLock::new(got.iter().take(10).cloned().collect())));
                         assert_values_eq(&basic, expected_basic, 1e-10, name);
                         match &got[10] {
                             Value::List(nested) => if top_weak.as_ptr() != nested.as_ptr() {
-                                panic!("{} - self-containment not ref-eq - got {:?}", name, nested.read());
+                                panic!("{} - self-containment not ref-eq - got {:?}", name, nested.borrow());
                             }
                             x => panic!("{} - not a list - got {:?}", name, x.get_type()),
                         }
@@ -231,7 +231,7 @@ fn test_proc_sieve_of_eratosthenes() {
         let mut locals = SymbolTable::default();
         locals.define_or_redefine("n", Shared::Unique(Number::new(100.0).unwrap().into()));
 
-        let mut proc = env.proc.write(mc);
+        let mut proc = env.proc.borrow_mut(mc);
         assert!(proc.is_running());
         proc.initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         assert!(proc.is_running());
@@ -299,34 +299,34 @@ fn test_proc_all_arithmetic() {
 
     run_till_term(&mut env, |mc, _, res| {
         let inf = std::f64::INFINITY;
-        let expect = Value::List(GcCell::allocate(mc, [
-            Value::List(GcCell::allocate(mc, [8.5, 2.9, -2.9, -8.5].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [2.9, 8.5, -8.5, -2.9].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [15.96, -15.96, -15.96, 15.96].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [2.035714285714286, -2.035714285714286, -2.035714285714286, 2.035714285714286].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [inf, -inf, -inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [130.75237792066878, 0.007648044463151016].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.1, -2.7, 2.7, -0.1, 5.8, -1.3, 1.3, -5.8].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [7.0, 8.0, -7.0, -8.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [56.8, 6.3, inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [-56.8, 6.3, -inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [8.0, 8.0, -7.0, -7.0, inf, -inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [7.0, 7.0, -8.0, -8.0, inf, -inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [2.701851217221259, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.12706460860135046, 0.7071067811865475].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.9918944425900297, 0.7071067811865476].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.12810295445305653, 1.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.0, 30.0, -30.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [90.0, 60.0, 120.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [0.0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [-0.6931471805599453, 0.0, 2.186051276738094, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [-0.3010299956639812, 0.0, 0.9493900066449128, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [-1.0, 0.0, 3.1538053360790355, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [1.0, 3.3201169227365472, 0.0001363889264820114, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [1.0, 15.848931924611133, 1.2589254117941663e-9, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [1.0, 2.2973967099940698, 0.002093307544016197, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect())),
-            Value::List(GcCell::allocate(mc, [Value::String(Rc::new("0".into())), Value::String(Rc::new("1.2".into())), Value::String(Rc::new("-8.9".into())), Number::new(inf).unwrap().into(), Number::new(-inf).unwrap().into()].into_iter().collect())),
-        ].into_iter().collect()));
+        let expect = Value::List(Gc::new(mc, RefLock::new([
+            Value::List(Gc::new(mc, RefLock::new([8.5, 2.9, -2.9, -8.5].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([2.9, 8.5, -8.5, -2.9].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([15.96, -15.96, -15.96, 15.96].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([2.035714285714286, -2.035714285714286, -2.035714285714286, 2.035714285714286].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([inf, -inf, -inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([130.75237792066878, 0.007648044463151016].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([0.1, -2.7, 2.7, -0.1, 5.8, -1.3, 1.3, -5.8].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([7.0, 8.0, -7.0, -8.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([56.8, 6.3, inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([-56.8, 6.3, -inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([8.0, 8.0, -7.0, -7.0, inf, -inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([7.0, 7.0, -8.0, -8.0, inf, -inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([2.701851217221259, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([0.12706460860135046, 0.7071067811865475].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([0.9918944425900297, 0.7071067811865476].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([0.12810295445305653, 1.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([0.0, 30.0, -30.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([90.0, 60.0, 120.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([0.0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([-0.6931471805599453, 0.0, 2.186051276738094, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([-0.3010299956639812, 0.0, 0.9493900066449128, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([-1.0, 0.0, 3.1538053360790355, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([1.0, 3.3201169227365472, 0.0001363889264820114, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([1.0, 15.848931924611133, 1.2589254117941663e-9, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([1.0, 2.2973967099940698, 0.002093307544016197, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
+            Value::List(Gc::new(mc, RefLock::new([Value::String(Rc::new("0".into())), Value::String(Rc::new("1.2".into())), Value::String(Rc::new("-8.9".into())), Number::new(inf).unwrap().into(), Number::new(-inf).unwrap().into()].into_iter().collect()))),
+        ].into_iter().collect())));
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-7, "short circuit test");
     });
 }
@@ -455,13 +455,13 @@ fn test_proc_warp_yields() {
         env.mutate(|mc, env| {
             let mut locals = SymbolTable::default();
             locals.define_or_redefine("mode", Shared::Unique(Number::new(mode as f64).unwrap().into()));
-            env.proc.write(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
+            env.proc.borrow_mut(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         });
 
         run_till_term(&mut env, |mc, env, res| {
             let (res, yields) = res.unwrap();
             assert_values_eq(res.as_ref().unwrap(), &Value::from_json(mc, json!("x")).unwrap(), 1e-20, &format!("yield test (mode {mode}) res"));
-            let counter = env.glob.read().globals.lookup("counter").unwrap().get().clone();
+            let counter = env.glob.borrow().globals.lookup("counter").unwrap().get().clone();
             assert_values_eq(&counter, &Number::new(expected_counter as f64).unwrap().into(), 1e-20, &format!("yield test (mode {mode}) value"));
             if yields != expected_yields { panic!("yield test (mode {}) yields - got {} expected {}", mode, yields, expected_yields) }
         });
@@ -564,7 +564,7 @@ fn test_proc_rpc_call_basic() {
             let mut locals = SymbolTable::default();
             locals.define_or_redefine("lat", Shared::Unique(Number::new(lat).unwrap().into()));
             locals.define_or_redefine("long", Shared::Unique(Number::new(long).unwrap().into()));
-            env.proc.write(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
+            env.proc.borrow_mut(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         });
         run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
             Value::String(ret) => assert_eq!(&*ret, city),
@@ -944,9 +944,9 @@ fn test_proc_pick_random() {
     run_till_term(&mut env, |_, _, res| {
         let results = {
             let mut out = vec![];
-            for row in res.unwrap().0.unwrap().as_list().unwrap().read().iter() {
+            for row in res.unwrap().0.unwrap().as_list().unwrap().borrow().iter() {
                 let mut vals = vec![];
-                for val in row.as_list().unwrap().read().iter() {
+                for val in row.as_list().unwrap().borrow().iter() {
                     vals.push(match val {
                         Value::Number(x) => *x,
                         _ => panic!("{val:?}"),
@@ -1014,13 +1014,13 @@ fn test_proc_rand_list_ops() {
 
             let mut out = vec![];
             let res = res.unwrap().0.unwrap().as_list().unwrap();
-            let res = res.read();
+            let res = res.borrow();
             let mut res = res.iter();
             let last = loop {
                 match res.next().unwrap() {
                     Value::List(row) => {
                         let mut vals = vec![];
-                        for val in row.read().iter() {
+                        for val in row.borrow().iter() {
                             vals.push(extract_value(val));
                         }
                         out.push(vals);

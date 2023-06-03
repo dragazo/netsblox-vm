@@ -61,7 +61,7 @@ pub struct ErrorSummary {
 impl ErrorSummary {
     pub fn extract<C: CustomTypes<S>, S: System<C>>(error: &ExecError<C, S>, process: &Process<C, S>, locations: &Locations) -> Self {
         let raw_entity = process.call_stack.last().unwrap().entity;
-        let entity = raw_entity.read().name.as_str().to_owned();
+        let entity = raw_entity.borrow().name.as_str().to_owned();
         let cause = format!("{:?}", error.cause);
 
         fn summarize_symbols<C: CustomTypes<S>, S: System<C>>(symbols: &SymbolTable<'_, C, S>) -> Vec<VarEntry> {
@@ -71,8 +71,8 @@ impl ErrorSummary {
             }
             res
         }
-        let globals = summarize_symbols(&process.get_global_context().read().globals);
-        let fields = summarize_symbols(&raw_entity.read().fields);
+        let globals = summarize_symbols(&process.get_global_context().borrow().globals);
+        let fields = summarize_symbols(&raw_entity.borrow().fields);
 
         let call_stack = process.get_call_stack();
         let mut trace = Vec::with_capacity(call_stack.len());
@@ -115,7 +115,7 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// such as a stop script command or the death of the process's associated entity.
     Terminate { result: Option<Value<'gc, C, S>> },
     /// The process has requested to broadcast a message to all entities (if `target` is `None`) or to a specific `target`, which may trigger other code to execute.
-    Broadcast { msg_type: String, barrier: Option<Barrier>, targets: Option<Vec<GcCell<'gc, Entity<'gc, C, S>>>> },
+    Broadcast { msg_type: String, barrier: Option<Barrier>, targets: Option<Vec<Gc<'gc, RefLock<Entity<'gc, C, S>>>>> },
     /// The process has requested to create or destroy a new watcher for a variable.
     /// If `create` is true, the process is requesting to register the given watcher.
     /// If `create` if false, the process is requesting to remove a watcher which is equivalent to the given watcher.
@@ -123,11 +123,11 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// The existence of a watcher is invisible to a process, so it is perfectly valid for implementors to simply ignore all watcher requests.
     Watcher { create: bool, watcher: Watcher<'gc, C, S> },
     /// The process has requested to fork a new process that starts with the given parameters.
-    Fork { pos: usize, locals: SymbolTable<'gc, C, S>, entity: GcCell<'gc, Entity<'gc, C, S>> },
+    Fork { pos: usize, locals: SymbolTable<'gc, C, S>, entity: Gc<'gc, RefLock<Entity<'gc, C, S>>> },
     /// The process has created a new clone of an existing entity.
     /// The clone has already been created, so this is just an informational flag for any logging or other initialization logic.
     /// Projects use this event to bind new scripts to the clone, which is an aspect of projects but not processes or entities.
-    CreatedClone { new_entity: GcCell<'gc, Entity<'gc, C, S>> },
+    CreatedClone { new_entity: Gc<'gc, RefLock<Entity<'gc, C, S>>> },
     /// The process has requested to pause execution of the (entire) project.
     /// This can be useful for student debugging (similar to breakpoints), but can be ignored by the executor if desired.
     Pause,
@@ -141,7 +141,7 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
 pub struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub called_from: usize,
     #[collect(require_static)]     return_to: usize,
-                               pub entity: GcCell<'gc, Entity<'gc, C, S>>,
+                               pub entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
                                pub locals: SymbolTable<'gc, C, S>,
 
     #[collect(require_static)] warp_counter: usize,
@@ -187,7 +187,7 @@ pub struct ProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
-                               global_context: GcCell<'gc, GlobalContext<'gc, C, S>>,
+                               global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>,
     #[collect(require_static)] start_pos: usize,
     #[collect(require_static)] pos: usize,
     #[collect(require_static)] running: bool,
@@ -207,7 +207,7 @@ pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
 impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity` and `system`.
     /// The created process is initialized to an idle (non-running) state; use [`Process::initialize`] to begin execution.
-    pub fn new(global_context: GcCell<'gc, GlobalContext<'gc, C, S>>, entity: GcCell<'gc, Entity<'gc, C, S>>, start_pos: usize) -> Self {
+    pub fn new(global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>, entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>, start_pos: usize) -> Self {
         Self {
             global_context,
             start_pos,
@@ -242,7 +242,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         self.running
     }
     /// Gets the global context that this process is tied to (see [`Process::new`]).
-    pub fn get_global_context(&self) -> GcCell<'gc, GlobalContext<'gc, C, S>> {
+    pub fn get_global_context(&self) -> Gc<'gc, RefLock<GlobalContext<'gc, C, S>>> {
         self.global_context
     }
     /// Gets a reference to the current call stack.
@@ -280,7 +280,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// as well as to retrieve the return value or execution error in the event that the process terminates.
     /// 
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`ProcessStep::Terminate`].
-    pub fn step(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, C, S>, ExecError<C, S>> {
+    pub fn step(&mut self, mc: &Mutation<'gc>) -> Result<ProcessStep<'gc, C, S>, ExecError<C, S>> {
         let mut res = self.step_impl(mc);
         if let Err(err) = &res {
             if let Some(Handler { pos, var, warp_counter, call_stack_size, value_stack_size, meta_stack_size }) = self.handler_stack.last() {
@@ -309,8 +309,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         }
         res.map_err(|cause| ExecError { cause, pos: self.pos })
     }
-    fn step_impl(&mut self, mc: MutationContext<'gc, '_>) -> Result<ProcessStep<'gc, C, S>, ErrorCause<C, S>> {
-        let mut global_context = self.global_context.write(mc);
+    fn step_impl(&mut self, mc: &Mutation<'gc>) -> Result<ProcessStep<'gc, C, S>, ErrorCause<C, S>> {
+        let mut global_context = self.global_context.borrow_mut(mc);
         let mut global_context = &mut *global_context;
 
         fn process_result<'gc, C: CustomTypes<S>, S: System<C>, T>(result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, C, S>>>, last_ok: Option<&mut Option<Value<'gc, C, S>>>, last_err: Option<&mut Option<Value<'gc, C, S>>>, to_value: fn(T) -> Option<Value<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
@@ -373,7 +373,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
         match &self.defer {
             None => (),
-            Some(Defer::Request { key, aft_pos, action }) => match global_context.system.poll_request(mc, key, &mut *context_entity.write(mc))? {
+            Some(Defer::Request { key, aft_pos, action }) => match global_context.system.poll_request(mc, key, &mut *context_entity.borrow_mut(mc))? {
                 AsyncResult::Completed(x) => {
                     process_request!(x, action, *aft_pos);
                     self.defer = None;
@@ -381,7 +381,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 AsyncResult::Pending => return Ok(ProcessStep::Yield),
                 AsyncResult::Consumed => panic!(),
             }
-            Some(Defer::Command { key, aft_pos }) => match global_context.system.poll_command(mc, key, &mut *context_entity.write(mc))? {
+            Some(Defer::Command { key, aft_pos }) => match global_context.system.poll_command(mc, key, &mut *context_entity.borrow_mut(mc))? {
                 AsyncResult::Completed(x) => {
                     process_command!(x, *aft_pos);
                     self.defer = None;
@@ -418,7 +418,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
         }
 
-        let mut entity = context_entity.write(mc);
+        let mut entity = context_entity.borrow_mut(mc);
         let (parent_scope, current_scope) = match self.call_stack.as_mut_slice() {
             [] => unreachable!(),
             [x] => (None, &mut x.locals),
@@ -456,10 +456,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }}
         }
 
-        fn prep_call_closure<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, value_stack: &mut Vec<Value<'gc, C, S>>, args: usize) -> Result<(usize, SymbolTable<'gc, C, S>), ErrorCause<C, S>> {
+        fn prep_call_closure<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, value_stack: &mut Vec<Value<'gc, C, S>>, args: usize) -> Result<(usize, SymbolTable<'gc, C, S>), ErrorCause<C, S>> {
             let mut values = value_stack.drain(value_stack.len() - (args + 1)..);
             let closure = values.next().unwrap().as_closure()?;
-            let mut closure = closure.write(mc);
+            let mut closure = closure.borrow_mut(mc);
             if closure.params.len() != args {
                 return Err(ErrorCause::ClosureArgCount { expected: closure.params.len(), got: args });
             }
@@ -559,16 +559,16 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
 
             Instruction::ListCons => {
-                let mut res = self.value_stack.pop().unwrap().as_list()?.read().clone();
+                let mut res = self.value_stack.pop().unwrap().as_list()?.borrow().clone();
                 res.push_front(self.value_stack.pop().unwrap());
-                self.value_stack.push(GcCell::allocate(mc, res).into());
+                self.value_stack.push(Gc::new(mc, RefLock::new(res)).into());
                 self.pos = aft_pos;
             }
             Instruction::ListCdr => {
-                let mut res = self.value_stack.pop().unwrap().as_list()?.read().clone();
+                let mut res = self.value_stack.pop().unwrap().as_list()?.borrow().clone();
                 if res.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }) }
                 res.pop_front().unwrap();
-                self.value_stack.push(GcCell::allocate(mc, res).into());
+                self.value_stack.push(Gc::new(mc, RefLock::new(res)).into());
                 self.pos = aft_pos;
             }
 
@@ -588,17 +588,17 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
             Instruction::ListIsEmpty => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                self.value_stack.push(list.read().is_empty().into());
+                self.value_stack.push(list.borrow().is_empty().into());
                 self.pos = aft_pos;
             }
             Instruction::ListLength => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                self.value_stack.push(Number::new(list.read().len() as f64)?.into());
+                self.value_stack.push(Number::new(list.borrow().len() as f64)?.into());
                 self.pos = aft_pos;
             }
             Instruction::ListDims => {
                 let list = self.value_stack.pop().unwrap();
-                self.value_stack.push(GcCell::allocate(mc, ops::dimensions(&list)?.into_iter().map(|x| Ok(Number::new(x as f64)?.into())).collect::<Result<VecDeque<_>, NumberError>>()?).into());
+                self.value_stack.push(Gc::new(mc, RefLock::new(ops::dimensions(&list)?.into_iter().map(|x| Ok(Number::new(x as f64)?.into())).collect::<Result<VecDeque<_>, NumberError>>()?)).into());
                 self.pos = aft_pos;
             }
             Instruction::ListRank => {
@@ -609,12 +609,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
             Instruction::ListRev => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                self.value_stack.push(GcCell::allocate(mc, list.read().iter().rev().cloned().collect::<VecDeque<_>>()).into());
+                self.value_stack.push(Gc::new(mc, RefLock::new(list.borrow().iter().rev().cloned().collect::<VecDeque<_>>())).into());
                 self.pos = aft_pos;
             }
             Instruction::ListFlatten => {
                 let list = self.value_stack.pop().unwrap();
-                self.value_stack.push(GcCell::allocate(mc, ops::flatten(&list)?).into());
+                self.value_stack.push(Gc::new(mc, RefLock::new(ops::flatten(&list)?)).into());
                 self.pos = aft_pos;
             }
             Instruction::ListReshape { len } => {
@@ -623,7 +623,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                         let stack_size = self.value_stack.len();
                         self.value_stack.drain(stack_size - len..).collect()
                     }
-                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().cloned().collect(),
+                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.borrow().iter().cloned().collect(),
                 };
                 let src = self.value_stack.pop().unwrap();
 
@@ -645,9 +645,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                         let stack_size = self.value_stack.len();
                         self.value_stack.drain(stack_size - len..).map(|x| x.as_list()).collect::<Result<_,_>>()?
                     }
-                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().map(|x| x.as_list()).collect::<Result<_,_>>()?,
+                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.borrow().iter().map(|x| x.as_list()).collect::<Result<_,_>>()?,
                 };
-                self.value_stack.push(GcCell::allocate(mc, ops::cartesian_product(mc, &sources)).into());
+                self.value_stack.push(Gc::new(mc, RefLock::new(ops::cartesian_product(mc, &sources))).into());
                 self.pos = aft_pos;
             }
 
@@ -663,7 +663,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::ListLines => {
                 let value = self.value_stack.pop().unwrap().as_list()?;
-                let value = value.read();
+                let value = value.borrow();
 
                 let mut values = value.iter();
                 let res = match values.next() {
@@ -686,7 +686,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let index = self.value_stack.pop().unwrap();
                 let val = self.value_stack.pop().unwrap();
-                let mut list = list.write(mc);
+                let mut list = list.borrow_mut(mc);
 
                 let index = ops::prep_index(&index, list.len() + 1)?;
                 list.insert(index, val);
@@ -695,13 +695,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ListInsertLast => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let val = self.value_stack.pop().unwrap();
-                list.write(mc).push_back(val);
+                list.borrow_mut(mc).push_back(val);
                 self.pos = aft_pos;
             }
             Instruction::ListInsertRandom => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let val = self.value_stack.pop().unwrap();
-                let mut list = list.write(mc);
+                let mut list = list.borrow_mut(mc);
 
                 let index = ops::prep_rand_index(&*global_context.system, list.len() + 1)?;
                 list.insert(index, val);
@@ -716,7 +716,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::ListGetLast => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                self.value_stack.push(match list.read().back() {
+                self.value_stack.push(match list.borrow().back() {
                     Some(x) => x.clone(),
                     None => return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }),
                 });
@@ -724,7 +724,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::ListGetRandom => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                let list = list.read();
+                let list = list.borrow();
                 let index = ops::prep_rand_index(&*global_context.system, list.len())?;
                 self.value_stack.push(list[index].clone());
                 self.pos = aft_pos;
@@ -734,7 +734,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let value = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let index = self.value_stack.pop().unwrap();
-                let mut list = list.write(mc);
+                let mut list = list.borrow_mut(mc);
 
                 let index = ops::prep_index(&index, list.len())?;
                 list[index] = value;
@@ -743,7 +743,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ListAssignLast => {
                 let value = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                let mut list = list.write(mc);
+                let mut list = list.borrow_mut(mc);
                 if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }); }
                 *list.back_mut().unwrap() = value;
                 self.pos = aft_pos;
@@ -751,7 +751,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ListAssignRandom => {
                 let value = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                let mut list = list.write(mc);
+                let mut list = list.borrow_mut(mc);
 
                 let index = ops::prep_rand_index(&*global_context.system, list.len())?;
                 list[index] = value;
@@ -761,24 +761,24 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ListRemove => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let index = self.value_stack.pop().unwrap();
-                let mut list = list.write(mc);
+                let mut list = list.borrow_mut(mc);
                 let index = ops::prep_index(&index, list.len())?;
                 list.remove(index);
                 self.pos = aft_pos;
             }
             Instruction::ListRemoveLast => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
-                let mut list = list.write(mc);
+                let mut list = list.borrow_mut(mc);
                 if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }) }
                 list.pop_back().unwrap();
                 self.pos = aft_pos;
             }
             Instruction::ListRemoveAll => {
-                self.value_stack.pop().unwrap().as_list()?.write(mc).clear();
+                self.value_stack.pop().unwrap().as_list()?.borrow_mut(mc).clear();
                 self.pos = aft_pos;
             }
 
-            Instruction::ListPopFirstOrElse { goto } => match self.value_stack.pop().unwrap().as_list()?.write(mc).pop_front() {
+            Instruction::ListPopFirstOrElse { goto } => match self.value_stack.pop().unwrap().as_list()?.borrow_mut(mc).pop_front() {
                 Some(value) => {
                     self.value_stack.push(value);
                     self.pos = aft_pos;
@@ -793,7 +793,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::VariadicOp { op, len } => {
-                fn combine_as_binary<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, mut acc: Value<'gc, C, S>, values: &mut dyn Iterator<Item = &Value<'gc, C, S>>, op: BinaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+                fn combine_as_binary<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, mut acc: Value<'gc, C, S>, values: &mut dyn Iterator<Item = &Value<'gc, C, S>>, op: BinaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
                     for item in values {
                         acc = ops::binary_op(mc, system, &acc, item, op)?;
                     }
@@ -812,7 +812,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     Ok(res.clone())
                 }
 
-                type Combine<'gc, C, S, I> = fn(MutationContext<'gc, '_>, &S, I) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
+                type Combine<'gc, C, S, I> = fn(&Mutation<'gc>, &S, I) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
                 let combine: Combine<'gc, C, S, &mut dyn Iterator<Item = &Value<'gc, C, S>>> = match op {
                     VariadicOp::Add => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(0.0)?), values, BinaryOp::Add),
                     VariadicOp::Mul => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(1.0)?), values, BinaryOp::Mul),
@@ -826,14 +826,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                         Ok(Rc::new(acc).into())
                     },
                     VariadicOp::MakeList => |mc, _, values| {
-                        Ok(GcCell::allocate(mc, values.cloned().collect::<VecDeque<_>>()).into())
+                        Ok(Gc::new(mc, RefLock::new(values.cloned().collect::<VecDeque<_>>())).into())
                     },
                     VariadicOp::ListCat => |mc, _, values| {
                         let mut acc = VecDeque::new();
                         for item in values {
-                            acc.extend(item.as_list()?.read().iter().cloned());
+                            acc.extend(item.as_list()?.borrow().iter().cloned());
                         }
-                        Ok(GcCell::allocate(mc, acc).into())
+                        Ok(Gc::new(mc, RefLock::new(acc)).into())
                     },
                 };
 
@@ -846,7 +846,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     }
                     VariadicLen::Dynamic => {
                         let src = self.value_stack.pop().unwrap().as_list()?;
-                        let src = src.read();
+                        let src = src.borrow();
                         combine(mc, &*global_context.system, &mut src.iter())?
                     }
                 };
@@ -900,9 +900,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
             Instruction::Watcher { create, var } => {
                 let watcher = Watcher {
-                    entity: GcCell::downgrade(context_entity),
+                    entity: Gc::downgrade(context_entity),
                     name: var.to_owned(),
-                    value: GcCell::downgrade(lookup_var!(mut var).alias_inner(mc)),
+                    value: Gc::downgrade(lookup_var!(mut var).alias_inner(mc)),
                 };
                 self.pos = aft_pos;
                 return Ok(ProcessStep::Watcher { create, watcher });
@@ -953,7 +953,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 for var in captures.iter() {
                     caps.define_or_redefine(var, lookup_var!(mut var).alias(mc));
                 }
-                self.value_stack.push(GcCell::allocate(mc, Closure { pos, params, captures: caps }).into());
+                self.value_stack.push(Gc::new(mc, RefLock::new(Closure { pos, params, captures: caps })).into());
                 self.pos = aft_pos;
             }
             Instruction::CallClosure { new_entity, args } => {
@@ -1048,7 +1048,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                         let stack_size = self.value_stack.len();
                         self.value_stack.drain(stack_size - len..).collect()
                     }
-                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.read().iter().cloned().collect(),
+                    VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.borrow().iter().cloned().collect(),
                 };
                 let name = self.value_stack.pop().unwrap().to_string()?.into_owned();
                 perform_request!(Request::Syscall { name, args }, RequestAction::Syscall, aft_pos);
@@ -1061,7 +1061,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let targets = match target {
                     false => None,
                     true => Some(match self.value_stack.pop().unwrap() {
-                        Value::List(x) => x.read().iter().map(Value::as_entity).collect::<Result<_,_>>()?,
+                        Value::List(x) => x.borrow().iter().map(Value::as_entity).collect::<Result<_,_>>()?,
                         x => vec![x.as_entity()?],
                     }),
                 };
@@ -1117,7 +1117,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let targets = match self.value_stack.pop().unwrap() {
                     Value::String(x) => vec![x.as_str().to_owned()],
                     Value::List(x) => {
-                        let x = x.read();
+                        let x = x.borrow();
                         let mut res = Vec::with_capacity(x.len());
                         for val in x.iter() {
                             match val {
@@ -1171,7 +1171,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::PushCostumeList => {
-                self.value_stack.push(Value::List(GcCell::allocate(mc, entity.costume_list.iter().map(|x| Value::Image(x.1.clone())).collect())));
+                self.value_stack.push(Value::List(Gc::new(mc, RefLock::new(entity.costume_list.iter().map(|x| Value::Image(x.1.clone())).collect()))));
                 self.pos = aft_pos;
             }
             Instruction::SetCostume => {
@@ -1210,8 +1210,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::Clone => {
                 drop(entity); // drop our mutable borrow from earlier (in case target is self)
                 let target_cell = self.value_stack.pop().unwrap().as_entity()?;
-                let target = target_cell.read();
-                let new_entity = GcCell::allocate(mc, Entity {
+                let target = target_cell.borrow();
+                let new_entity = Gc::new(mc, RefLock::new(Entity {
                     name: target.name.clone(),
                     costume_list: target.costume_list.clone(),
                     costume: target.costume.clone(),
@@ -1219,7 +1219,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     alive: true,
                     root: Some(target.root.unwrap_or(target_cell)),
                     fields: target.fields.clone(),
-                });
+                }));
                 self.value_stack.push(new_entity.into());
                 self.pos = aft_pos;
                 return Ok(ProcessStep::CreatedClone { new_entity });
@@ -1234,13 +1234,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::Goto => match self.value_stack.pop().unwrap() {
                 Value::List(target) => {
-                    let target = target.read();
+                    let target = target.borrow();
                     if target.len() != 2 { return Err(ErrorCause::InvalidListLength { expected: 2, got: target.len() }); }
                     let (x, y) = (target[0].to_number()?, target[1].to_number()?);
                     perform_command!(Command::GotoXY { x, y }, aft_pos);
                 }
                 Value::Entity(target) => {
-                    let target = target.read();
+                    let target = target.borrow();
                     perform_command!(Command::GotoEntity { target: &*target }, aft_pos);
                 }
                 target => return Err(ErrorCause::ConversionError { got: target.get_type(), expected: Type::Entity }),
@@ -1252,13 +1252,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::PointTowards => match self.value_stack.pop().unwrap() {
                 Value::List(target) => {
-                    let target = target.read();
+                    let target = target.borrow();
                     if target.len() != 2 { return Err(ErrorCause::InvalidListLength { expected: 2, got: target.len() }); }
                     let (x, y) = (target[0].to_number()?, target[1].to_number()?);
                     perform_command!(Command::PointTowardsXY { x, y }, aft_pos);
                 }
                 Value::Entity(target) => {
-                    let target = target.read();
+                    let target = target.borrow();
                     perform_command!(Command::PointTowardsEntity { target: &*target }, aft_pos);
                 }
                 target => return Err(ErrorCause::ConversionError { got: target.get_type(), expected: Type::Entity }),
@@ -1280,12 +1280,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 mod ops {
     use super::*;
 
-    fn as_list<'gc, C: CustomTypes<S>, S: System<C>>(v: &Value<'gc, C, S>) -> Option<GcCell<'gc, VecDeque<Value<'gc, C, S>>>> {
+    fn as_list<'gc, C: CustomTypes<S>, S: System<C>>(v: &Value<'gc, C, S>) -> Option<Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>> {
         v.as_list().ok()
     }
-    fn as_matrix<'gc, C: CustomTypes<S>, S: System<C>>(v: &Value<'gc, C, S>) -> Option<GcCell<'gc, VecDeque<Value<'gc, C, S>>>> {
+    fn as_matrix<'gc, C: CustomTypes<S>, S: System<C>>(v: &Value<'gc, C, S>) -> Option<Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>> {
         let vals = as_list(v)?;
-        let good = match vals.read().front() {
+        let good = match vals.borrow().front() {
             None => false,
             Some(first) => as_list(first).is_some(),
         };
@@ -1310,7 +1310,7 @@ mod ops {
                 Value::List(values) => {
                     let key = value.identity();
                     if !cache.insert(key) { return Err(ErrorCause::CyclicValue) }
-                    for value in values.read().iter() {
+                    for value in values.borrow().iter() {
                         flatten_impl(value, dest, cache)?;
                     }
                     cache.remove(&key);
@@ -1335,7 +1335,7 @@ mod ops {
                 let key = value.identity();
                 if !cache.insert(key) { return Err(ErrorCause::CyclicValue) }
 
-                let values = values.read();
+                let values = values.borrow();
                 res[depth] = res[depth].max(values.len());
                 for value in values.iter() {
                     dimensions_impl(value, depth + 1, res, cache)?;
@@ -1351,9 +1351,9 @@ mod ops {
         debug_assert_eq!(cache.len(), 0);
         Ok(res)
     }
-    pub(super) fn reshape<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, src: &Value<'gc, C, S>, dims: &[usize]) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+    pub(super) fn reshape<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, src: &Value<'gc, C, S>, dims: &[usize]) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         if dims.iter().any(|&x| x == 0) {
-            return Ok(GcCell::allocate(mc, VecDeque::default()).into())
+            return Ok(Gc::new(mc, RefLock::new(VecDeque::default())).into())
         }
 
         let mut src = ops::flatten(src)?;
@@ -1361,20 +1361,20 @@ mod ops {
             src.push_back(empty_string().into());
         }
 
-        fn reshape_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, src: &mut Cycle<VecDequeIter<Value<'gc, C, S>>>, dims: &[usize]) -> Value<'gc, C, S> {
+        fn reshape_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, src: &mut Cycle<VecDequeIter<Value<'gc, C, S>>>, dims: &[usize]) -> Value<'gc, C, S> {
             match dims {
                 [] => src.next().unwrap().clone(),
-                [first, rest @ ..] => GcCell::allocate(mc, (0..*first).map(|_| reshape_impl(mc, src, rest)).collect::<VecDeque<_>>()).into(),
+                [first, rest @ ..] => Gc::new(mc, RefLock::new((0..*first).map(|_| reshape_impl(mc, src, rest)).collect::<VecDeque<_>>())).into(),
             }
         }
         Ok(reshape_impl(mc, &mut src.iter().cycle(), dims))
     }
-    pub(super) fn columns<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, src: &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+    pub(super) fn columns<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, src: &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let src = src.as_list()?;
-        let src = src.read();
+        let src = src.borrow();
 
         let columns = src.iter().map(|x| match x {
-            Value::List(x) => x.read().len().max(1),
+            Value::List(x) => x.borrow().len().max(1),
             _ => 1,
         }).max().unwrap_or(0);
 
@@ -1383,34 +1383,34 @@ mod ops {
             let mut inner = VecDeque::with_capacity(src.len());
             for row in src.iter() {
                 inner.push_back(match row {
-                    Value::List(x) => x.read().get(column).cloned().unwrap_or_else(|| Value::String(empty_string())),
+                    Value::List(x) => x.borrow().get(column).cloned().unwrap_or_else(|| Value::String(empty_string())),
                     _ => row.clone(),
                 });
             }
-            res.push_back(Value::List(GcCell::allocate(mc, inner)));
+            res.push_back(Value::List(Gc::new(mc, RefLock::new(inner))));
         }
-        Ok(Value::List(GcCell::allocate(mc, res)))
+        Ok(Gc::new(mc, RefLock::new(res)).into())
     }
-    pub(super) fn cartesian_product<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, sources: &[GcCell<VecDeque<Value<'gc, C, S>>>]) -> VecDeque<Value<'gc, C, S>> {
+    pub(super) fn cartesian_product<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, sources: &[Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>]) -> VecDeque<Value<'gc, C, S>> {
         if sources.is_empty() { return Default::default() }
 
-        fn cartesian_product_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, res: &mut VecDeque<Value<'gc, C, S>>, partial: &mut VecDeque<Value<'gc, C, S>>, sources: &[GcCell<VecDeque<Value<'gc, C, S>>>]) {
+        fn cartesian_product_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, res: &mut VecDeque<Value<'gc, C, S>>, partial: &mut VecDeque<Value<'gc, C, S>>, sources: &[Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>]) {
             match sources {
-                [] => res.push_back(GcCell::allocate(mc, partial.clone()).into()),
-                [first, rest @ ..] => for item in first.read().iter() {
+                [] => res.push_back(Gc::new(mc, RefLock::new(partial.clone())).into()),
+                [first, rest @ ..] => for item in first.borrow().iter() {
                     partial.push_back(item.clone());
                     cartesian_product_impl(mc, res, partial, rest);
                     partial.pop_back();
                 }
             }
         }
-        let mut res = VecDeque::with_capacity(sources.iter().fold(1, |a, b| a * b.read().len()));
+        let mut res = VecDeque::with_capacity(sources.iter().fold(1, |a, b| a * b.borrow().len()));
         let mut partial = VecDeque::with_capacity(sources.len());
         cartesian_product_impl(mc, &mut res, &mut partial, sources);
         res
     }
 
-    fn binary_op_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, C, S>, Identity<'gc, C, S>, bool), Value<'gc, C, S>>, scalar_op: fn(MutationContext<'gc, '_>, &S, &Value<'gc, C, S>, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+    fn binary_op_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, C, S>, Identity<'gc, C, S>, bool), Value<'gc, C, S>>, scalar_op: fn(&Mutation<'gc>, &S, &Value<'gc, C, S>, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let cache_key = (a.identity(), b.identity(), matrix_mode);
         Ok(match cache.get(&cache_key) {
             Some(x) => x.clone(),
@@ -1418,33 +1418,33 @@ mod ops {
                 let checker = if matrix_mode { as_matrix } else { as_list };
                 match (checker(a), checker(b)) {
                     (Some(a), Some(b)) => {
-                        let (a, b) = (a.read(), b.read());
-                        let real_res: Value<C, S> = GcCell::allocate(mc, VecDeque::with_capacity(a.len().min(b.len()))).into();
+                        let (a, b) = (a.borrow(), b.borrow());
+                        let real_res: Value<C, S> = Gc::new(mc, RefLock::new(VecDeque::with_capacity(a.len().min(b.len())))).into();
                         cache.insert(cache_key, real_res.clone());
                         let res = as_list(&real_res).unwrap();
-                        let mut res = res.write(mc);
+                        let mut res = res.borrow_mut(mc);
                         for (a, b) in iter::zip(&*a, &*b) {
                             res.push_back(binary_op_impl(mc, system, a, b, matrix_mode, cache, scalar_op)?);
                         }
                         real_res
                     }
                     (Some(a), None) => {
-                        let a = a.read();
-                        let real_res: Value<C, S> = GcCell::allocate(mc, VecDeque::with_capacity(a.len())).into();
+                        let a = a.borrow();
+                        let real_res: Value<C, S> = Gc::new(mc, RefLock::new(VecDeque::with_capacity(a.len()))).into();
                         cache.insert(cache_key, real_res.clone());
                         let res = as_list(&real_res).unwrap();
-                        let mut res = res.write(mc);
+                        let mut res = res.borrow_mut(mc);
                         for a in &*a {
                             res.push_back(binary_op_impl(mc, system, a, b, matrix_mode, cache, scalar_op)?);
                         }
                         real_res
                     }
                     (None, Some(b)) => {
-                        let b = b.read();
-                        let real_res: Value<C, S> = GcCell::allocate(mc, VecDeque::with_capacity(b.len())).into();
+                        let b = b.borrow();
+                        let real_res: Value<C, S> = Gc::new(mc, RefLock::new(VecDeque::with_capacity(b.len()))).into();
                         cache.insert(cache_key, real_res.clone());
                         let res = as_list(&real_res).unwrap();
-                        let mut res = res.write(mc);
+                        let mut res = res.borrow_mut(mc);
                         for b in &*b {
                             res.push_back(binary_op_impl(mc, system, a, b, matrix_mode, cache, scalar_op)?);
                         }
@@ -1455,7 +1455,7 @@ mod ops {
             }
         })
     }
-    pub(super) fn binary_op<'gc, 'a, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, a: &'a Value<'gc, C, S>, b: &'a Value<'gc, C, S>, op: BinaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+    pub(super) fn binary_op<'gc, 'a, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, a: &'a Value<'gc, C, S>, b: &'a Value<'gc, C, S>, op: BinaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let mut cache = Default::default();
         match op {
             BinaryOp::Add       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.add(b.to_number()?)?.into())),
@@ -1478,7 +1478,7 @@ mod ops {
             }),
             BinaryOp::SplitBy => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
                 let (text, pattern) = (a.to_string()?, b.to_string()?);
-                Ok(GcCell::allocate(mc, text.split(pattern.as_ref()).map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(Gc::new(mc, RefLock::new(text.split(pattern.as_ref()).map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
 
             BinaryOp::Range => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
@@ -1497,7 +1497,7 @@ mod ops {
                         }
                     }
                 }
-                Ok(GcCell::allocate(mc, res).into())
+                Ok(Gc::new(mc, RefLock::new(res)).into())
             }),
             BinaryOp::Random => binary_op_impl(mc, system, a, b, true, &mut cache, |_, system, a, b| {
                 let (mut a, mut b) = (a.to_number()?.get(), b.to_number()?.get());
@@ -1513,17 +1513,17 @@ mod ops {
         }
     }
 
-    fn unary_op_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, x: &Value<'gc, C, S>, cache: &mut BTreeMap<Identity<'gc, C, S>, Value<'gc, C, S>>, scalar_op: &dyn Fn(MutationContext<'gc, '_>, &S, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+    fn unary_op_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, x: &Value<'gc, C, S>, cache: &mut BTreeMap<Identity<'gc, C, S>, Value<'gc, C, S>>, scalar_op: &dyn Fn(&Mutation<'gc>, &S, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let cache_key = x.identity();
         Ok(match cache.get(&cache_key) {
             Some(x) => x.clone(),
             None => match as_list(x) {
                 Some(x) => {
-                    let x = x.read();
-                    let real_res: Value<C, S> = GcCell::allocate(mc, VecDeque::with_capacity(x.len())).into();
+                    let x = x.borrow();
+                    let real_res: Value<C, S> = Gc::new(mc, RefLock::new(VecDeque::with_capacity(x.len()))).into();
                     cache.insert(cache_key, real_res.clone());
                     let res = as_list(&real_res).unwrap();
-                    let mut res = res.write(mc);
+                    let mut res = res.borrow_mut(mc);
                     for x in &*x {
                         res.push_back(unary_op_impl(mc, system, x, cache, scalar_op)?);
                     }
@@ -1534,7 +1534,7 @@ mod ops {
             }
         })
     }
-    pub(super) fn unary_op<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, x: &Value<'gc, C, S>, op: UnaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+    pub(super) fn unary_op<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, x: &Value<'gc, C, S>, op: UnaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let mut cache = Default::default();
         match op {
             UnaryOp::Not    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok((!x.to_bool()?).into())),
@@ -1563,25 +1563,25 @@ mod ops {
             }),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(GcCell::allocate(mc, x.to_string()?.chars().map(|x| Rc::new(x.to_string()).into()).collect::<VecDeque<_>>()).into())
+                Ok(Gc::new(mc, RefLock::new(x.to_string()?.chars().map(|x| Rc::new(x.to_string()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitWord => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(GcCell::allocate(mc, x.to_string()?.split_whitespace().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(Gc::new(mc, RefLock::new(x.to_string()?.split_whitespace().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitTab => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(GcCell::allocate(mc, x.to_string()?.split('\t').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(Gc::new(mc, RefLock::new(x.to_string()?.split('\t').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitCR => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(GcCell::allocate(mc, x.to_string()?.split('\r').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(Gc::new(mc, RefLock::new(x.to_string()?.split('\r').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitLF => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(GcCell::allocate(mc, x.to_string()?.lines().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into())
+                Ok(Gc::new(mc, RefLock::new(x.to_string()?.lines().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitCsv => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                let lines = x.to_string()?.lines().map(|line| GcCell::allocate(mc, line.split(',').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>()).into()).collect::<VecDeque<_>>();
+                let lines = x.to_string()?.lines().map(|line| Gc::new(mc, RefLock::new(line.split(',').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into()).collect::<VecDeque<_>>();
                 Ok(match lines.len() {
                     1 => lines.into_iter().next().unwrap(),
-                    _ => GcCell::allocate(mc, lines).into(),
+                    _ => Gc::new(mc, RefLock::new(lines)).into(),
                 })
             }),
             UnaryOp::SplitJson => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
@@ -1607,14 +1607,14 @@ mod ops {
                 let values: VecDeque<_> = src.chars().map(|ch| Ok(Number::new(ch as u32 as f64)?.into())).collect::<Result<_, NumberError>>()?;
                 Ok(match values.len() {
                     1 => values.into_iter().next().unwrap(),
-                    _ => GcCell::allocate(mc, values).into(),
+                    _ => Gc::new(mc, RefLock::new(values)).into(),
                 })
             }),
         }
     }
-    pub(super) fn index_list<'gc, C: CustomTypes<S>, S: System<C>>(mc: MutationContext<'gc, '_>, system: &S, list: &Value<'gc, C, S>, index: &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+    pub(super) fn index_list<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, list: &Value<'gc, C, S>, index: &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let list = list.as_list()?;
-        let list = list.read();
+        let list = list.borrow();
         unary_op_impl(mc, system, index, &mut Default::default(), &|_, _, x| Ok(list[prep_index(x, list.len())?].clone()))
     }
 
@@ -1651,7 +1651,7 @@ mod ops {
             (Value::String(_), _) | (_, Value::String(_)) => None,
 
             (Value::List(a), Value::List(b)) => {
-                let (a, b) = (a.read(), b.read());
+                let (a, b) = (a.borrow(), b.borrow());
                 let (mut a, mut b) = (a.iter(), b.iter());
                 loop {
                     match (a.next(), b.next()) {
@@ -1738,8 +1738,8 @@ mod ops {
         }
     }
 
-    pub(super) fn find<'gc, C: CustomTypes<S>, S: System<C>>(list: GcCell<'gc, VecDeque<Value<'gc, C, S>>>, value: &Value<'gc, C, S>) -> Result<Option<usize>, ErrorCause<C, S>> {
-        let list = list.read();
+    pub(super) fn find<'gc, C: CustomTypes<S>, S: System<C>>(list: Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>, value: &Value<'gc, C, S>) -> Result<Option<usize>, ErrorCause<C, S>> {
+        let list = list.borrow();
         for (i, x) in list.iter().enumerate() {
             if cmp(x, value)? == Some(Ordering::Equal) {
                 return Ok(Some(i));

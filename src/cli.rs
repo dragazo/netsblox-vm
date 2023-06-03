@@ -67,16 +67,16 @@ impl<F: FnOnce()> Drop for AtExit<F> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 struct Env<'gc, C: CustomTypes<StdSystem<C>>> {
-                               proj: GcCell<'gc, Project<'gc, C, StdSystem<C>>>,
+                               proj: Gc<'gc, RefLock<Project<'gc, C, StdSystem<C>>>>,
     #[collect(require_static)] locs: Locations,
 }
-type EnvArena<S> = Arena<Rootable![Env<'gc, S>]>;
+type EnvArena<S> = Arena<Rootable![Env<'_, S>]>;
 
 fn get_env<C: CustomTypes<StdSystem<C>>>(role: &ast::Role, system: Rc<StdSystem<C>>) -> Result<EnvArena<C>, FromAstError> {
     let (bytecode, init_info, locs, _) = ByteCode::compile(role).unwrap();
     Ok(EnvArena::new(Default::default(), |mc| {
         let proj = Project::from_init(mc, &init_info, Rc::new(bytecode), Settings::default(), system);
-        Env { proj: GcCell::allocate(mc, proj), locs }
+        Env { proj: Gc::new(mc, RefLock::new(proj)), locs }
     }))
 }
 
@@ -220,7 +220,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
             return;
         }
     };
-    env.mutate(|mc, env| env.proj.write(mc).input(Input::Start));
+    env.mutate(|mc, env| env.proj.borrow_mut(mc).input(Input::Start));
 
     let mut input_sequence = Vec::with_capacity(16);
     let in_input_mode = || !input_queries.borrow().is_empty();
@@ -255,12 +255,12 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
         }
 
         env.mutate(|mc, env| {
-            let mut proj = env.proj.write(mc);
+            let mut proj = env.proj.borrow_mut(mc);
             for input in input_sequence.drain(..) { proj.input(input); }
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
                 if let ProjectStep::Error { error, proc } = &res {
-                    print!("\r\n>>> runtime error in entity {:?}: {:?}\r\n\r\n", proc.get_call_stack().last().unwrap().entity.read().name, error.cause);
+                    print!("\r\n>>> runtime error in entity {:?}: {:?}\r\n\r\n", proc.get_call_stack().last().unwrap().entity.borrow().name, error.cause);
                 }
                 idle_sleeper.consume(&res);
             }
@@ -312,15 +312,15 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
             return;
         }
     };
-    env.mutate(|mc, env| env.proj.write(mc).input(Input::Start));
+    env.mutate(|mc, env| env.proj.borrow_mut(mc).input(Input::Start));
 
     loop {
         env.mutate(|mc, env| {
-            let mut proj = env.proj.write(mc);
+            let mut proj = env.proj.borrow_mut(mc);
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
                 if let ProjectStep::Error { error, proc } = &res {
-                    println!("\n>>> runtime error in entity {:?}: {:?}\n", proc.get_call_stack().last().unwrap().entity.read().name, error.cause);
+                    println!("\n>>> runtime error in entity {:?}: {:?}\n", proc.get_call_stack().last().unwrap().entity.borrow().name, error.cause);
                 }
                 idle_sleeper.consume(&res);
             }
@@ -486,7 +486,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
                                 state.running.store(true, MemoryOrder::Relaxed);
                             }
                         }
-                        env.mutate(|mc, env| env.proj.write(mc).input(input));
+                        env.mutate(|mc, env| env.proj.borrow_mut(mc).input(input));
                     }
                 }
                 Err(TryRecvError::Disconnected) => break 'program,
@@ -499,7 +499,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
         }
 
         env.mutate(|mc, env| {
-            let mut proj = env.proj.write(mc);
+            let mut proj = env.proj.borrow_mut(mc);
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
                 match &res {

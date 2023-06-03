@@ -14,9 +14,9 @@ use super::*;
 #[derive(Collect)]
 #[collect(no_drop)]
 struct Env<'gc> {
-    proj: GcCell<'gc, Project<'gc, C, StdSystem<C>>>,
+    proj: Gc<'gc, RefLock<Project<'gc, C, StdSystem<C>>>>,
 }
-type EnvArena = Arena<Rootable![Env<'gc>]>;
+type EnvArena = Arena<Rootable![Env<'_>]>;
 
 fn get_running_project(xml: &str, system: Rc<StdSystem<C>>) -> EnvArena {
     EnvArena::new(Default::default(), |mc| {
@@ -28,7 +28,7 @@ fn get_running_project(xml: &str, system: Rc<StdSystem<C>>) -> EnvArena {
 
         let mut proj = Project::from_init(mc, &init_info, Rc::new(bytecode), Settings::default(), system);
         proj.input(Input::Start);
-        Env { proj: GcCell::allocate(mc, proj) }
+        Env { proj: Gc::new(mc, RefLock::new(proj)) }
     })
 }
 
@@ -39,7 +39,7 @@ enum SpecialEvent<'gc, C: CustomTypes<S>, S: System<C>> {
     Pause,
 }
 
-fn run_till_term<'gc>(mc: MutationContext<'gc, '_>, proj: &mut Project<'gc, C, StdSystem<C>>) -> Result<Vec<SpecialEvent<'gc, C, StdSystem<C>>>, ExecError<C, StdSystem<C>>> {
+fn run_till_term<'gc>(mc: &Mutation<'gc>, proj: &mut Project<'gc, C, StdSystem<C>>) -> Result<Vec<SpecialEvent<'gc, C, StdSystem<C>>>, ExecError<C, StdSystem<C>>> {
     let mut special_events = vec![];
     loop {
         match proj.step(mc) {
@@ -60,9 +60,9 @@ fn test_proj_counting() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/counting.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!([
             1, 3, 6, 7, 9, 12, 13, 15, 18, 19, 21, 24, 25, 27, 30, 31, 33, 36, 37, 39, 42, 43, 45, 48, 49, 51, 54, 55, 57, 60,
@@ -77,9 +77,9 @@ fn test_proj_effects() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
     let proj = get_running_project(include_str!("projects/effects.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!([
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -100,9 +100,9 @@ fn test_proj_size_visible() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
     let proj = get_running_project(include_str!("projects/size-visible.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!([
             [81, false],
@@ -127,9 +127,9 @@ fn test_proj_motion() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
     let proj = get_running_project(include_str!("projects/motion.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!([
             [-42, 67, 287],
@@ -168,9 +168,9 @@ fn test_proj_pen_basic() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
     let proj = get_running_project(include_str!("projects/pen-basic.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!([
             [1, 187.1287078857422, 79.21568751335144, 100, 71.37254774570465, false],
@@ -224,7 +224,7 @@ fn test_proj_watchers() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
     let proj = get_running_project(include_str!("projects/watchers.xml"), system);
     proj.mutate(|mc, proj| {
-        let events = run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
+        let events = run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
 
         let mapped = events.iter().map(|x| match x {
             SpecialEvent::Watcher { create, watcher } => (*create, watcher.name.as_str()),
@@ -250,18 +250,18 @@ fn test_proj_costumes() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/costumes.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let res = global_context.globals.lookup("res").unwrap().get().clone();
         match &res {
             Value::List(x) => {
-                let x = x.read();
+                let x = x.borrow();
                 assert_eq!(x.len(), 16);
                 let costumes = match &x[0] {
                     Value::List(x) => {
-                        let x = x.read();
+                        let x = x.borrow();
                         assert_eq!(x.len(), 5);
                         x.iter().map(|x| match x {
                             Value::Image(x) => x.clone(),
@@ -274,7 +274,7 @@ fn test_proj_costumes() {
                 assert_eq!(costume_set.len(), 5);
 
                 let chart = match &x[9] {
-                    Value::List(x) => match &x.read()[0] {
+                    Value::List(x) => match &x.borrow()[0] {
                         Value::Image(x) => x.clone(),
                         x => panic!("{x:?}"),
                     }
@@ -286,7 +286,7 @@ fn test_proj_costumes() {
                 for idx in [1, 6, 14] {
                     match &x[idx] {
                         Value::List(x) => {
-                            let x = x.read();
+                            let x = x.borrow();
                             assert_eq!(x.len(), 2);
                             match &x[0] {
                                 Value::Image(x) => assert!(Rc::ptr_eq(x, &costumes[1])),
@@ -303,7 +303,7 @@ fn test_proj_costumes() {
                 for idx in [2, 7, 8, 15] {
                     match &x[idx] {
                         Value::List(x) => {
-                            let x = x.read();
+                            let x = x.borrow();
                             assert_eq!(x.len(), 2);
                             match &x[0] {
                                 Value::String(x) => assert_eq!(x.as_str(), ""),
@@ -320,7 +320,7 @@ fn test_proj_costumes() {
                 for idx in [3] {
                     match &x[idx] {
                         Value::List(x) => {
-                            let x = x.read();
+                            let x = x.borrow();
                             assert_eq!(x.len(), 2);
                             match &x[0] {
                                 Value::Image(x) => assert!(Rc::ptr_eq(x, &costumes[3])),
@@ -337,7 +337,7 @@ fn test_proj_costumes() {
                 for idx in [4, 11] {
                     match &x[idx] {
                         Value::List(x) => {
-                            let x = x.read();
+                            let x = x.borrow();
                             assert_eq!(x.len(), 2);
                             match &x[0] {
                                 Value::Image(x) => assert!(Rc::ptr_eq(x, &costumes[4])),
@@ -354,7 +354,7 @@ fn test_proj_costumes() {
                 for idx in [5, 12] {
                     match &x[idx] {
                         Value::List(x) => {
-                            let x = x.read();
+                            let x = x.borrow();
                             assert_eq!(x.len(), 2);
                             match &x[0] {
                                 Value::Image(x) => assert!(Rc::ptr_eq(x, &costumes[0])),
@@ -371,7 +371,7 @@ fn test_proj_costumes() {
                 for idx in [9, 10] {
                     match &x[idx] {
                         Value::List(x) => {
-                            let x = x.read();
+                            let x = x.borrow();
                             assert_eq!(x.len(), 2);
                             match &x[0] {
                                 Value::Image(x) => assert!(Rc::ptr_eq(x, &chart)),
@@ -388,7 +388,7 @@ fn test_proj_costumes() {
                 for idx in [13] {
                     match &x[idx] {
                         Value::List(x) => {
-                            let x = x.read();
+                            let x = x.borrow();
                             assert_eq!(x.len(), 2);
                             match &x[0] {
                                 Value::Image(x) => assert!(Rc::ptr_eq(x, &costumes[2])),
@@ -413,9 +413,9 @@ fn test_proj_broadcast() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/broadcast.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         assert_values_eq(&global_context.globals.lookup("counter").unwrap().get().clone(), &Number::new(320.0).unwrap().into(), 1e-20, "counter");
         let expected = Value::from_json(mc, json!([
@@ -436,9 +436,9 @@ fn test_proj_broadcast_to() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/broadcast-to.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!([
             "stage 1", "stage 2", "turtle 1", "turtle 2", "duck 1", "duck 2", "dog 1", "dog 2", "---",
@@ -461,9 +461,9 @@ fn test_proj_any_msg() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/any-msg.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!([
             ["initial", ""],
@@ -506,9 +506,9 @@ fn test_proj_launch() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/launch.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!([
             ["start", 0],
@@ -544,9 +544,9 @@ fn test_proj_cloning() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/cloning.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!([
             "0", 1, 2, 3, 4, 5, 6, 7, 8,
@@ -560,9 +560,9 @@ fn test_proj_pause() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/pause.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!("5")).unwrap();
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 1e-20, "res");
@@ -574,9 +574,9 @@ fn test_proj_loop_yields() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/loop-yields.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         assert_values_eq(&global_context.globals.lookup("counter").unwrap().get().clone(), &Number::new(150.0).unwrap().into(), 1e-20, "counter");
         let expected = Value::from_json(mc, json!([
@@ -592,9 +592,9 @@ fn test_proj_run_call_ask_tell() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config()));
     let proj = get_running_project(include_str!("projects/run-call-ask-tell.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         let expected = Value::from_json(mc, json!([
             [0.0, [87, 25, 10], [74, 65, 14], [45, 25, 201]],
@@ -617,19 +617,19 @@ fn test_proj_parallel_rpcs() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
-        assert_eq!(global_context.globals.lookup("input").unwrap().get().as_list().unwrap().read().len(), 0);
+        assert_eq!(global_context.globals.lookup("input").unwrap().get().as_list().unwrap().borrow().len(), 0);
 
-        let meta: Vec<_> = global_context.globals.lookup("meta").unwrap().get().as_list().unwrap().read().iter().map(|x| x.to_number().unwrap()).collect();
+        let meta: Vec<_> = global_context.globals.lookup("meta").unwrap().get().as_list().unwrap().borrow().iter().map(|x| x.to_number().unwrap()).collect();
         if meta.len() != 4 || meta.iter().map(|x| x.get()).sum::<f64>() != 216.0 || !meta.iter().all(|&x| x.get() >= 30.0) {
             panic!("{meta:?}");
         }
 
-        let mut output: Vec<_> = global_context.globals.lookup("output").unwrap().get().as_list().unwrap().read().iter().map(|row| {
-            let vals: Vec<_> = row.as_list().unwrap().read().iter().map(|x| {
+        let mut output: Vec<_> = global_context.globals.lookup("output").unwrap().get().as_list().unwrap().borrow().iter().map(|row| {
+            let vals: Vec<_> = row.as_list().unwrap().borrow().iter().map(|x| {
                 let v = x.to_number().unwrap().get();
                 assert_eq!(v as i64 as f64, v);
                 v as i64
@@ -659,9 +659,9 @@ fn test_proj_wait_until() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
     let proj = get_running_project(include_str!("projects/wait-until.xml"), system);
     proj.mutate(|mc, proj| {
-        run_till_term(mc, &mut *proj.proj.write(mc)).unwrap();
-        let global_context = proj.proj.read().get_global_context();
-        let global_context = global_context.read();
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
 
         assert_values_eq(&global_context.globals.lookup("mark").unwrap().get(), &Value::from_json(mc, json!(64)).unwrap(), 1e-20, "after wait value");
         assert_values_eq(&global_context.globals.lookup("counter").unwrap().get(), &Value::from_json(mc, json!(128)).unwrap(), 1e-20, "final counter value");
