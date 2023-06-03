@@ -27,7 +27,10 @@ pub mod runtime;
 pub mod process;
 pub mod project;
 pub mod template;
-mod meta;
+
+mod meta {
+    include!(concat!(env!("OUT_DIR"), "/meta.rs"));
+}
 
 #[cfg(feature = "std")] pub mod std_system;
 #[cfg(feature = "cli")] pub mod cli;

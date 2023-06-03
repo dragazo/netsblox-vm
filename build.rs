@@ -35,6 +35,7 @@ fn main() {
     }
     let hash = u128::from_be_bytes(context.compute().0);
 
-    let mut f = BufWriter::new(File::create("src/meta.rs").unwrap());
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let mut f = BufWriter::new(File::create(format!("{out_dir}/meta.rs")).unwrap());
     writeln!(f, "pub const FINGERPRINT: u128 = 0x{hash:0>32x}u128;").unwrap();
 }
