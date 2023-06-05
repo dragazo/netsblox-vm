@@ -469,16 +469,31 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
                 Ok(command) => match command {
                     ServerCommand::SetProject(content) => match open_project(&content, None) {
                         Ok((proj_name, role)) => {
-                            tee_println!(weak_state.upgrade() => "\n>>> loaded project '{proj_name}'\n");
+                            let mut state = weak_state.upgrade().unwrap();
+                            tee_println!(Some(&mut state) => "\n>>> loaded project '{proj_name}'\n");
                             match get_env(&role, system.clone()) {
                                 Ok(x) => {
                                     env = x;
-                                    *weak_state.upgrade().unwrap().current_proj.lock().unwrap() = content;
+                                    *state.current_proj.lock().unwrap() = content;
                                 }
-                                Err(e) => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> keeping previous project...\n"),
+                                Err(e) => tee_println!(Some(&mut state) => "\n>>> project load error: {e:?}\n>>> keeping previous project...\n"),
                             }
                         }
-                        Err(e) => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> keeping previous project...\n"),
+                        Err(e) => match e {
+                            OpenProjectError::ParseError { error } if error.location.collab_id.is_some() => {
+                                let mut state = weak_state.upgrade().unwrap();
+                                let cause = format!("{:?}", error.kind);
+                                state.errors.lock().unwrap().push(ErrorSummary {
+                                    cause: cause.clone(),
+                                    entity: error.location.entity.unwrap_or_default(),
+                                    globals: vec![],
+                                    fields: vec![],
+                                    trace: vec![TraceEntry { location: error.location.collab_id.unwrap(), locals: vec![] }], // unwrap safe because of branch guard condition
+                                });
+                                tee_println!(Some(&mut state) => "\n>>> project load error: {cause:?}\n>>> see red error comments...\n>>> keeping previous project...\n");
+                            }
+                            _ => tee_println!(weak_state.upgrade() => "\n>>> project load error: {e:?}\n>>> keeping previous project...\n"),
+                        }
                     }
                     ServerCommand::Input(input) => {
                         if let Input::Start = &input {

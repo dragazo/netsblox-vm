@@ -28,6 +28,7 @@
         "actix",
         "argb",
         "chacha",
+        "collab",
         "Condvar",
         "getrandom",
         "Listcat",
