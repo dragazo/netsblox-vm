@@ -327,6 +327,13 @@
         constructor(ide) {{
             super('Native');
             this.ide = ide;
+
+            setTimeout(() => request({{
+                method: 'GET',
+                url: `${{SERVER}}/project`,
+                onErr: alert,
+                onOk: x => ide.droppedText(x),
+            }}), 500);
         }}
 
         onOpenRole() {{}}
