@@ -1889,6 +1889,32 @@ fn test_proc_c_rings() {
 }
 
 #[test]
+fn test_proc_to_csv() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/to-csv.xml"),
+        methods = "",
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            "",
+            "test,,again",
+            "a,d,c,ef,8",
+            " a , d,c ,e f,8",
+            " a b c ,ain't,'aint,aint','ain't', x y z ,'",
+            " a b c ,\"ain\"\"t\",\"\"\"aint\",\"aint\"\"\",\"\"\"ain\"\"t\"\"\", x y z ,\"\"\"\"",
+            " a b c ,\"ain,t\",\",aint\",\"aint,\",\",ain,t,\", x y z ,\",\"",
+            "hello,\"one\ntwo\nthree\",world",
+            "hello,\"one\ntwo\nthree\"\nworld,test,\"one\ntwo\n\"\nagain,\"\ntwo\",\"\ntwo\n\"",
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "to-csv");
+    });
+}
+
+#[test]
 fn test_proc_extra_blocks() {
     let actions = Rc::new(RefCell::new(vec![]));
     let actions_clone = actions.clone();

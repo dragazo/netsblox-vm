@@ -656,6 +656,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(Rc::new(value.to_string()).into());
                 self.pos = aft_pos;
             }
+            Instruction::ListCsv => {
+                let value = self.value_stack.pop().unwrap();
+                self.value_stack.push(Rc::new(ops::to_csv(&value)?).into());
+                self.pos = aft_pos;
+            }
             Instruction::ListColumns => {
                 let value = self.value_stack.pop().unwrap();
                 self.value_stack.push(ops::columns(mc, &value)?);
@@ -1408,6 +1413,43 @@ mod ops {
         let mut partial = VecDeque::with_capacity(sources.len());
         cartesian_product_impl(mc, &mut res, &mut partial, sources);
         res
+    }
+    pub(super) fn to_csv<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>) -> Result<String, ErrorCause<C, S>> {
+        let value = value.as_list()?;
+        let value = value.borrow();
+
+        fn process_scalar(res: &mut String, value: &str) {
+            let needs_quotes = value.chars().any(|x| matches!(x, '"' | ',' | '\n'));
+
+            if needs_quotes { res.push('"'); }
+            for ch in value.chars() {
+                match ch {
+                    '"' => res.push_str("\"\""),
+                    x => res.push(x),
+                }
+            }
+            if needs_quotes { res.push('"'); }
+        }
+        fn process_vector<'gc, C: CustomTypes<S>, S: System<C>>(res: &mut String, value: &VecDeque<Value<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
+            for (i, x) in value.iter().enumerate() {
+                if i != 0 { res.push(','); }
+                process_scalar(res, x.to_string()?.as_ref())
+            }
+            Ok(())
+        }
+        fn process_table<'gc, C: CustomTypes<S>, S: System<C>>(res: &mut String, value: &VecDeque<Value<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
+            for (i, x) in value.iter().enumerate() {
+                if i != 0 { res.push('\n'); }
+                process_vector(res, &*x.as_list()?.borrow())?;
+            }
+            Ok(())
+        }
+
+        let mut res = String::new();
+        let table_mode = value.iter().any(|x| matches!(x, Value::List(..)));
+        let f = if table_mode { process_table } else { process_vector };
+        f(&mut res, &*value)?;
+        Ok(res)
     }
 
     fn binary_op_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, C, S>, Identity<'gc, C, S>, bool), Value<'gc, C, S>>, scalar_op: fn(&Mutation<'gc>, &S, &Value<'gc, C, S>, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
