@@ -1446,7 +1446,10 @@ mod ops {
                     }
 
                     match src.next() {
-                        Some('"') if !in_quote => in_quote = true,
+                        Some('"') if !in_quote => match scalar.is_empty() {
+                            true => in_quote = true,
+                            false => return Err(ErrorCause::NotCsv { value: value.to_owned() }),
+                        }
                         Some('"') if in_quote => match src.next() {
                             Some('"') => scalar.push('"'),
                             Some(',') => finish!(scalar),

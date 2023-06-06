@@ -1941,6 +1941,10 @@ fn test_proc_from_csv() {
                 ["world", "test", "one\ntwo\n"],
                 ["again", "\ntwo", "\ntwo\n"],
             ],
+            [["abcxyz"]],
+            "NotCsv { value: \"abc\\\"xyz\\\"\" }",
+            "NotCsv { value: \"\\\"abc\\\"xyz\" }",
+            "NotCsv { value: \"\\\"abcxyz\" }",
         ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "from-csv");
     });
