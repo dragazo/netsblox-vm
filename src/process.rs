@@ -566,7 +566,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::ListCdr => {
                 let mut res = self.value_stack.pop().unwrap().as_list()?.borrow().clone();
-                if res.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }) }
+                if res.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }) }
                 res.pop_front().unwrap();
                 self.value_stack.push(Gc::new(mc, RefLock::new(res)).into());
                 self.pos = aft_pos;
@@ -723,7 +723,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 self.value_stack.push(match list.borrow().back() {
                     Some(x) => x.clone(),
-                    None => return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }),
+                    None => return Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }),
                 });
                 self.pos = aft_pos;
             }
@@ -749,7 +749,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let value = self.value_stack.pop().unwrap();
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let mut list = list.borrow_mut(mc);
-                if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }); }
+                if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }); }
                 *list.back_mut().unwrap() = value;
                 self.pos = aft_pos;
             }
@@ -774,7 +774,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ListRemoveLast => {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let mut list = list.borrow_mut(mc);
-                if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }) }
+                if list.is_empty() { return Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }) }
                 list.pop_back().unwrap();
                 self.pos = aft_pos;
             }
@@ -1299,13 +1299,13 @@ mod ops {
 
     pub(super) fn prep_index<C: CustomTypes<S>, S: System<C>>(index: &Value<'_, C, S>, len: usize) -> Result<usize, ErrorCause<C, S>> {
         let raw_index = index.to_number()?.get();
-        if raw_index < 1.0 || raw_index > len as f64 { return Err(ErrorCause::IndexOutOfBounds { index: raw_index, len }) }
-        let index = raw_index as u64;
+        let index = raw_index as i64;
         if index as f64 != raw_index { return Err(ErrorCause::IndexNotInteger { index: raw_index }) }
+        if index < 1 || index > len as i64 { return Err(ErrorCause::IndexOutOfBounds { index, len }) }
         Ok(index as usize - 1)
     }
     pub(super) fn prep_rand_index<C: CustomTypes<S>, S: System<C>>(system: &S, len: usize) -> Result<usize, ErrorCause<C, S>> {
-        if len == 0 { return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }) }
+        if len == 0 { return Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }) }
         system.rand(0..len)
     }
 
@@ -1651,7 +1651,7 @@ mod ops {
 
             UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| match x.to_string()?.chars().rev().next() {
                 Some(ch) => Ok(Rc::new(ch.to_string()).into()),
-                None => return Err(ErrorCause::IndexOutOfBounds { index: 1.0, len: 0 }),
+                None => return Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }),
             }),
             UnaryOp::StrGetRandom => unary_op_impl(mc, system, x, &mut cache, &|_, system, x| {
                 let x = x.to_string()?;

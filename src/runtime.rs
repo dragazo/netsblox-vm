@@ -101,7 +101,7 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     /// An operation that expected a list with a certain size received an incorrect size.
     InvalidListLength { expected: usize, got: usize },
     /// An indexing operation on a list/string had an out of bounds index, `index`, on a list/string of size `len`. Note that Snap!/NetsBlox use 1-based indexing.
-    IndexOutOfBounds { index: f64, len: usize },
+    IndexOutOfBounds { index: i64, len: usize },
     /// Attempt to index a list with a non-integer numeric value, `index`.
     IndexNotInteger { index: f64 },
     /// Attempt to use a number which was not a valid size (must be convertible to [`usize`]).

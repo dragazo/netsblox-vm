@@ -1613,7 +1613,7 @@ fn test_proc_index_over_bounds() {
         let res = res.unwrap_err();
         match &res.cause {
             ErrorCause::IndexOutOfBounds { index, len } => {
-                assert!((index - 11.0).abs() < 1e-10);
+                assert_eq!(*index, 11);
                 assert_eq!(*len, 10);
             }
             x => panic!("{x:?}"),
@@ -1824,7 +1824,7 @@ fn test_proc_exception_unregister() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ "top start", "before test", "before inner", "inner error", "IndexOutOfBounds { index: 332534.0, len: 3 }", "after test", "top error", "IndexOutOfBounds { index: 332534.0, len: 6 }", "top done"])).unwrap();
+        let expect = Value::from_json(mc, json!([ "top start", "before test", "before inner", "inner error", "IndexOutOfBounds { index: 332534, len: 3 }", "after test", "top error", "IndexOutOfBounds { index: 332534, len: 6 }", "top done"])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "exception res");
     });
 }
@@ -1840,7 +1840,7 @@ fn test_proc_exception_rethrow() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ "IndexOutOfBounds { index: 543548.0, len: 0 }", "test error here" ])).unwrap();
+        let expect = Value::from_json(mc, json!([ "IndexOutOfBounds { index: 543548, len: 0 }", "test error here" ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "exception res");
     });
 }
