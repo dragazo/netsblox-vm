@@ -114,6 +114,8 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     ClosureArgCount { expected: usize, got: usize },
     /// An acyclic operation received a cyclic input value.
     CyclicValue,
+    /// Attempt to parse an invalid CSV-encoded string.
+    NotCsv { value: String },
     /// Attempt to parse an invalid JSON-encoded string.
     NotJson { value: String },
     /// A failed attempt to convert a native vm [`Value`] to [`Json`] for use outside the vm.

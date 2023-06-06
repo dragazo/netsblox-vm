@@ -1414,6 +1414,58 @@ mod ops {
         cartesian_product_impl(mc, &mut res, &mut partial, sources);
         res
     }
+    pub(super) fn from_csv<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, value: &str) -> Result<VecDeque<Value<'gc, C, S>>, ErrorCause<C, S>> {
+        let mut src = value.chars();
+        let mut table = VecDeque::new();
+
+        if value.is_empty() { return Ok(table); }
+
+        'next_vector: loop {
+            let mut vector = VecDeque::new();
+
+            'next_scalar: loop {
+                let mut scalar = String::new();
+                let mut in_quote = false;
+
+                loop {
+                    macro_rules! finish {
+                        (scalar) => {{
+                            vector.push_back(Value::String(Rc::new(scalar)));
+                            continue 'next_scalar;
+                        }};
+                        (vector) => {{
+                            vector.push_back(Rc::new(scalar).into());
+                            table.push_back(Gc::new(mc, RefLock::new(vector)).into());
+                            continue 'next_vector;
+                        }};
+                        (table) => {{
+                            vector.push_back(Rc::new(scalar).into());
+                            table.push_back(Gc::new(mc, RefLock::new(vector)).into());
+                            return Ok(table);
+                        }}
+                    }
+
+                    match src.next() {
+                        Some('"') if !in_quote => in_quote = true,
+                        Some('"') if in_quote => match src.next() {
+                            Some('"') => scalar.push('"'),
+                            Some(',') => finish!(scalar),
+                            Some('\n') => finish!(vector),
+                            None => finish!(table),
+                            Some(_) => return Err(ErrorCause::NotCsv { value: value.to_owned() }),
+                        }
+                        Some(',') if !in_quote => finish!(scalar),
+                        Some('\n') if !in_quote => finish!(vector),
+                        Some(x) => scalar.push(x),
+                        None => match in_quote {
+                            true => return Err(ErrorCause::NotCsv { value: value.to_owned() }),
+                            false => finish!(table),
+                        }
+                    }
+                }
+            }
+        }
+    }
     pub(super) fn to_csv<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>) -> Result<String, ErrorCause<C, S>> {
         let value = value.as_list()?;
         let value = value.borrow();
@@ -1620,11 +1672,8 @@ mod ops {
                 Ok(Gc::new(mc, RefLock::new(x.to_string()?.lines().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitCsv => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                let lines = x.to_string()?.lines().map(|line| Gc::new(mc, RefLock::new(line.split(',').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into()).collect::<VecDeque<_>>();
-                Ok(match lines.len() {
-                    1 => lines.into_iter().next().unwrap(),
-                    _ => Gc::new(mc, RefLock::new(lines)).into(),
-                })
+                let value = from_csv(mc, x.to_string()?.as_ref())?;
+                Ok(Gc::new(mc, RefLock::new(value)).into())
             }),
             UnaryOp::SplitJson => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 let value = x.to_string()?;
