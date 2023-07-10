@@ -144,6 +144,7 @@ pub struct StdSystem<C: CustomTypes<StdSystem<C>>> {
 
     message_replies: Arc<Mutex<MessageReplies>>,
     message_sender: Sender<OutgoingMessage<C, Self>>,
+    message_injector: Sender<IncomingMessage<C, Self>>,
     message_receiver: Receiver<IncomingMessage<C, Self>>,
 }
 impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
@@ -161,7 +162,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
         };
 
         let message_replies = Arc::new(Mutex::new(Default::default()));
-        let (message_sender, message_receiver) = {
+        let (message_sender, message_receiver, message_injector) = {
             let (base_url, client_id, project_name, message_replies) = (context.base_url.clone(), context.client_id.clone(), context.project_name.clone(), message_replies.clone());
             let (out_sender, out_receiver) = channel();
             let (in_sender, in_receiver) = channel();
@@ -257,9 +258,10 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                     ws_sender_sender.send(Message::Text(msg.to_string())).await.unwrap();
                 }
             }
-            thread::spawn(move || handler(base_url, client_id, project_name, message_replies, out_receiver, in_sender));
+            let in_sender_clone = in_sender.clone();
+            thread::spawn(move || handler(base_url, client_id, project_name, message_replies, out_receiver, in_sender_clone));
 
-            (out_sender, in_receiver)
+            (out_sender, in_receiver, in_sender)
         };
 
         let client = Arc::new(reqwest::Client::builder().build().unwrap());
@@ -321,7 +323,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
             start_time: Instant::now(),
             rng: Mutex::new(ChaChaRng::from_seed(seed)),
             rpc_request_pipe,
-            message_replies, message_sender, message_receiver,
+            message_replies, message_sender, message_receiver, message_injector,
         }
     }
 
@@ -334,6 +336,11 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     /// Gets the public id of the running system that can be used to send messages to this client.
     pub fn get_public_id(&self) -> String {
         format!("{}@{}", self.context.project_name, self.context.client_id)
+    }
+
+    /// Injects a message into the receiving queue as if received over the network.
+    pub fn inject_message(&self, msg_type: String, values: Vec<(String, Json)>) {
+        self.message_injector.send(IncomingMessage { msg_type, values, reply_key: None }).unwrap();
     }
 }
 impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
