@@ -1,4 +1,5 @@
 use std::prelude::v1::*;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::BTreeMap;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -1887,6 +1888,42 @@ fn test_proc_c_rings() {
             "bar 2", "---",
         ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "c-rings");
+    });
+}
+
+#[test]
+fn test_proc_wall_time() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default()));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/c-rings.xml"),
+        methods = "",
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+
+    // println!("timestamp: {}", t.unix_timestamp_nanos() / 1000000);
+    // println!("year:      {}", t.year());
+    // println!("month:     {}", t.month() as u8);
+    // println!("month:     {}", t.day());
+    // println!("week day:  {}", t.date().weekday().number_from_sunday());
+    // println!("hour:      {}", t.hour());
+    // println!("minute:    {}", t.minute());
+    // println!("second:    {}", t.second());
+
+    run_till_term(&mut env, |mc, _, res| {
+        let t = time::OffsetDateTime::now_local();
+        let res = res.unwrap().0.unwrap().as_list().unwrap();
+        let res = res.borrow();
+        assert_eq!(res.len(), 8);
+
+        assert!((res[0].to_number().unwrap().get() - (t.unix_timestamp_nanos() / 1000000) as f64).abs() < 1000.0);
+        assert_eq!(res[1].to_number().unwrap().get(), t.year() as f64);
+        assert_eq!(res[2].to_number().unwrap().get(), t.month() as u8 as f64);
+        assert_eq!(res[3].to_number().unwrap().get(), t.day() as f64);
+        assert_eq!(res[4].to_number().unwrap().get(), t.date().weekday().number_from_sunday() as f64);
+        assert_eq!(res[5].to_number().unwrap().get(), t.hour() as f64);
+        assert_eq!(res[6].to_number().unwrap().get(), t.minute() as f64);
+        assert_eq!(res[7].to_number().unwrap().get(), t.second() as f64);
     });
 }
 

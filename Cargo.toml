@@ -57,6 +57,7 @@ monostate = { version = "0.1.6", default-features = false }
 take_mut = { version = "0.2.2", default-features = false }
 superslice = { version = "1.0", default-features = false }
 unicase = { version = "2.6.0", default-features = false }
+time = {version = "0.3.23", default-features = false }
 
 # std deps
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"], optional = true }

@@ -33,6 +33,7 @@
         "getrandom",
         "Listcat",
         "monostate",
+        "nanos",
         "pentrails",
         "powf",
         "Rootable",
