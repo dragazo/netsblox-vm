@@ -311,7 +311,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     }
     fn step_impl(&mut self, mc: &Mutation<'gc>) -> Result<ProcessStep<'gc, C, S>, ErrorCause<C, S>> {
         let mut global_context = self.global_context.borrow_mut(mc);
-        let mut global_context = &mut *global_context;
+        let global_context = &mut *global_context;
 
         fn process_result<'gc, C: CustomTypes<S>, S: System<C>, T>(result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, C, S>>>, last_ok: Option<&mut Option<Value<'gc, C, S>>>, last_err: Option<&mut Option<Value<'gc, C, S>>>, to_value: fn(T) -> Option<Value<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
             match result {
@@ -409,7 +409,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 }
                 false => return Ok(ProcessStep::Yield),
             }
-            Some(Defer::Sleep { until, aft_pos }) => match global_context.system.time_ms()? >= *until {
+            Some(Defer::Sleep { until, aft_pos }) => match global_context.system.time().to_arbitrary_ms()? >= *until {
                 true => {
                     self.pos = *aft_pos;
                     self.defer = None;
@@ -1103,11 +1103,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::ResetTimer => {
-                global_context.timer_start = global_context.system.time_ms()?;
+                global_context.timer_start = global_context.system.time().to_arbitrary_ms()?;
                 self.pos = aft_pos;
             }
             Instruction::PushTimer => {
-                self.value_stack.push(Number::new(global_context.system.time_ms()?.saturating_sub(global_context.timer_start) as f64 / 1000.0)?.into());
+                self.value_stack.push(Number::new(global_context.system.time().to_arbitrary_ms()?.saturating_sub(global_context.timer_start) as f64 / 1000.0)?.into());
                 self.pos = aft_pos;
             }
             Instruction::Sleep => {
@@ -1116,7 +1116,22 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     self.pos = aft_pos;
                     return Ok(ProcessStep::Yield);
                 }
-                self.defer = Some(Defer::Sleep { until: global_context.system.time_ms()? + ms as u64, aft_pos });
+                self.defer = Some(Defer::Sleep { until: global_context.system.time().to_arbitrary_ms()? + ms as u64, aft_pos });
+            }
+            Instruction::PushRealTime { query } => {
+                let t = global_context.system.time().to_real_local()?;
+                let v = match query {
+                    TimeQuery::UnixTimestampMs => (t.unix_timestamp_nanos() / 1000000) as f64,
+                    TimeQuery::Year => t.year() as f64,
+                    TimeQuery::Month => t.month() as u8 as f64,
+                    TimeQuery::Date => t.day() as f64,
+                    TimeQuery::DayOfWeek => t.date().weekday().number_from_sunday() as f64,
+                    TimeQuery::Hour => t.hour() as f64,
+                    TimeQuery::Minute => t.minute() as f64,
+                    TimeQuery::Second => t.second() as f64,
+                };
+                self.value_stack.push(Number::new(v)?.into());
+                self.pos = aft_pos;
             }
             Instruction::SendNetworkMessage { msg_type, values, expect_reply } => {
                 let targets = match self.value_stack.pop().unwrap() {

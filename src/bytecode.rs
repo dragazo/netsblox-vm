@@ -47,12 +47,26 @@ impl From<NumberError> for CompileError<'_> { fn from(error: NumberError) -> Sel
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
 pub(crate) enum Relation {
-    Equal,
-    NotEqual,
-    Less,
-    LessEq,
-    Greater,
-    GreaterEq,
+    Equal, NotEqual, Less, LessEq, Greater, GreaterEq,
+}
+#[derive(Clone, Copy, Debug, FromPrimitive)]
+#[repr(u8)]
+pub(crate) enum TimeQuery {
+    Year, Month, Date, DayOfWeek, Hour, Minute, Second, UnixTimestampMs,
+}
+impl From<&'_ ast::TimeQuery> for TimeQuery {
+    fn from(value: &'_ ast::TimeQuery) -> Self {
+        match value {
+            ast::TimeQuery::Year => TimeQuery::Year,
+            ast::TimeQuery::Month => TimeQuery::Month,
+            ast::TimeQuery::Date => TimeQuery::Date,
+            ast::TimeQuery::DayOfWeek => TimeQuery::DayOfWeek,
+            ast::TimeQuery::Hour => TimeQuery::Hour,
+            ast::TimeQuery::Minute => TimeQuery::Minute,
+            ast::TimeQuery::Second => TimeQuery::Second,
+            ast::TimeQuery::UnixTimestampMs => TimeQuery::UnixTimestampMs,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, FromPrimitive)]
@@ -365,6 +379,8 @@ pub(crate) enum Instruction<'a> {
     /// Consumes one value, `secs`, from the value stack and asynchronously waits for that amount of time to elapse.
     /// Non-positive sleep times are ignored, but still generate a yield point.
     Sleep,
+    /// Computes a specific query about the real-world time and pushes the result onto the value stack.
+    PushRealTime { query: TimeQuery },
 
     /// Consumes 1 value, `target` from the value stack, which is either a single or a list of targets.
     /// Then consumes `values` values from the value stack and meta stack, representing the fields of a message packet to send to (each) target.
@@ -461,7 +477,7 @@ macro_rules! read_write_u8_type {
         }
     )*}
 }
-read_write_u8_type! { PrintStyle, Property, Relation, BinaryOp, UnaryOp, VariadicOp, BasicType }
+read_write_u8_type! { PrintStyle, Property, Relation, TimeQuery, BinaryOp, UnaryOp, VariadicOp, BasicType }
 
 fn encode_u64(mut val: u64, out: &mut Vec<u8>, bytes: Option<usize>) {
     let mut blocks = ((64 - val.leading_zeros() as usize + 6) / 7).max(1);
@@ -789,34 +805,35 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             101 => read_prefixed!(Instruction::ResetTimer),
             102 => read_prefixed!(Instruction::PushTimer),
             103 => read_prefixed!(Instruction::Sleep),
+            104 => read_prefixed!(Instruction::PushRealTime {} : query),
 
-            104 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
-            105 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
-            106 => read_prefixed!(Instruction::SendNetworkReply),
+            105 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
+            106 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
+            107 => read_prefixed!(Instruction::SendNetworkReply),
 
-            107 => read_prefixed!(Instruction::PushProperty {} : prop),
-            108 => read_prefixed!(Instruction::SetProperty {} : prop),
-            109 => read_prefixed!(Instruction::ChangeProperty {} : prop),
+            108 => read_prefixed!(Instruction::PushProperty {} : prop),
+            109 => read_prefixed!(Instruction::SetProperty {} : prop),
+            110 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
-            110 => read_prefixed!(Instruction::PushCostume),
-            111 => read_prefixed!(Instruction::PushCostumeNumber),
-            112 => read_prefixed!(Instruction::PushCostumeList),
-            113 => read_prefixed!(Instruction::SetCostume),
-            114 => read_prefixed!(Instruction::NextCostume),
+            111 => read_prefixed!(Instruction::PushCostume),
+            112 => read_prefixed!(Instruction::PushCostumeNumber),
+            113 => read_prefixed!(Instruction::PushCostumeList),
+            114 => read_prefixed!(Instruction::SetCostume),
+            115 => read_prefixed!(Instruction::NextCostume),
 
-            115 => read_prefixed!(Instruction::Clone),
+            116 => read_prefixed!(Instruction::Clone),
 
-            116 => read_prefixed!(Instruction::ClearEffects),
+            117 => read_prefixed!(Instruction::ClearEffects),
 
-            117 => read_prefixed!(Instruction::GotoXY),
-            118 => read_prefixed!(Instruction::Goto),
+            118 => read_prefixed!(Instruction::GotoXY),
+            119 => read_prefixed!(Instruction::Goto),
 
-            119 => read_prefixed!(Instruction::PointTowardsXY),
-            120 => read_prefixed!(Instruction::PointTowards),
+            120 => read_prefixed!(Instruction::PointTowardsXY),
+            121 => read_prefixed!(Instruction::PointTowards),
 
-            121 => read_prefixed!(Instruction::Forward),
+            122 => read_prefixed!(Instruction::Forward),
 
-            122 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
+            123 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
 
             _ => unreachable!(),
         }
@@ -980,34 +997,35 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::ResetTimer => append_prefixed!(101),
             Instruction::PushTimer => append_prefixed!(102),
             Instruction::Sleep => append_prefixed!(103),
+            Instruction::PushRealTime { query } => append_prefixed!(104: query),
 
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(104: move str msg_type, values),
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(105: move str msg_type, values),
-            Instruction::SendNetworkReply => append_prefixed!(106),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(105: move str msg_type, values),
+            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(106: move str msg_type, values),
+            Instruction::SendNetworkReply => append_prefixed!(107),
 
-            Instruction::PushProperty { prop } => append_prefixed!(107: prop),
-            Instruction::SetProperty { prop } => append_prefixed!(108: prop),
-            Instruction::ChangeProperty { prop } => append_prefixed!(109: prop),
+            Instruction::PushProperty { prop } => append_prefixed!(108: prop),
+            Instruction::SetProperty { prop } => append_prefixed!(109: prop),
+            Instruction::ChangeProperty { prop } => append_prefixed!(110: prop),
 
-            Instruction::PushCostume => append_prefixed!(110),
-            Instruction::PushCostumeNumber => append_prefixed!(111),
-            Instruction::PushCostumeList => append_prefixed!(112),
-            Instruction::SetCostume => append_prefixed!(113),
-            Instruction::NextCostume => append_prefixed!(114),
+            Instruction::PushCostume => append_prefixed!(111),
+            Instruction::PushCostumeNumber => append_prefixed!(112),
+            Instruction::PushCostumeList => append_prefixed!(113),
+            Instruction::SetCostume => append_prefixed!(114),
+            Instruction::NextCostume => append_prefixed!(115),
 
-            Instruction::Clone => append_prefixed!(115),
+            Instruction::Clone => append_prefixed!(116),
 
-            Instruction::ClearEffects => append_prefixed!(116),
+            Instruction::ClearEffects => append_prefixed!(117),
 
-            Instruction::GotoXY => append_prefixed!(117),
-            Instruction::Goto => append_prefixed!(118),
+            Instruction::GotoXY => append_prefixed!(118),
+            Instruction::Goto => append_prefixed!(119),
 
-            Instruction::PointTowardsXY => append_prefixed!(119),
-            Instruction::PointTowards => append_prefixed!(120),
+            Instruction::PointTowardsXY => append_prefixed!(120),
+            Instruction::PointTowards => append_prefixed!(121),
 
-            Instruction::Forward => append_prefixed!(121),
+            Instruction::Forward => append_prefixed!(122),
 
-            Instruction::UnknownBlock { name, args } => append_prefixed!(122: move str name, args),
+            Instruction::UnknownBlock { name, args } => append_prefixed!(123: move str name, args),
         }
     }
 }
@@ -1321,6 +1339,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::Answer => self.ins.push(Instruction::PushAnswer.into()),
             ast::ExprKind::Message => self.ins.push(Instruction::PushLocalMessage.into()),
             ast::ExprKind::Timer => self.ins.push(Instruction::PushTimer.into()),
+            ast::ExprKind::RealTime { query } => self.ins.push(Instruction::PushRealTime { query: query.into() }.into()),
             ast::ExprKind::XPos => self.ins.push(Instruction::PushProperty { prop: Property::XPos }.into()),
             ast::ExprKind::YPos => self.ins.push(Instruction::PushProperty { prop: Property::YPos }.into()),
             ast::ExprKind::PenDown => self.ins.push(Instruction::PushProperty { prop: Property::PenDown }.into()),

@@ -24,6 +24,7 @@ use tokio_tungstenite::tungstenite::Message;
 use futures::{StreamExt, SinkExt};
 use uuid::Uuid;
 
+use crate::real_time::*;
 use crate::runtime::*;
 use crate::json::*;
 use crate::gc::*;
@@ -137,8 +138,8 @@ pub struct StdSystem<C: CustomTypes<StdSystem<C>>> {
     config: Config<C, Self>,
     context: Arc<Context>,
     client: Arc<reqwest::Client>,
-    start_time: Instant,
     rng: Mutex<ChaChaRng>,
+    utc_offset: UtcOffset,
 
     rpc_request_pipe: Sender<RpcRequest<C>>,
 
@@ -150,7 +151,7 @@ pub struct StdSystem<C: CustomTypes<StdSystem<C>>> {
 impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://editor.netsblox.org`).
     #[tokio::main(flavor = "current_thread")]
-    pub async fn new(base_url: String, project_name: Option<&str>, config: Config<C, Self>) -> Self {
+    pub async fn new(base_url: String, project_name: Option<&str>, config: Config<C, Self>, utc_offset: UtcOffset) -> Self {
         let mut context = Context {
             base_url,
             client_id: format!("vm-{}", names::Generator::default().next().unwrap()),
@@ -319,8 +320,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
         });
 
         Self {
-            config, context, client,
-            start_time: Instant::now(),
+            config, context, client, utc_offset,
             rng: Mutex::new(ChaChaRng::from_seed(seed)),
             rpc_request_pipe,
             message_replies, message_sender, message_receiver, message_injector,
@@ -354,8 +354,8 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         Ok(self.rng.lock().unwrap().gen_range(range))
     }
 
-    fn time_ms(&self) -> Result<u64, ErrorCause<C, StdSystem<C>>> {
-        Ok(self.start_time.elapsed().as_millis() as u64)
+    fn time(&self) -> SysTime {
+        SysTime::Real { local: OffsetDateTime::now_utc().to_offset(self.utc_offset) }
     }
 
     fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<Value<'gc, C, Self>, String>, Self::RequestKey>, ErrorCause<C, Self>> {

@@ -18,6 +18,10 @@ pub mod json {
     pub use serde_json::{self, Value as Json, Number as JsonNumber, Map as JsonMap, json, from_str as parse_json, from_slice as parse_json_slice};
 }
 
+pub mod real_time {
+    pub use time::{OffsetDateTime, UtcOffset};
+}
+
 /// The re-exported version of the `netsblox-ast` crate.
 pub use netsblox_ast as ast;
 

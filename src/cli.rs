@@ -33,6 +33,7 @@ use crossterm::style::{ResetColor, SetForegroundColor, Color, Print};
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
+use crate::real_time::*;
 use crate::std_system::*;
 use crate::bytecode::*;
 use crate::runtime::*;
@@ -161,7 +162,7 @@ fn open_project<'a>(content: &str, role: Option<&'a str>) -> Result<(String, ast
     Ok((parsed.name, role))
 }
 
-fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C, StdSystem<C>>) {
+fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C, StdSystem<C>>, utc_offset: UtcOffset) {
     terminal::enable_raw_mode().unwrap();
     execute!(stdout(), cursor::Hide).unwrap();
     let _tty_mode_guard = AtExit::new(|| {
@@ -209,7 +210,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
         },
     });
 
-    let system = Rc::new(StdSystem::new(server, Some(project_name), config));
+    let system = Rc::new(StdSystem::new(server, Some(project_name), config, utc_offset));
     let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     print!("public id: {}\r\n", system.get_public_id());
 
@@ -288,7 +289,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
 
     execute!(stdout(), terminal::Clear(ClearType::CurrentLine)).unwrap();
 }
-fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C, StdSystem<C>>) {
+fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C, StdSystem<C>>, utc_offset: UtcOffset) {
     let config = overrides.fallback(&Config {
         request: None,
         command: Some(Rc::new(move |_, _, key, command, entity| match command {
@@ -301,7 +302,7 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
         })),
     });
 
-    let system = Rc::new(StdSystem::new(server, Some(project_name), config));
+    let system = Rc::new(StdSystem::new(server, Some(project_name), config, utc_offset));
     let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     println!(">>> public id: {}\n", system.get_public_id());
 
@@ -327,7 +328,7 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
         });
     }
 }
-fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, port: u16, overrides: Config<C, StdSystem<C>>, syscalls: &[SyscallMenu]) {
+fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, port: u16, overrides: Config<C, StdSystem<C>>, utc_offset: UtcOffset, syscalls: &[SyscallMenu]) {
     println!(r#"connect from {nb_server}/?extensions=["http://{addr}:{port}/extension.js"]"#);
 
     let extension = ExtensionArgs {
@@ -385,7 +386,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
             _ => CommandStatus::UseDefault { key, command },
         })),
     });
-    let system = Rc::new(StdSystem::new(nb_server, Some("native-server"), config));
+    let system = Rc::new(StdSystem::new(nb_server, Some("native-server"), config, utc_offset));
     let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     println!("public id: {}", system.get_public_id());
 
@@ -539,15 +540,16 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
 
 /// Runs a CLI client using the given [`Mode`] configuration.
 pub fn run<C: CustomTypes<StdSystem<C>>>(mode: Mode, config: Config<C, StdSystem<C>>, syscalls: &[SyscallMenu]) {
+    let utc_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
     match mode {
         Mode::Run { src, role, server } => {
             let content = read_file(&src).unwrap_or_else(|_| crash!(1: "failed to read file '{src}'"));
             let (project_name, role) = open_project(&content, role.as_deref()).unwrap_or_else(|e| crash!(2: "{e}"));
 
             if stdout().is_tty() {
-                run_proj_tty(&project_name, server, &role, config);
+                run_proj_tty(&project_name, server, &role, config, utc_offset);
             } else {
-                run_proj_non_tty(&project_name, server, &role, config);
+                run_proj_non_tty(&project_name, server, &role, config, utc_offset);
             }
         }
         Mode::Dump { src, role } => {
@@ -562,7 +564,7 @@ pub fn run<C: CustomTypes<StdSystem<C>>>(mode: Mode, config: Config<C, StdSystem
             println!("\ntotal size: {}", bytecode.total_size());
         }
         Mode::Start { server, addr, port } => {
-            run_server(server, addr, port, config, syscalls);
+            run_server(server, addr, port, config, utc_offset, syscalls);
         }
     }
 }

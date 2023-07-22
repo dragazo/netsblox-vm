@@ -16,6 +16,7 @@ use serde::{Serialize, Deserialize};
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
+use crate::real_time::*;
 use crate::bytecode::*;
 
 /// Error type used by [`NumberChecker`].
@@ -1188,7 +1189,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
         }
 
         let proj_name = init_info.proj_name.clone();
-        let timer_start = system.time_ms().unwrap_or(0);
+        let timer_start = system.time().to_arbitrary_ms::<C, S>().unwrap_or(0);
 
         Self { proj_name, globals, entities, timer_start, system, settings, bytecode }
     }
@@ -1288,8 +1289,10 @@ impl<T> AsyncResult<T> {
 pub enum Feature {
     /// The ability of a process to generate random numbers.
     Random,
-    /// The ability of a process to get the current time (not necessarily wall time).
-    Time,
+    /// The ability of a process to get the current time with respect to an arbitrary starting point.
+    ArbitraryTime,
+    /// The ability of a process to get the current real time.
+    RealTime,
 
     /// The ability of a process to request keyboard input from the user.
     Input,
@@ -1503,6 +1506,36 @@ pub trait CustomTypes<S: System<Self>>: 'static + Sized {
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Result<Value<'gc, Self, S>, ErrorCause<Self, S>>;
 }
 
+/// The time as determined by an implementation of [`System`].
+pub enum SysTime {
+    /// No concept of time. This should only be produced as a last resort.
+    Timeless,
+    /// A time measurement with an arbitrary (but consistent during runtime) starting point, which must be measured in milliseconds.
+    /// For instance, this could be used to measure uptime on systems that do not support reading real time.
+    Arbitrary { ms: u64 },
+    /// A real-world time measurement.
+    /// This is always preferable over [`SysTime::Arbitrary`].
+    /// The value is intended to be transformed to local time, but this is not strictly required.
+    Real { local: OffsetDateTime },
+}
+impl SysTime {
+    /// Attempt to convert this time into milliseconds after some arbitrary starting point.
+    pub fn to_arbitrary_ms<C: CustomTypes<S>, S: System<C>>(&self) -> Result<u64, ErrorCause<C, S>> {
+        match self {
+            Self::Timeless => Err(ErrorCause::NotSupported { feature: Feature::ArbitraryTime }),
+            Self::Arbitrary { ms } => Ok(*ms),
+            Self::Real { local } => Ok((local.unix_timestamp_nanos() / 1000000) as u64),
+        }
+    }
+    /// Attempt to convert this time into a real world time in the local timezone.
+    pub fn to_real_local<C: CustomTypes<S>, S: System<C>>(&self) -> Result<time::OffsetDateTime, ErrorCause<C, S>> {
+        match self {
+            Self::Timeless | Self::Arbitrary { .. } => Err(ErrorCause::NotSupported { feature: Feature::RealTime }),
+            Self::Real { local } => Ok(*local),
+        }
+    }
+}
+
 /// Represents all the features of an implementing system.
 /// 
 /// This type encodes any features that cannot be performed without platform-specific resources.
@@ -1524,12 +1557,12 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
     /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],
     /// which makes it possible to implement this function with any random provider under the [`rand`] crate standard.
-    fn rand<T, R>(&self, range: R) -> Result<T, ErrorCause<C, Self>> where T: SampleUniform, R: SampleRange<T>;
+    fn rand<T: SampleUniform, R: SampleRange<T>>(&self, range: R) -> Result<T, ErrorCause<C, Self>>;
 
     /// Gets the current time in milliseconds.
     /// This is not required to represent the actual real-world time; e.g., this could simply measure uptime.
     /// Subsequent values are required to be non-decreasing.
-    fn time_ms(&self) -> Result<u64, ErrorCause<C, Self>>;
+    fn time(&self) -> SysTime;
 
     /// Performs a general request which returns a value to the system.
     /// Ideally, this function should be non-blocking, and the requestor will await the result asynchronously.
