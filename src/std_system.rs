@@ -350,8 +350,8 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
     type ExternReplyKey = ExternReplyKey;
     type InternReplyKey = InternReplyKey;
 
-    fn rand<T, R>(&self, range: R) -> Result<T, ErrorCause<C, StdSystem<C>>> where T: SampleUniform, R: SampleRange<T> {
-        Ok(self.rng.lock().unwrap().gen_range(range))
+    fn rand<T: SampleUniform, R: SampleRange<T>>(&self, range: R) -> T {
+        self.rng.lock().unwrap().gen_range(range)
     }
 
     fn time(&self) -> SysTime {

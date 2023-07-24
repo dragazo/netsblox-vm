@@ -10,13 +10,13 @@
 | ---- | ------- | ----------- |
 | `all` | on | Enables all features |
 | `std`  | on | Enables the `std` crate dependency and access to the default [`StdSystem`](crate::std_system::StdSystem) implementation of [`System`](crate::runtime::System) |
-| `cli` | on | Enables the `std` feature flag and additionally gives access to the [`cli`](crate::cli) submodule, which gives API access to the standard CLI (needed for syscall extensions) rather than having to write everything from scratch |
+| `cli` | on | Enables the `std` feature flag and additionally gives access to the [`cli`](crate::cli) submodule, which gives API access to the standard CLI (needed for syscall extensions) rather than having to write a CLI from scratch |
 | `serde` | on | Enables serialization of some types |
 
 ## `no-std`
 
 `netsblox-vm` supports building in `no-std` environments by disabling the default `std` feature flag.
-Note that the `alloc` crate is still required in this case.
+However, the `alloc` crate is still required in this case.
 
 ```toml
 [dependencies]

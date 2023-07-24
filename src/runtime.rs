@@ -1287,8 +1287,6 @@ impl<T> AsyncResult<T> {
 /// Types of [`System`] resources, grouped into feature categories.
 #[derive(Debug)]
 pub enum Feature {
-    /// The ability of a process to generate random numbers.
-    Random,
     /// The ability of a process to get the current time with respect to an arbitrary starting point.
     ArbitraryTime,
     /// The ability of a process to get the current real time.
@@ -1508,14 +1506,14 @@ pub trait CustomTypes<S: System<Self>>: 'static + Sized {
 
 /// The time as determined by an implementation of [`System`].
 pub enum SysTime {
-    /// No concept of time. This should only be produced as a last resort.
+    /// No concept of time. This should only be produced as a last resort, as it disables all time-based features.
     Timeless,
-    /// A time measurement with an arbitrary (but consistent during runtime) starting point, which must be measured in milliseconds.
+    /// A time measurement from an arbitrary (but consistent during runtime) starting point, which must be measured in milliseconds.
     /// For instance, this could be used to measure uptime on systems that do not support reading real time.
     Arbitrary { ms: u64 },
     /// A real-world time measurement.
     /// This is always preferable over [`SysTime::Arbitrary`].
-    /// The value is intended to be transformed to local time, but this is not strictly required.
+    /// The value is assumed to already be transformed to local time.
     Real { local: OffsetDateTime },
 }
 impl SysTime {
@@ -1557,11 +1555,9 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
     /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],
     /// which makes it possible to implement this function with any random provider under the [`rand`] crate standard.
-    fn rand<T: SampleUniform, R: SampleRange<T>>(&self, range: R) -> Result<T, ErrorCause<C, Self>>;
+    fn rand<T: SampleUniform, R: SampleRange<T>>(&self, range: R) -> T;
 
-    /// Gets the current time in milliseconds.
-    /// This is not required to represent the actual real-world time; e.g., this could simply measure uptime.
-    /// Subsequent values are required to be non-decreasing.
+    /// Gets the current system time.
     fn time(&self) -> SysTime;
 
     /// Performs a general request which returns a value to the system.

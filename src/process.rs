@@ -170,6 +170,7 @@ enum RequestAction {
     Rpc, Syscall, Input, Push,
 }
 
+/// A collection of context info for starting a new [`Process`].
 #[derive(Collect, Educe)]
 #[collect(no_drop, bound = "")]
 #[educe(Clone, Default)]
@@ -1321,7 +1322,7 @@ mod ops {
     }
     pub(super) fn prep_rand_index<C: CustomTypes<S>, S: System<C>>(system: &S, len: usize) -> Result<usize, ErrorCause<C, S>> {
         if len == 0 { return Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }) }
-        system.rand(0..len)
+        Ok(system.rand(0..len))
     }
 
     pub(super) fn flatten<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>) -> Result<VecDeque<Value<'gc, C, S>>, ErrorCause<C, S>> {
@@ -1616,9 +1617,9 @@ mod ops {
                 if a > b { (a, b) = (b, a); }
                 let res = if a == libm::round(a) && b == libm::round(b) {
                     let (a, b) = (a as i64, b as i64);
-                    system.rand(a..=b)? as f64
+                    system.rand(a..=b) as f64
                 } else {
-                    system.rand(a..=b)?
+                    system.rand(a..=b)
                 };
                 Ok(Number::new(res)?.into())
             }),
