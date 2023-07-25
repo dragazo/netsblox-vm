@@ -1443,7 +1443,7 @@ fn test_proc_identical_to() {
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_json(mc, json!([
             [true, false, false, true],
-            [false, false, false, true],
+            [true, true, true, true],
             [false, false, true, true, true],
             [false, false, false, true],
         ])).unwrap();

@@ -279,8 +279,8 @@ pub(crate) enum Instruction<'a> {
     VariadicOp { op: VariadicOp, len: VariadicLen },
     /// Consumes 2 values, `b` and `a`, from the value stack, and pushes the (boolean) result of the comparison onto the value stack,
     Cmp { relation: Relation },
-    /// Consumes 2 values, `b` and `a`, from the value stack, and pushes the (boolean) result of a reference equality check onto the value stack.
-    RefEq,
+    /// Consumes 2 values, `b` and `a`, from the value stack, and pushes the (boolean) result of an identicalness check onto the value stack.
+    Identical,
     /// Consumes 1 value, `x`, from the value stack, and pushes the value `f(x)` onto the value stack.
     UnaryOp { op: UnaryOp },
 
@@ -739,7 +739,7 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             51 => read_prefixed!(Instruction::Cmp { relation: Relation::LessEq }),
             52 => read_prefixed!(Instruction::Cmp { relation: Relation::Greater }),
             53 => read_prefixed!(Instruction::Cmp { relation: Relation::GreaterEq }),
-            54 => read_prefixed!(Instruction::RefEq),
+            54 => read_prefixed!(Instruction::Identical),
 
             55 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Add }),
             56 => read_prefixed!(Instruction::BinaryOp { op: BinaryOp::Sub }),
@@ -931,7 +931,7 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::Cmp { relation: Relation::LessEq } => append_prefixed!(51),
             Instruction::Cmp { relation: Relation::Greater } => append_prefixed!(52),
             Instruction::Cmp { relation: Relation::GreaterEq } => append_prefixed!(53),
-            Instruction::RefEq => append_prefixed!(54),
+            Instruction::Identical => append_prefixed!(54),
 
             Instruction::BinaryOp { op: BinaryOp::Add } => append_prefixed!(55),
             Instruction::BinaryOp { op: BinaryOp::Sub } => append_prefixed!(56),
@@ -1308,7 +1308,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::ExprKind::LessEq { left, right } => self.append_simple_ins(entity, &[left, right], Relation::LessEq.into())?,
             ast::ExprKind::Eq { left, right } => self.append_simple_ins(entity, &[left, right], Relation::Equal.into())?,
             ast::ExprKind::Neq { left, right } => self.append_simple_ins(entity, &[left, right], Relation::NotEqual.into())?,
-            ast::ExprKind::Identical { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::RefEq)?,
+            ast::ExprKind::Identical { left, right } => self.append_simple_ins(entity, &[left, right], Instruction::Identical)?,
             ast::ExprKind::ListGet { list, index } => self.append_simple_ins(entity, &[index, list], Instruction::ListGet)?,
             ast::ExprKind::ListGetLast { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetLast)?,
             ast::ExprKind::ListGetRandom { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetRandom)?,

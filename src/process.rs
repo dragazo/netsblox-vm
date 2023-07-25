@@ -799,11 +799,22 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::VariadicOp { op, len } => {
-                fn combine_as_binary<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, mut acc: Value<'gc, C, S>, values: &mut dyn Iterator<Item = &Value<'gc, C, S>>, op: BinaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
-                    for item in values {
-                        acc = ops::binary_op(mc, system, &acc, item, op)?;
+                type CombineCase0<'gc, C, S> = fn(&Mutation<'gc>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
+                type CombineCase1<'gc, C, S> = fn(&Mutation<'gc>, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
+                fn combine_as_binary<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, values: &mut dyn Iterator<Item = &Value<'gc, C, S>>, op: BinaryOp, empty_case: CombineCase0<'gc, C, S>, singleton_case: CombineCase1<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+                    match values.next() {
+                        Some(first) => match values.next() {
+                            Some(second) => {
+                                let mut acc = ops::binary_op(mc, system, first, second, op)?;
+                                for item in values {
+                                    acc = ops::binary_op(mc, system, &acc, item, op)?;
+                                }
+                                Ok(acc)
+                            }
+                            None => singleton_case(mc, first),
+                        }
+                        None => empty_case(mc),
                     }
-                    Ok(acc)
                 }
                 fn combine_by_relation<'gc, C: CustomTypes<S>, S: System<C>>(values: &mut dyn Iterator<Item = &Value<'gc, C, S>>, relation: Relation) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
                     let mut res = match values.next() {
@@ -820,8 +831,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 type Combine<'gc, C, S, I> = fn(&Mutation<'gc>, &S, I) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
                 let combine: Combine<'gc, C, S, &mut dyn Iterator<Item = &Value<'gc, C, S>>> = match op {
-                    VariadicOp::Add => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(0.0)?), values, BinaryOp::Add),
-                    VariadicOp::Mul => |mc, system, values| combine_as_binary(mc, system, Value::Number(Number::new(1.0)?), values, BinaryOp::Mul),
+                    VariadicOp::Add => |mc, system, values| combine_as_binary(mc, system, values, BinaryOp::Add, |_| Ok(Value::Number(Number::new(0.0)?)), |_, v| Ok(if v.get_type() == Type::List { v.clone() } else { v.to_number()?.into() })),
+                    VariadicOp::Mul => |mc, system, values| combine_as_binary(mc, system, values, BinaryOp::Mul, |_| Ok(Value::Number(Number::new(1.0)?)), |_, v| Ok(if v.get_type() == Type::List { v.clone() } else { v.to_number()?.into() })),
                     VariadicOp::Min => |_, _, values| combine_by_relation(values, Relation::Less),
                     VariadicOp::Max => |_, _, values| combine_by_relation(values, Relation::Greater),
                     VariadicOp::StrCat => |_, _, values| {
@@ -865,10 +876,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(ops::check_relation(&a, &b, relation)?.into());
                 self.pos = aft_pos;
             }
-            Instruction::RefEq => {
+            Instruction::Identical => {
                 let b = self.value_stack.pop().unwrap();
                 let a = self.value_stack.pop().unwrap();
-                self.value_stack.push(ops::ref_eq(&a, &b).into());
+                self.value_stack.push(ops::identical(&a, &b).into());
                 self.pos = aft_pos;
             }
             Instruction::UnaryOp { op } => {
@@ -1818,15 +1829,15 @@ mod ops {
         })
     }
 
-    pub(super) fn ref_eq<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> bool {
+    pub(super) fn identical<'gc, C: CustomTypes<S>, S: System<C>>(a: &Value<'gc, C, S>, b: &Value<'gc, C, S>) -> bool {
         match (a, b) {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Bool(_), _) | (_, Value::Bool(_)) => false,
 
-            (Value::Number(a), Value::Number(b)) => a == b,
+            (Value::Number(a), Value::Number(b)) => a.get().to_bits() == b.get().to_bits(),
             (Value::Number(_), _) | (_, Value::Number(_)) => false,
 
-            (Value::String(a), Value::String(b)) => Rc::ptr_eq(a, b),
+            (Value::String(a), Value::String(b)) => a == b,
             (Value::String(_), _) | (_, Value::String(_)) => false,
 
             (Value::Image(a), Value::Image(b)) => Rc::ptr_eq(a, b),
