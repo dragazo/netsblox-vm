@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use crate::*;
 use crate::gc::*;
+use crate::json::*;
 use crate::slotmap::*;
 use crate::runtime::*;
 use crate::bytecode::*;
@@ -59,11 +60,13 @@ pub enum Input {
     Stop,
     /// Simulates a key down hat from the keyboard.
     /// This should be repeated if the button is held down.
-    KeyDown(KeyCode),
+    KeyDown { key: KeyCode },
     /// Simulates a key up hat from the keyboard.
     /// Due to the nature of the TTY interface, key up events are not always available, so this hat does not need to be sent.
     /// If not sent, a timeout is used to determine when a key is released (sending this hat can short-circuit the timeout).
-    KeyUp(KeyCode),
+    KeyUp { key: KeyCode },
+    /// Trigger the execution of a custom event (hat) block script.
+    CustomEvent { name: String, args: BTreeMap<String, Json>, interrupt: bool, max_queue: usize },
 }
 
 /// Result of stepping through the execution of a [`Project`].
@@ -191,7 +194,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
             }
         }
     }
-    pub fn input(&mut self, input: Input) {
+    pub fn input(&mut self, mc: &Mutation<'gc>, input: Input) {
         match input {
             Input::Start => {
                 for script in self.scripts.iter_mut() {
@@ -201,11 +204,27 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     }
                 }
             }
+            Input::CustomEvent { name, args, interrupt, max_queue } => {
+                for script in self.scripts.iter_mut() {
+                    if let Event::Custom { name: script_event_name, fields } = &script.event.0 {
+                        if name != *script_event_name { continue }
+
+                        let mut locals = SymbolTable::default();
+                        for field in fields.iter() {
+                            locals.define_or_redefine(field,
+                                args.get(field).and_then(|x| Value::from_json(mc, x.clone()).ok())
+                                .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
+                        }
+                        if interrupt { script.stop_all(&mut self.state); }
+                        script.schedule(&mut self.state, ProcContext { locals, ..Default::default() }, max_queue);
+                    }
+                }
+            }
             Input::Stop => {
                 self.state.processes.clear();
                 self.state.process_queue.clear();
             }
-            Input::KeyDown(input_key) => {
+            Input::KeyDown { key: input_key } => {
                 for script in self.scripts.iter_mut() {
                     if let Event::OnKey { key_filter } = &script.event.0 {
                         if key_filter.map(|x| x == input_key).unwrap_or(true) {
@@ -214,7 +233,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     }
                 }
             }
-            Input::KeyUp(_) => unimplemented!(),
+            Input::KeyUp { .. } => unimplemented!(),
         }
     }
     pub fn step(&mut self, mc: &Mutation<'gc>) -> ProjectStep<'gc, C, S> {
@@ -223,15 +242,15 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
             let values: BTreeMap<_,_> = values.into_iter().collect();
             for script in self.scripts.iter_mut() {
                 if let Event::NetworkMessage { msg_type: script_msg_type, fields } = &script.event.0 {
-                    if msg_type == *script_msg_type {
-                        let mut locals = SymbolTable::default();
-                        for field in fields.iter() {
-                            locals.define_or_redefine(field,
-                                values.get(field).and_then(|x| Value::from_json(mc, x.clone()).ok())
-                                .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
-                        }
-                        script.schedule(&mut self.state, ProcContext { locals, barrier: None, reply_key: reply_key.clone(), local_message: None }, usize::MAX);
+                    if msg_type != *script_msg_type { continue }
+
+                    let mut locals = SymbolTable::default();
+                    for field in fields.iter() {
+                        locals.define_or_redefine(field,
+                            values.get(field).and_then(|x| Value::from_json(mc, x.clone()).ok())
+                            .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
                     }
+                    script.schedule(&mut self.state, ProcContext { locals, barrier: None, reply_key: reply_key.clone(), local_message: None }, usize::MAX);
                 }
             }
         }

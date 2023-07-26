@@ -28,7 +28,7 @@ fn get_running_project(xml: &str, system: Rc<StdSystem<C>>) -> EnvArena {
         let (bytecode, init_info, _, _) = ByteCode::compile(&ast.roles[0]).unwrap();
 
         let mut proj = Project::from_init(mc, &init_info, Rc::new(bytecode), Settings::default(), system);
-        proj.input(Input::Start);
+        proj.input(mc, Input::Start);
         Env { proj: Gc::new(mc, RefLock::new(proj)) }
     })
 }

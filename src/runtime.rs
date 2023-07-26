@@ -601,6 +601,8 @@ pub enum Event {
     NetworkMessage { msg_type: String, fields: Vec<String> },
     /// Fire when a key is pressed. [`None`] is used to denote any key press.
     OnKey { key_filter: Option<KeyCode> },
+    /// Fire when explicitly requested from an input command.
+    Custom { name: String, fields: Vec<String> },
 }
 
 #[derive(Debug, Clone, Copy, FromPrimitive)]

@@ -221,7 +221,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
             return;
         }
     };
-    env.mutate(|mc, env| env.proj.borrow_mut(mc).input(Input::Start));
+    env.mutate(|mc, env| env.proj.borrow_mut(mc).input(mc, Input::Start));
 
     let mut input_sequence = Vec::with_capacity(16);
     let in_input_mode = || !input_queries.borrow().is_empty();
@@ -234,17 +234,17 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
                     RawKeyCode::Esc => input_sequence.push(Input::Stop),
                     RawKeyCode::Char(ch) => match in_input_mode() {
                         true => { input_value.push(ch); update_flag.set(true); }
-                        false => input_sequence.push(Input::KeyDown(KeyCode::Char(ch.to_ascii_lowercase()))),
+                        false => input_sequence.push(Input::KeyDown { key: KeyCode::Char(ch.to_ascii_lowercase()) }),
                     }
                     RawKeyCode::Backspace => if in_input_mode() && input_value.pop().is_some() { update_flag.set(true) }
                     RawKeyCode::Enter => if let Some((_, res_key)) = input_queries.borrow_mut().pop_front() {
                         res_key.complete(Ok(C::Intermediate::from_json(Json::String(mem::take(&mut input_value)))));
                         update_flag.set(true);
                     }
-                    RawKeyCode::Up => if !in_input_mode() { input_sequence.push(Input::KeyDown(KeyCode::Up)) }
-                    RawKeyCode::Down => if !in_input_mode() { input_sequence.push(Input::KeyDown(KeyCode::Down)) }
-                    RawKeyCode::Left => if !in_input_mode() { input_sequence.push(Input::KeyDown(KeyCode::Left)) }
-                    RawKeyCode::Right => if !in_input_mode() { input_sequence.push(Input::KeyDown(KeyCode::Right)) }
+                    RawKeyCode::Up => if !in_input_mode() { input_sequence.push(Input::KeyDown { key: KeyCode::Up }) }
+                    RawKeyCode::Down => if !in_input_mode() { input_sequence.push(Input::KeyDown { key: KeyCode::Down }) }
+                    RawKeyCode::Left => if !in_input_mode() { input_sequence.push(Input::KeyDown { key: KeyCode::Left }) }
+                    RawKeyCode::Right => if !in_input_mode() { input_sequence.push(Input::KeyDown { key: KeyCode::Right }) }
                     _ => (),
                 }
                 Event::Resize(c, r) => {
@@ -257,7 +257,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
 
         env.mutate(|mc, env| {
             let mut proj = env.proj.borrow_mut(mc);
-            for input in input_sequence.drain(..) { proj.input(input); }
+            for input in input_sequence.drain(..) { proj.input(mc, input); }
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
                 if let ProjectStep::Error { error, proc } = &res {
@@ -313,7 +313,7 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
             return;
         }
     };
-    env.mutate(|mc, env| env.proj.borrow_mut(mc).input(Input::Start));
+    env.mutate(|mc, env| env.proj.borrow_mut(mc).input(mc, Input::Start));
 
     loop {
         env.mutate(|mc, env| {
@@ -502,7 +502,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
                                 state.running.store(true, MemoryOrder::Relaxed);
                             }
                         }
-                        env.mutate(|mc, env| env.proj.borrow_mut(mc).input(input));
+                        env.mutate(|mc, env| env.proj.borrow_mut(mc).input(mc, input));
                     }
                 }
                 Err(TryRecvError::Disconnected) => break 'program,
