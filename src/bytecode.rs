@@ -2350,6 +2350,7 @@ impl ByteCode {
                     ast::HatKind::OnClone => Event::OnClone,
                     ast::HatKind::LocalMessage { msg_type } => Event::LocalMessage { msg_type: msg_type.clone() },
                     ast::HatKind::NetworkMessage { msg_type, fields } => Event::NetworkMessage { msg_type: msg_type.clone(), fields: fields.iter().map(|x| x.trans_name.clone()).collect() },
+                    ast::HatKind::Unknown { name, fields } => Event::Custom { name: name.clone(), fields: fields.iter().map(|x| x.trans_name.clone()).collect() },
                     ast::HatKind::OnKey { key } => Event::OnKey {
                         key_filter: match key.as_str() {
                             "any key" => None,

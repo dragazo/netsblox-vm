@@ -614,6 +614,39 @@ fn test_proj_run_call_ask_tell() {
 }
 
 #[test]
+fn test_proj_custom_events() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, default_properties_config(), UtcOffset::UTC));
+    let proj = get_running_project(include_str!("projects/custom-events.xml"), system);
+    proj.mutate(|mc, proj| {
+        let mut proj = proj.proj.borrow_mut(mc);
+        proj.input(mc, Input::CustomEvent { name: "receiveTest1".into(), args: Default::default(), interrupt: false, max_queue: usize::MAX });
+        proj.input(mc, Input::CustomEvent { name: "receiveTest1".into(), args: Default::default(), interrupt: false, max_queue: usize::MAX });
+        proj.input(mc, Input::CustomEvent { name: "receiveTest1".into(), args: Default::default(), interrupt: false, max_queue: usize::MAX });
+        proj.input(mc, Input::CustomEvent { name: "receiveTest3".into(), args: vec![("val".to_owned(), json!(34)), ("derp".to_owned(), json!(12))].into_iter().collect(), interrupt: false, max_queue: 0 });
+        proj.input(mc, Input::CustomEvent { name: "receiveTest3".into(), args: vec![("val".to_owned(), json!(420)), ("derp".to_owned(), json!(69))].into_iter().collect(), interrupt: false, max_queue: 0 });
+        proj.input(mc, Input::CustomEvent { name: "receiveTest2".into(), args: vec![("merp".to_owned(), json!("hello world"))].into_iter().collect(), interrupt: true, max_queue: 0 });
+        proj.input(mc, Input::CustomEvent { name: "receiveTest2".into(), args: vec![("merp".to_owned(), json!("goodbye world"))].into_iter().collect(), interrupt: true, max_queue: 0 });
+        run_till_term(mc, &mut *proj).unwrap();
+        let global_context = proj.get_global_context();
+        let global_context = global_context.borrow();
+
+        let expected = Value::from_json(mc, json!([
+            ["here 1"],
+            ["here 2"],
+            ["here 1"],
+            ["here 2"],
+            ["here 1"],
+            ["here 2"],
+            ["here 5", 34, 12, 22],
+            ["here 6", 34, 12, 3412],
+            ["here 3", "goodbye world", "goodbye worldgoodbye world"],
+            ["here 4", "goodbye world", "goodbye world-goodbye world"],
+        ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 0.1, "res");
+    });
+}
+
+#[test]
 fn test_proj_parallel_rpcs() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), system);
