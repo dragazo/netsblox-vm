@@ -65,7 +65,9 @@ pub enum Input {
     /// Due to the nature of the TTY interface, key up events are not always available, so this hat does not need to be sent.
     /// If not sent, a timeout is used to determine when a key is released (sending this hat can short-circuit the timeout).
     KeyUp { key: KeyCode },
-    /// Trigger the execution of a custom event (hat) block script.
+    /// Trigger the execution of a custom event (hat) block script with the given set of message-style input variables.
+    /// The `interrupt` flag can be set to cause any running scripts to stop and wipe their current queues, placing this new execution front and center.
+    /// The `max_queue` field controls the maximum size of the context/schedule execution queue; beyond this size, this (and only this) execution will be dropped.
     CustomEvent { name: String, args: BTreeMap<String, Json>, interrupt: bool, max_queue: usize },
 }
 
@@ -142,6 +144,22 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Script<'gc, C, S> {
     }
 }
 
+struct AllContextsConsumer {
+    did_it: bool,
+}
+impl AllContextsConsumer {
+    fn new() -> Self {
+        Self { did_it: false }
+    }
+    fn do_once<'gc, C: CustomTypes<S>, S: System<C>>(&mut self, proj: &mut Project<'gc, C, S>) {
+        if !std::mem::replace(&mut self.did_it, true) {
+            for script in proj.scripts.iter_mut() {
+                script.consume_context(&mut proj.state);
+            }
+        }
+    }
+}
+
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 struct State<'gc, C: CustomTypes<S>, S: System<C>> {
@@ -180,6 +198,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
         }
     }
     pub fn add_script(&mut self, start_pos: usize, entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>, event: Option<Event>) {
+        let mut all_contexts_consumer = AllContextsConsumer::new();
         match event {
             Some(event) => self.scripts.push(Script {
                 event: Rc::new((event, start_pos)),
@@ -190,23 +209,27 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
             None => {
                 let process = Process::new(self.state.global_context, entity, start_pos);
                 let key = self.state.processes.insert(process);
+
+                all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
                 self.state.process_queue.push_back(key);
             }
         }
     }
     pub fn input(&mut self, mc: &Mutation<'gc>, input: Input) {
+        let mut all_contexts_consumer = AllContextsConsumer::new();
         match input {
             Input::Start => {
-                for script in self.scripts.iter_mut() {
-                    if let Event::OnFlag = &script.event.0 {
-                        script.stop_all(&mut self.state);
-                        script.schedule(&mut self.state, Default::default(), 0);
+                for i in 0..self.scripts.len() {
+                    if let Event::OnFlag = &self.scripts[i].event.0 {
+                        all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
+                        self.scripts[i].stop_all(&mut self.state);
+                        self.scripts[i].schedule(&mut self.state, Default::default(), 0);
                     }
                 }
             }
             Input::CustomEvent { name, args, interrupt, max_queue } => {
-                for script in self.scripts.iter_mut() {
-                    if let Event::Custom { name: script_event_name, fields } = &script.event.0 {
+                for i in 0..self.scripts.len() {
+                    if let Event::Custom { name: script_event_name, fields } = &self.scripts[i].event.0 {
                         if name != *script_event_name { continue }
 
                         let mut locals = SymbolTable::default();
@@ -215,20 +238,26 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                                 args.get(field).and_then(|x| Value::from_json(mc, x.clone()).ok())
                                 .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
                         }
-                        if interrupt { script.stop_all(&mut self.state); }
-                        script.schedule(&mut self.state, ProcContext { locals, ..Default::default() }, max_queue);
+
+                        all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
+                        if interrupt { self.scripts[i].stop_all(&mut self.state); }
+                        self.scripts[i].schedule(&mut self.state, ProcContext { locals, ..Default::default() }, max_queue);
                     }
                 }
             }
             Input::Stop => {
+                for script in self.scripts.iter_mut() {
+                    script.stop_all(&mut self.state);
+                }
                 self.state.processes.clear();
                 self.state.process_queue.clear();
             }
             Input::KeyDown { key: input_key } => {
-                for script in self.scripts.iter_mut() {
-                    if let Event::OnKey { key_filter } = &script.event.0 {
+                for i in 0..self.scripts.len() {
+                    if let Event::OnKey { key_filter } = &self.scripts[i].event.0 {
                         if key_filter.map(|x| x == input_key).unwrap_or(true) {
-                            script.schedule(&mut self.state, Default::default(), 0);
+                            all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
+                            self.scripts[i].schedule(&mut self.state, Default::default(), 0);
                         }
                     }
                 }
@@ -237,11 +266,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
         }
     }
     pub fn step(&mut self, mc: &Mutation<'gc>) -> ProjectStep<'gc, C, S> {
+        let mut all_contexts_consumer = AllContextsConsumer::new();
+
         let msg = self.state.global_context.borrow().system.receive_message();
         if let Some(IncomingMessage { msg_type, values, reply_key }) = msg {
             let values: BTreeMap<_,_> = values.into_iter().collect();
-            for script in self.scripts.iter_mut() {
-                if let Event::NetworkMessage { msg_type: script_msg_type, fields } = &script.event.0 {
+            for i in 0..self.scripts.len() {
+                if let Event::NetworkMessage { msg_type: script_msg_type, fields } = &self.scripts[i].event.0 {
                     if msg_type != *script_msg_type { continue }
 
                     let mut locals = SymbolTable::default();
@@ -250,14 +281,19 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                             values.get(field).and_then(|x| Value::from_json(mc, x.clone()).ok())
                             .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
                     }
-                    script.schedule(&mut self.state, ProcContext { locals, barrier: None, reply_key: reply_key.clone(), local_message: None }, usize::MAX);
+
+                    all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
+                    self.scripts[i].schedule(&mut self.state, ProcContext { locals, barrier: None, reply_key: reply_key.clone(), local_message: None }, usize::MAX);
                 }
             }
         }
 
         let (proc_key, proc) = loop {
             match self.state.process_queue.pop_front() {
-                None => return ProjectStep::Idle,
+                None => {
+                    debug_assert!(self.scripts.iter().all(|x| x.context_queue.is_empty()));
+                    return ProjectStep::Idle;
+                }
                 Some(proc_key) => if let Some(proc) = self.state.processes.get_mut(proc_key) { break (proc_key, proc) }
             }
         };
@@ -269,6 +305,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     ProjectStep::Normal
                 }
                 ProcessStep::Yield => {
+                    all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
                     self.state.process_queue.push_back(proc_key);
                     ProjectStep::Yield
                 }
@@ -284,6 +321,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     let mut proc = Process::new(self.state.global_context, entity, pos);
                     proc.initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
                     let fork_proc_key = self.state.processes.insert(proc);
+
+                    all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
                     self.state.process_queue.push_back(fork_proc_key); // forked process starts at end of exec queue
                     self.state.process_queue.push_front(proc_key); // keep executing the same process as before
                     ProjectStep::Normal
@@ -303,6 +342,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     }
                     for script in new_scripts.iter_mut() {
                         if let Event::OnClone = &script.event.0 {
+                            all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
                             script.schedule(&mut self.state, ProcContext::default(), 0);
                         }
                     }
@@ -311,26 +351,36 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     ProjectStep::Normal
                 }
                 ProcessStep::Broadcast { msg_type, barrier, targets } => {
-                    for script in self.scripts.iter_mut() {
-                        if let Event::LocalMessage { msg_type: recv_type } = &script.event.0 {
+                    for i in 0..self.scripts.len() {
+                        if let Event::LocalMessage { msg_type: recv_type } = &self.scripts[i].event.0 {
                             if recv_type.as_ref().map(|x| *x == *msg_type).unwrap_or(true) {
                                 if let Some(targets) = &targets {
-                                    if !targets.iter().any(|&target| Gc::ptr_eq(script.entity, target)) {
+                                    if !targets.iter().any(|&target| Gc::ptr_eq(self.scripts[i].entity, target)) {
                                         continue
                                     }
                                 }
-                                script.stop_all(&mut self.state);
-                                script.schedule(&mut self.state, ProcContext { locals: Default::default(), barrier: barrier.clone(), reply_key: None, local_message: Some(msg_type.clone()) }, 0);
+
+                                all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
+                                self.scripts[i].stop_all(&mut self.state);
+                                self.scripts[i].schedule(&mut self.state, ProcContext { locals: Default::default(), barrier: barrier.clone(), reply_key: None, local_message: Some(msg_type.clone()) }, 0);
                             }
                         }
                     }
                     self.state.process_queue.push_front(proc_key); // keep executing same process, if it was a wait, it'll yield next step
                     ProjectStep::Normal
                 }
-                ProcessStep::Terminate { result } => ProjectStep::ProcessTerminated { result, proc: self.state.processes.remove(proc_key).unwrap() },
+                ProcessStep::Terminate { result } => {
+                    let proc = self.state.processes.remove(proc_key).unwrap();
+                    all_contexts_consumer.do_once(self); // need to consume all contexts after dropping a process
+                    ProjectStep::ProcessTerminated { result, proc }
+                }
                 ProcessStep::Idle => unreachable!(),
             }
-            Err(error) => ProjectStep::Error { error, proc: self.state.processes.remove(proc_key).unwrap() },
+            Err(error) => {
+                let proc = self.state.processes.remove(proc_key).unwrap();
+                all_contexts_consumer.do_once(self); // need to consume all contexts after dropping a process
+                ProjectStep::Error { error, proc }
+            }
         }
     }
     pub fn get_global_context(&self) -> Gc<'gc, RefLock<GlobalContext<'gc, C, S>>> {

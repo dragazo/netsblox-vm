@@ -633,14 +633,14 @@ fn test_proj_custom_events() {
         let expected = Value::from_json(mc, json!([
             ["here 1"],
             ["here 2"],
-            ["here 1"],
-            ["here 2"],
-            ["here 1"],
-            ["here 2"],
             ["here 5", 34, 12, 22],
             ["here 6", 34, 12, 3412],
             ["here 3", "goodbye world", "goodbye worldgoodbye world"],
             ["here 4", "goodbye world", "goodbye world-goodbye world"],
+            ["here 1"],
+            ["here 2"],
+            ["here 1"],
+            ["here 2"],
         ])).unwrap();
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 0.1, "res");
     });
