@@ -799,19 +799,18 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::VariadicOp { op, len } => {
-                type CombineCase0<'gc, C, S> = fn(&Mutation<'gc>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
-                type CombineCase1<'gc, C, S> = fn(&Mutation<'gc>, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
-                fn combine_as_binary<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, values: &mut dyn Iterator<Item = &Value<'gc, C, S>>, op: BinaryOp, empty_case: CombineCase0<'gc, C, S>, singleton_case: CombineCase1<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
+                type CombineEmpty<'gc, C, S> = fn(&Mutation<'gc>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
+                fn combine_as_binary<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, values: &mut dyn Iterator<Item = &Value<'gc, C, S>>, combine_op: BinaryOp, singleton_op: UnaryOp, empty_case: CombineEmpty<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
                     match values.next() {
                         Some(first) => match values.next() {
                             Some(second) => {
-                                let mut acc = ops::binary_op(mc, system, first, second, op)?;
+                                let mut acc = ops::binary_op(mc, system, first, second, combine_op)?;
                                 for item in values {
-                                    acc = ops::binary_op(mc, system, &acc, item, op)?;
+                                    acc = ops::binary_op(mc, system, &acc, item, combine_op)?;
                                 }
                                 Ok(acc)
                             }
-                            None => singleton_case(mc, first),
+                            None => ops::unary_op(mc, system, first, singleton_op),
                         }
                         None => empty_case(mc),
                     }
@@ -831,8 +830,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 type Combine<'gc, C, S, I> = fn(&Mutation<'gc>, &S, I) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>;
                 let combine: Combine<'gc, C, S, &mut dyn Iterator<Item = &Value<'gc, C, S>>> = match op {
-                    VariadicOp::Add => |mc, system, values| combine_as_binary(mc, system, values, BinaryOp::Add, |_| Ok(Value::Number(Number::new(0.0)?)), |_, v| Ok(if v.get_type() == Type::List { v.clone() } else { v.to_number()?.into() })),
-                    VariadicOp::Mul => |mc, system, values| combine_as_binary(mc, system, values, BinaryOp::Mul, |_| Ok(Value::Number(Number::new(1.0)?)), |_, v| Ok(if v.get_type() == Type::List { v.clone() } else { v.to_number()?.into() })),
+                    VariadicOp::Add => |mc, system, values| combine_as_binary(mc, system, values, BinaryOp::Add, UnaryOp::ToNumber, |_| Ok(Number::new(0.0)?.into())),
+                    VariadicOp::Mul => |mc, system, values| combine_as_binary(mc, system, values, BinaryOp::Mul, UnaryOp::ToNumber, |_| Ok(Number::new(1.0)?.into())),
                     VariadicOp::Min => |_, _, values| combine_by_relation(values, Relation::Less),
                     VariadicOp::Max => |_, _, values| combine_by_relation(values, Relation::Greater),
                     VariadicOp::StrCat => |_, _, values| {
@@ -1661,20 +1660,21 @@ mod ops {
     pub(super) fn unary_op<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, x: &Value<'gc, C, S>, op: UnaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let mut cache = Default::default();
         match op {
-            UnaryOp::Not    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok((!x.to_bool()?).into())),
-            UnaryOp::Abs    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.abs()?.into())),
-            UnaryOp::Neg    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.neg()?.into())),
-            UnaryOp::Sqrt   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.sqrt()?.into())),
-            UnaryOp::Round  => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.round()?.into())),
-            UnaryOp::Floor  => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.floor()?.into())),
-            UnaryOp::Ceil   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.ceil()?.into())),
-            UnaryOp::Sin    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::sin(x.to_number()?.get().to_radians()))?.into())),
-            UnaryOp::Cos    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::cos(x.to_number()?.get().to_radians()))?.into())),
-            UnaryOp::Tan    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::tan(x.to_number()?.get().to_radians()))?.into())),
-            UnaryOp::Asin   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::asin(x.to_number()?.get()).to_degrees())?.into())),
-            UnaryOp::Acos   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::acos(x.to_number()?.get()).to_degrees())?.into())),
-            UnaryOp::Atan   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::atan(x.to_number()?.get()).to_degrees())?.into())),
-            UnaryOp::StrLen => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(x.to_string()?.chars().count() as f64)?.into())),
+            UnaryOp::ToNumber => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.into())),
+            UnaryOp::Not      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok((!x.to_bool()?).into())),
+            UnaryOp::Abs      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.abs()?.into())),
+            UnaryOp::Neg      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.neg()?.into())),
+            UnaryOp::Sqrt     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.sqrt()?.into())),
+            UnaryOp::Round    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.round()?.into())),
+            UnaryOp::Floor    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.floor()?.into())),
+            UnaryOp::Ceil     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.ceil()?.into())),
+            UnaryOp::Sin      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::sin(x.to_number()?.get().to_radians()))?.into())),
+            UnaryOp::Cos      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::cos(x.to_number()?.get().to_radians()))?.into())),
+            UnaryOp::Tan      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::tan(x.to_number()?.get().to_radians()))?.into())),
+            UnaryOp::Asin     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::asin(x.to_number()?.get()).to_degrees())?.into())),
+            UnaryOp::Acos     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::acos(x.to_number()?.get()).to_degrees())?.into())),
+            UnaryOp::Atan     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::atan(x.to_number()?.get()).to_degrees())?.into())),
+            UnaryOp::StrLen   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(x.to_string()?.chars().count() as f64)?.into())),
 
             UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| match x.to_string()?.chars().rev().next() {
                 Some(ch) => Ok(Rc::new(ch.to_string()).into()),

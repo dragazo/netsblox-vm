@@ -1583,6 +1583,25 @@ fn test_proc_signed_zero() {
 }
 
 #[test]
+fn test_proc_singleton_sum_product() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/singleton-sum-product.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            9, 9, [6, [4, 2], 1], [6, [4, 2], 1],
+            9, 9, [6, [4, 2], 1], [6, [4, 2], 1],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "singleton sum product");
+    });
+}
+
+#[test]
 fn test_proc_list_combinations() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),

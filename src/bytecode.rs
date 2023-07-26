@@ -80,6 +80,7 @@ pub(crate) enum BinaryOp {
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
 pub(crate) enum UnaryOp {
+    ToNumber,
     Not,
     Abs, Neg,
     Sqrt,
