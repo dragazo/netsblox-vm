@@ -8,10 +8,11 @@
 
 | name | default | description |
 | ---- | ------- | ----------- |
-| `all` | on | Enables all features |
 | `std`  | on | Enables the `std` crate dependency and access to the default [`StdSystem`](crate::std_system::StdSystem) implementation of [`System`](crate::runtime::System) |
 | `cli` | on | Enables the `std` feature flag and additionally gives access to the [`cli`](crate::cli) submodule, which gives API access to the standard CLI (needed for syscall extensions) rather than having to write a CLI from scratch |
 | `serde` | on | Enables serialization of some types |
+| `native-tls` | on | Enables the use of native TLS (only used if `std` is also enabled) |
+| `native-tls-vendored` | off | Enables the use of the vendored version of native TLS (only used if `std` is also enabled) |
 
 ## `no-std`
 
