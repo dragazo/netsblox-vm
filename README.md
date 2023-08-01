@@ -11,8 +11,14 @@
 | `std`  | on | Enables the `std` crate dependency and access to the default [`StdSystem`](crate::std_system::StdSystem) implementation of [`System`](crate::runtime::System) |
 | `cli` | on | Enables the `std` feature flag and additionally gives access to the [`cli`](crate::cli) submodule, which gives API access to the standard CLI (needed for syscall extensions) rather than having to write a CLI from scratch |
 | `serde` | on | Enables serialization of some types |
-| `native-tls` | on | Enables the use of native TLS (only used if `std` is also enabled) |
-| `native-tls-vendored` | off | Enables the use of the vendored version of native TLS (only used if `std` is also enabled) |
+| `native-tls` | on | Enables the `native-tls` feature for TLS-capable dependencies (only used if `std` is also enabled) |
+| `native-tls-vendored` | off | Enables the `native-tls-vendored` feature for TLS-capable dependencies (only used if `std` is also enabled) |
+| `rustls-tls-native-roots` | off | Enables the `rustls-tls-native-roots` feature for TLS-capable dependencies (only used if `std` is also enabled) |
+| `rustls-tls-webpki-roots` | off | Enables the `rustls-tls-webpki-roots` feature for TLS-capable dependencies (only used if `std` is also enabled) |
+
+Note that if `std` is enabled, one of the TLS feature flags must also be enabled in order to connect to the NetsBlox server with [`StdSystem`](crate::std_system::StdSystem).
+The `native-tls` feature is enabled by default to support this on common desktop and server environments;
+however you may need to disable default features and explicitly opt into a different TLS option for other targets (e.g., Android or iOS).
 
 ## `no-std`
 
