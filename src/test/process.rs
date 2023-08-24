@@ -29,7 +29,7 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
     assert_eq!(ast.roles.len(), 1);
 
     let (code, init_info, ins_locs, locs) = ByteCode::compile(&ast.roles[0]).unwrap();
-    let main = locs.funcs.iter().find(|x| x.0.trans_name.trim() == "main").expect("no main function at global scope");
+    let main = locs.funcs.iter().chain(locs.entities[0].1.funcs.iter()).find(|x| x.0.trans_name.trim() == "main").expect("no main function/method");
 
     (EnvArena::new(Default::default(), |mc| {
         let glob = GlobalContext::from_init(mc, &init_info, Rc::new(code), settings, system);
@@ -1776,10 +1776,10 @@ fn test_proc_string_cmp() {
 fn test_proc_stack_overflow() {
     let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, locs) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
-        globals = "",
-        fields = "",
-        funcs = include_str!("blocks/stack-overflow.xml"),
-        methods = "",
+        globals = r#"<variable name="g"><l>0</l></variable>"#,
+        fields = r#"<variable name="f"><l>0</l></variable>"#,
+        funcs = "",
+        methods = include_str!("blocks/stack-overflow.xml"),
     ), Settings::default(), system);
 
     run_till_term(&mut env, |_, env, res| {
@@ -1788,6 +1788,15 @@ fn test_proc_stack_overflow() {
         fn check(s: &ErrorSummary) {
             assert!(s.cause.contains("CallDepthLimit"));
             assert!(format!("{s:?}").starts_with("ErrorSummary"));
+
+            assert_eq!(s.globals.len(), 1);
+            assert_eq!(s.globals[0].name, "g");
+            assert_eq!(s.globals[0].value, "\"hello\"");
+
+            assert_eq!(s.fields.len(), 1);
+            assert_eq!(s.fields[0].name, "f");
+            assert_eq!(s.fields[0].value, "\"world\"");
+
             assert!(s.trace.len() >= 64);
             assert_eq!(s.trace[0].locals.len(), 0);
             for (i, entry) in s.trace[1..].iter().enumerate() {
