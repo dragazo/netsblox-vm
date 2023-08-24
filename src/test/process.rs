@@ -2024,6 +2024,40 @@ fn test_proc_from_csv() {
 }
 
 #[test]
+fn test_proc_extra_cmp_tests() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/extra-cmp-tests.xml"),
+        methods = "",
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]],
+            [[3, 1], [3, 2], [4, 1], [4, 2]],
+            [false, true, false],
+            [false, true, false],
+            [true, false, true],
+            [false, true, false],
+            [false, true, false],
+            [true, false, true],
+            [true, false, true],
+            [false, true, false],
+            [false, true, false],
+            [false, true, false],
+            [false, true, false],
+            [false, true, false],
+            [false, true, false],
+            [true, false, true],
+            [false, true, false],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "extra-cmp-tests");
+    });
+}
+
+#[test]
 fn test_proc_extra_blocks() {
     let actions = Rc::new(RefCell::new(vec![]));
     let actions_clone = actions.clone();
