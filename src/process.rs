@@ -39,18 +39,21 @@ fn empty_string() -> Rc<String> {
 
 /// A variable entry in the structure expected by the standard js extension.
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Debug, Clone)]
 pub struct VarEntry {
     pub name: String,
     pub value: String,
 }
 /// A trace entry in the structure expected by the standard js extension.
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Debug, Clone)]
 pub struct TraceEntry {
     pub location: String,
     pub locals: Vec<VarEntry>,
 }
 /// A error message in the structure expected by the standard js extension.
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Debug, Clone)]
 pub struct ErrorSummary {
     pub cause: String,
     pub entity: String,

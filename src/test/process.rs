@@ -62,11 +62,15 @@ fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(&M
                 Ok(ProcessStep::Watcher { .. }) => panic!("proc tests should not use watchers"),
                 Ok(ProcessStep::Fork { .. }) => panic!("proc tests should not fork"),
                 Ok(ProcessStep::Pause) => panic!("proc tests should not pause"),
-                Err(e) => return and_then(mc, env, Err(e)),
+                Err(e) => {
+                    drop(proc); // so handler can borrow the proc if needed
+                    return and_then(mc, env, Err(e));
+                }
             }
         };
 
         assert!(!proc.is_running());
+        drop(proc); // so handler can borrow the proc if needed
         and_then(mc, env, Ok((ret, yields)));
     });
 }
@@ -1765,6 +1769,37 @@ fn test_proc_string_cmp() {
             [false, true, true, false, true, true, true],
         ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "string cmp");
+    });
+}
+
+#[test]
+fn test_proc_stack_overflow() {
+    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let (mut env, locs) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/stack-overflow.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |_, env, res| {
+        let err = res.unwrap_err();
+        let summary = ErrorSummary::extract(&err, &*env.proc.borrow(), &locs);
+        fn check(s: &ErrorSummary) {
+            assert!(s.cause.contains("CallDepthLimit"));
+            assert!(format!("{s:?}").starts_with("ErrorSummary"));
+            assert!(s.trace.len() >= 64);
+            assert_eq!(s.trace[0].locals.len(), 0);
+            for (i, entry) in s.trace[1..].iter().enumerate() {
+                assert_eq!(entry.locals.len(), 1);
+                let v = &entry.locals[0];
+                assert_eq!(v.name, "v");
+                println!("{i} => {}", v.value);
+                assert_eq!(v.value, format!("{}", i + 1));
+            }
+        }
+        check(&summary);
+        check(&summary.clone());
     });
 }
 
