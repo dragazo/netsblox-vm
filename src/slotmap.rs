@@ -2,9 +2,9 @@
 //! 
 //! This is essentially a rewrite of a subset of the `slotmap` crate since we can't implement [`Collect`] on foreign types.
 
-use std::prelude::v1::*;
-use std::marker::PhantomData;
-use std::{vec, slice, iter};
+use alloc::vec::{self, Vec};
+use core::marker::PhantomData;
+use core::{slice, iter};
 
 use crate::gc::*;
 

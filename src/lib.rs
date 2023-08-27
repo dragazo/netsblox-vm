@@ -3,9 +3,13 @@
 
 #![doc = include_str!("../README.md")]
 
-extern crate no_std_compat as std;
+#[cfg(feature = "std")]
+#[macro_use]
+extern crate std;
 
+#[macro_use] extern crate alloc;
 #[macro_use] extern crate num_derive;
+
 pub(crate) use educe::Educe;
 
 /// Re-exports of relevant items from `gc_arena`.

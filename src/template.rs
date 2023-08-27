@@ -1,8 +1,9 @@
 //! Various templated source files.
 
-use std::prelude::v1::*;
-use std::time::Duration;
-use std::fmt::Write;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::time::Duration;
+use core::fmt::Write;
 
 #[cfg(feature = "serde")]
 use serde::Serialize;

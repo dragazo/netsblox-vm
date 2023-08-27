@@ -1,6 +1,8 @@
-use std::prelude::v1::*;
-use std::collections::{VecDeque, BTreeMap};
-use std::rc::Rc;
+use alloc::vec::Vec;
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::collections::{VecDeque, BTreeMap};
+use alloc::rc::Rc;
 
 use crate::*;
 use crate::gc::*;
@@ -152,7 +154,7 @@ impl AllContextsConsumer {
         Self { did_it: false }
     }
     fn do_once<'gc, C: CustomTypes<S>, S: System<C>>(&mut self, proj: &mut Project<'gc, C, S>) {
-        if !std::mem::replace(&mut self.did_it, true) {
+        if !core::mem::replace(&mut self.did_it, true) {
             for script in proj.scripts.iter_mut() {
                 script.consume_context(&mut proj.state);
             }

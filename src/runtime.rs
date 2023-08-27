@@ -1,11 +1,13 @@
-use std::prelude::v1::*;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::marker::PhantomData;
-use std::{iter, fmt, mem};
-use std::rc::{Rc, Weak};
-use std::borrow::Cow;
-use std::ops::Deref;
-use std::cell::Ref;
+use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
+use alloc::rc::{Rc, Weak};
+use alloc::borrow::{Cow, ToOwned};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
+use core::marker::PhantomData;
+use core::{iter, fmt, mem};
+use core::ops::Deref;
+use core::cell::Ref;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
 use checked_float::{FloatChecker, CheckedFloat};
@@ -917,11 +919,9 @@ impl<'gc, T: 'gc + Collect> Shared<'gc, T> {
     /// Transitions the shared value from [`Shared::Unique`] to [`Shared::Aliased`] if it has not already,
     /// and returns an additional alias to the underlying value.
     pub fn alias_inner(&mut self, mc: &Mutation<'gc>) -> Gc<'gc, RefLock<T>> {
-        take_mut::take(self, |myself| {
-            match myself {
-                Shared::Unique(x) => Shared::Aliased(Gc::new(mc, RefLock::new(x))),
-                Shared::Aliased(_) => myself,
-            }
+        replace_with::replace_with(self, || unreachable!(), |myself| match myself {
+            Shared::Unique(x) => Shared::Aliased(Gc::new(mc, RefLock::new(x))),
+            Shared::Aliased(_) => myself,
         });
 
         match self {
@@ -1026,9 +1026,9 @@ impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> IntoIterator for &'a mut SymbolTa
 pub mod symbol_table {
     //! Special types for working with a [`SymbolTable`].
     use super::*;
-    pub struct IntoIter<'gc, C: CustomTypes<S>, S: System<C>>(pub(crate) std::collections::btree_map::IntoIter<String, Shared<'gc, Value<'gc, C, S>>>);
-    pub struct Iter<'gc, 'a, C: CustomTypes<S>, S: System<C>>(pub(crate) std::collections::btree_map::Iter<'a, String, Shared<'gc, Value<'gc, C, S>>>);
-    pub struct IterMut<'gc, 'a, C: CustomTypes<S>, S: System<C>>(pub(crate) std::collections::btree_map::IterMut<'a, String, Shared<'gc, Value<'gc, C, S>>>);
+    pub struct IntoIter<'gc, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::IntoIter<String, Shared<'gc, Value<'gc, C, S>>>);
+    pub struct Iter<'gc, 'a, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::Iter<'a, String, Shared<'gc, Value<'gc, C, S>>>);
+    pub struct IterMut<'gc, 'a, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::IterMut<'a, String, Shared<'gc, Value<'gc, C, S>>>);
     impl<'gc, C: CustomTypes<S>, S: System<C>> Iterator for IntoIter<'gc, C, S> { type Item = (String, Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
     impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> Iterator for Iter<'gc, 'a, C, S> { type Item = (&'a String, &'a Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
     impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> Iterator for IterMut<'gc, 'a, C, S> { type Item = (&'a String, &'a mut Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }

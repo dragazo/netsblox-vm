@@ -2,10 +2,14 @@
 //! 
 //! To generate bytecode from a project, you can use [`ByteCode::compile`].
 
-use std::prelude::v1::*;
-use std::collections::{BTreeMap, VecDeque};
-use std::rc::Rc;
-use std::mem;
+use alloc::collections::{BTreeMap, VecDeque};
+use alloc::string::{String, ToString};
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use alloc::rc::Rc;
+
+use core::mem;
 
 #[cfg(feature = "std")]
 use std::io::{self, Write};
@@ -646,7 +650,7 @@ impl<'a> BinaryRead<'a> for &'a str {
     fn read(code: &'a [u8], data: &'a [u8], start: usize) -> (Self, usize) {
         let (data_pos, aft) = <usize as BinaryRead>::read(code, data, start);
         let (data_len, aft) = <usize as BinaryRead>::read(code, data, aft);
-        (std::str::from_utf8(&data[data_pos..data_pos + data_len]).unwrap(), aft)
+        (core::str::from_utf8(&data[data_pos..data_pos + data_len]).unwrap(), aft)
     }
 }
 
@@ -1262,8 +1266,8 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::Value::Number(v) => self.ins.push(Instruction::PushNumber { value: *v }.into()),
             ast::Value::String(v) => self.ins.push(Instruction::PushString { value: v }.into()),
             ast::Value::Constant(v) => self.ins.push(Instruction::PushNumber { value: match v {
-                ast::Constant::Pi => std::f64::consts::PI,
-                ast::Constant::E => std::f64::consts::E,
+                ast::Constant::Pi => core::f64::consts::PI,
+                ast::Constant::E => core::f64::consts::E,
             }}.into()),
             ast::Value::Bool(v) => self.ins.push(Instruction::PushBool { value: *v }.into()),
             ast::Value::List(values, _) => {
@@ -2041,7 +2045,7 @@ impl<'a> ByteCodeBuilder<'a> {
             res
         };
 
-        let get_ptr = |x: Option<&ast::Entity>| x.map(|x| x as *const ast::Entity).unwrap_or(std::ptr::null());
+        let get_ptr = |x: Option<&ast::Entity>| x.map(|x| x as *const ast::Entity).unwrap_or(core::ptr::null());
         for (hole_pos, hole_fn, hole_ent) in self.call_holes.iter() {
             let sym = &*hole_fn.trans_name;
             let &(pos, fn_info) = entity_fn_to_info.get(&get_ptr(*hole_ent)).and_then(|tab| tab.get(sym)).or_else(|| global_fn_to_info.get(sym)).unwrap();
@@ -2269,8 +2273,8 @@ impl ByteCode {
                 ast::Value::Bool(x) => InitValue::Bool(*x),
                 ast::Value::Number(x) => InitValue::Number(Number::new(*x)?),
                 ast::Value::Constant(x) => match x {
-                    ast::Constant::E => InitValue::Number(Number::new(std::f64::consts::E)?),
-                    ast::Constant::Pi => InitValue::Number(Number::new(std::f64::consts::PI)?),
+                    ast::Constant::E => InitValue::Number(Number::new(core::f64::consts::E)?),
+                    ast::Constant::Pi => InitValue::Number(Number::new(core::f64::consts::PI)?),
                 }
                 ast::Value::Ref(x) => {
                     let idx = *refs.get(&x.0).ok_or_else(|| CompileError::UndefinedRef { value })?;

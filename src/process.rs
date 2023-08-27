@@ -6,11 +6,14 @@
 //! Thus, many types in this module, such as  [`Value`] and [`Process`], are branded with an invariant `'gc` lifetime and can only be access by callback.
 //! Some utilities are provided to export these values from the runtime environment if needed.
 
-use std::prelude::v1::*;
-use std::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
-use std::iter::{self, Cycle};
-use std::cmp::Ordering;
-use std::rc::Rc;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use alloc::string::{String, ToString};
+use alloc::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
+use alloc::borrow::ToOwned;
+
+use core::iter::{self, Cycle};
+use core::cmp::Ordering;
 
 use unicase::UniCase;
 

@@ -1803,7 +1803,6 @@ fn test_proc_stack_overflow() {
                 assert_eq!(entry.locals.len(), 1);
                 let v = &entry.locals[0];
                 assert_eq!(v.name, "v");
-                println!("{i} => {}", v.value);
                 assert_eq!(v.value, format!("{}", i + 1));
             }
         }

@@ -28,7 +28,6 @@ default = [
     "native-tls",
 ]
 std = [
-    "no-std-compat/std",
     "tokio",
     "futures",
     "async-channel",
@@ -69,10 +68,9 @@ rustls-tls-webpki-roots = [
 [dependencies]
 
 # core deps
-no-std-compat = { version = "0.4.1", default-features = false, features = ["alloc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 gc-arena = { version = "=0.3.0", default-features = false }
-netsblox-ast = { version = "=0.3.7", default-features = false }
+netsblox-ast = { version = "=0.3.8", default-features = false }
 # netsblox-ast = { path = "../netsblox-ast", default-features = false }
 num-traits = { version = "0.2.16", default-features = false }
 num-derive = { version = "0.3.3", default-features = false }
@@ -82,7 +80,7 @@ checked-float = { version = "0.1.4", default-features = false, features = ["serd
 educe = { version = "0.4.22", default-features = false, features = ["Debug", "Clone", "Copy", "PartialOrd", "Ord", "PartialEq", "Eq", "Default"] }
 libm = { version = "0.2.7", default-features = false }
 monostate = { version = "0.1.9", default-features = false }
-take_mut = { version = "0.2.2", default-features = false }
+replace_with = { version = "0.1.7", default-features = false }
 superslice = { version = "1.0", default-features = false }
 unicase = { version = "2.6.0", default-features = false }
 time = { version = "0.3.24", default-features = false }
