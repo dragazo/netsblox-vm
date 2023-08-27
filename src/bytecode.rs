@@ -542,11 +542,11 @@ fn test_binary_u64() {
         for (expect, expanded) in [(expect_small, false), (expect_large, true)] {
             for prefix_bytes in 0..8 {
                 buf.clear();
-                buf.extend(std::iter::once(0x53).cycle().take(prefix_bytes));
+                buf.extend(core::iter::once(0x53).cycle().take(prefix_bytes));
                 encode_u64(v, &mut buf, if expanded { Some(10) } else { None });
                 assert!(buf[..prefix_bytes].iter().all(|&x| x == 0x53));
                 assert_eq!(&buf[prefix_bytes..], expect);
-                buf.extend(std::iter::once(0xff).cycle().take(8));
+                buf.extend(core::iter::once(0xff).cycle().take(8));
                 let (back, aft) = <u64 as BinaryRead>::read(&buf, &[], prefix_bytes);
                 assert_eq!(back, v);
                 assert_eq!(aft, prefix_bytes + expect.len());
@@ -607,13 +607,13 @@ fn test_binary_i32() {
     for (v, expect) in tests {
         for prefix_bytes in 0..8 {
             buf.clear();
-            buf.extend(std::iter::once(0x53).cycle().take(prefix_bytes));
+            buf.extend(core::iter::once(0x53).cycle().take(prefix_bytes));
             BinaryWrite::append(&v, &mut buf, &mut discard.0, &mut discard.1);
             assert_eq!(discard.0.len(), 0);
             assert_eq!(discard.1.len(), 0);
             assert!(buf[..prefix_bytes].iter().all(|&x| x == 0x53));
             assert_eq!(&buf[prefix_bytes..], expect);
-            buf.extend(std::iter::once(0xff).cycle().take(8));
+            buf.extend(core::iter::once(0xff).cycle().take(8));
             let (back, aft) = <i32 as BinaryRead>::read(&buf, &[], prefix_bytes);
             assert_eq!(back, v);
             assert_eq!(aft, prefix_bytes + expect.len());

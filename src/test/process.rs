@@ -1,8 +1,10 @@
-use std::prelude::v1::*;
-use std::collections::BTreeMap;
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::fmt::Write;
+use alloc::rc::Rc;
+use alloc::borrow::ToOwned;
+use alloc::collections::BTreeMap;
+use alloc::string::{String, ToString};
+
+use core::cell::RefCell;
+use core::fmt::Write;
 
 use crate::*;
 use crate::gc::*;
@@ -303,7 +305,7 @@ fn test_proc_all_arithmetic() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let inf = std::f64::INFINITY;
+        let inf = core::f64::INFINITY;
         let expect = Value::List(Gc::new(mc, RefLock::new([
             Value::List(Gc::new(mc, RefLock::new([8.5, 2.9, -2.9, -8.5].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
             Value::List(Gc::new(mc, RefLock::new([2.9, 8.5, -8.5, -2.9].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),

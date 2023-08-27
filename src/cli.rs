@@ -8,17 +8,22 @@
 //! and use the block-based interface to write, upload, and run code on the server.
 //! Note that server mode does not yet support multiple simultaneous.
 
-use std::prelude::v1::*;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::collections::VecDeque;
+
+use core::time::Duration;
+use core::cell::{Cell, RefCell};
+use core::{mem, fmt};
+
 use std::fs::File;
-use std::rc::Rc;
-use std::time::Duration;
-use std::collections::VecDeque;
-use std::cell::{Cell, RefCell};
 use std::io::{self, Read, Write as IoWrite, stdout};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::sync::atomic::{AtomicBool, Ordering as MemoryOrder};
-use std::{thread, mem, fmt};
+use std::thread;
 
 use clap::Parser;
 use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};

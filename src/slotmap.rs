@@ -193,7 +193,7 @@ impl<'a, K: Key, T> Iterator for IterMut<'a, K, T> {
 
 #[test]
 fn test_slotmap() {
-    use std::collections::BTreeSet;
+    use alloc::collections::BTreeSet;
     new_key! {
         struct TestKey;
     }

@@ -1,6 +1,6 @@
-use std::prelude::v1::*;
-use std::collections::BTreeSet;
-use std::rc::Rc;
+use alloc::collections::BTreeSet;
+use alloc::borrow::ToOwned;
+use alloc::rc::Rc;
 
 use crate::*;
 use crate::gc::*;

@@ -7,15 +7,16 @@
 //! which together allow for the definition of any external features (e.g., defining syscalls),
 //! as well as overriding default behavior (e.g., rpc intercepting).
 
-use std::prelude::v1::*;
-use std::collections::BTreeMap;
-use std::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::collections::BTreeMap;
+use alloc::borrow::ToOwned;
+use alloc::vec::Vec;
+use alloc::rc::Rc;
 
-extern crate std as real_std;
-use real_std::time::{Instant, SystemTime, UNIX_EPOCH};
-use real_std::sync::{Arc, Mutex};
-use real_std::sync::mpsc::{Sender, Receiver, channel};
-use real_std::thread;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{Sender, Receiver, channel};
+use std::thread;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
 use rand_chacha::ChaChaRng;

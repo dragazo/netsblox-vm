@@ -1,6 +1,7 @@
-use std::prelude::v1::*;
-use std::rc::Rc;
-use std::iter;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+
+use core::iter;
 
 use crate::runtime::*;
 use crate::process::*;

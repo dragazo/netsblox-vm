@@ -1,8 +1,9 @@
+use core::cell::RefCell;
+use core::fmt;
+
+use std::rc::Rc;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, Write, BufReader, BufWriter};
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::fmt;
 
 use netsblox_vm::cli::{run, Mode};
 use netsblox_vm::template::SyscallMenu;
