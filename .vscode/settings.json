@@ -37,6 +37,7 @@
         "pentrails",
         "powf",
         "Rootable",
+        "RUSTDOCFLAGS",
         "Seedable",
         "superslice",
         "syscall",

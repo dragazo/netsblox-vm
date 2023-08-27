@@ -74,7 +74,7 @@ netsblox-ast = { version = "=0.3.8", default-features = false }
 # netsblox-ast = { path = "../netsblox-ast", default-features = false }
 num-traits = { version = "0.2.16", default-features = false }
 num-derive = { version = "0.3.3", default-features = false }
-bin-pool = { version = "0.1.0", default-features = false }
+bin-pool = { version = "0.1.1", default-features = false }
 rand = { version = "0.8.5", default-features = false }
 checked-float = { version = "0.1.4", default-features = false, features = ["serde"] }
 educe = { version = "0.4.22", default-features = false, features = ["Debug", "Clone", "Copy", "PartialOrd", "Ord", "PartialEq", "Eq", "Default"] }
