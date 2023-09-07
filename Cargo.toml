@@ -82,8 +82,8 @@ libm = { version = "0.2.7", default-features = false }
 monostate = { version = "0.1.9", default-features = false }
 replace_with = { version = "0.1.7", default-features = false }
 superslice = { version = "1.0", default-features = false }
-unicase = { version = "2.6.0", default-features = false }
-time = { version = "0.3.24", default-features = false }
+unicase = { version = "2.7.0", default-features = false }
+time = { version = "0.3.28", default-features = false }
 
 # std deps
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"], optional = true }
@@ -97,9 +97,9 @@ rand_chacha = { version = "0.3.1", default-features = false, optional = true }
 getrandom = { version = "0.2.10", default-features = false, optional = true }
 
 # cli deps
-clap = { version = "4.3.19", default-features = false, features = ["std", "derive"], optional = true }
+clap = { version = "4.4.2", features = ["derive"], optional = true }
 crossterm = { version = "0.26.1", default-features = false, optional = true }
-actix-web = { version = "4.3.1", default-features = false, features = ["macros"], optional = true }
+actix-web = { version = "4.4.0", default-features = false, features = ["macros"], optional = true }
 actix-cors = { version = "0.6.4", default-features = false, optional = true }
 
 # misc deps

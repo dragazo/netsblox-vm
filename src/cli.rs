@@ -25,7 +25,7 @@ use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::sync::atomic::{AtomicBool, Ordering as MemoryOrder};
 use std::thread;
 
-use clap::Parser;
+use clap::Subcommand;
 use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
 use actix_cors::Cors;
 
@@ -87,7 +87,7 @@ fn get_env<C: CustomTypes<StdSystem<C>>>(role: &ast::Role, system: Rc<StdSystem<
 }
 
 /// Standard NetsBlox VM project actions that can be performed
-#[derive(Parser)]
+#[derive(Subcommand)]
 pub enum Mode {
     /// Compiles and runs a single project file
     Run {
@@ -97,7 +97,7 @@ pub enum Mode {
         #[clap(long)]
         role: Option<String>,
 
-        /// Address of the NetsBlox server (default: `https://editor.netsblox.org`)
+        /// Address of the NetsBlox server
         #[clap(long, default_value_t = String::from(DEFAULT_BASE_URL))]
         server: String,
     },
@@ -111,14 +111,14 @@ pub enum Mode {
     },
     /// Starts an execution server which you can connect to from the browser
     Start {
-        /// Address of the NetsBlox server (default: `https://editor.netsblox.org`)
+        /// Address of the NetsBlox server
         #[clap(long, default_value_t = String::from(DEFAULT_BASE_URL))]
         server: String,
 
-        /// The address of this machine, which others use to send HTTP requests (default 127.0.0.1)
+        /// The address of this machine, which others use to send HTTP requests
         #[clap(long, default_value_t = String::from("127.0.0.1"))]
         addr: String,
-        /// The port to bind for the web server (default 6286)
+        /// The port to bind for the web server
         #[clap(long, default_value_t = 6286)]
         port: u16,
     },
