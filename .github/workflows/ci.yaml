@@ -40,8 +40,22 @@ jobs:
           command: test
           args: --lib ${{ matrix.opt }}
 
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: cargo install cargo-audit
+      - run: cargo generate-lockfile
+      - run: cargo audit
+
   no-std:
-    name: no-std build
+    name: no-std
     runs-on: ubuntu-latest
     strategy:
       matrix:
