@@ -150,9 +150,14 @@ pub struct StdSystem<C: CustomTypes<StdSystem<C>>> {
     message_receiver: Receiver<IncomingMessage<C, Self>>,
 }
 impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
-    /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://editor.netsblox.org`).
+    /// Equivalent to [`StdSystem::new_async`] except that it can be executed outside of async context.
+    /// Note that using this from within async context will result in a panic from `tokio` trying to create a runtime within a runtime.
     #[tokio::main(flavor = "current_thread")]
-    pub async fn new(base_url: String, project_name: Option<&str>, config: Config<C, Self>, utc_offset: UtcOffset) -> Self {
+    pub async fn new_sync(base_url: String, project_name: Option<&str>, config: Config<C, Self>, utc_offset: UtcOffset) -> Self {
+        Self::new_async(base_url, project_name, config, utc_offset).await
+    }
+    /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://editor.netsblox.org`).
+    pub async fn new_async(base_url: String, project_name: Option<&str>, config: Config<C, Self>, utc_offset: UtcOffset) -> Self {
         let mut context = Context {
             base_url,
             client_id: format!("vm-{}", names::Generator::default().next().unwrap()),

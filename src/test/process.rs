@@ -79,7 +79,7 @@ fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(&M
 
 #[test]
 fn test_proc_ret() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -95,7 +95,7 @@ fn test_proc_ret() {
 
 #[test]
 fn test_proc_sum_123n() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -118,7 +118,7 @@ fn test_proc_sum_123n() {
 
 #[test]
 fn test_proc_recursive_factorial() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -141,7 +141,7 @@ fn test_proc_recursive_factorial() {
 
 #[test]
 fn test_proc_loops_lists_basic() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -181,7 +181,7 @@ fn test_proc_loops_lists_basic() {
 
 #[test]
 fn test_proc_recursively_self_containing_lists() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -226,7 +226,7 @@ fn test_proc_recursively_self_containing_lists() {
 
 #[test]
 fn test_proc_sieve_of_eratosthenes() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -252,7 +252,7 @@ fn test_proc_sieve_of_eratosthenes() {
 
 #[test]
 fn test_proc_early_return() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -268,7 +268,7 @@ fn test_proc_early_return() {
 
 #[test]
 fn test_proc_short_circuit() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -296,7 +296,7 @@ fn test_proc_short_circuit() {
 
 #[test]
 fn test_proc_all_arithmetic() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -340,7 +340,7 @@ fn test_proc_all_arithmetic() {
 
 #[test]
 fn test_proc_lambda_local_shadow_capture() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -356,7 +356,7 @@ fn test_proc_lambda_local_shadow_capture() {
 
 #[test]
 fn test_proc_upvars() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -415,7 +415,7 @@ fn test_proc_upvars() {
 
 #[test]
 fn test_proc_generators_nested() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -431,7 +431,7 @@ fn test_proc_generators_nested() {
 
 #[test]
 fn test_proc_call_in_closure() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -450,7 +450,7 @@ fn test_proc_call_in_closure() {
 
 #[test]
 fn test_proc_warp_yields() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="counter"><l>0</l></variable>"#,
         fields = "",
@@ -477,7 +477,7 @@ fn test_proc_warp_yields() {
 
 #[test]
 fn test_proc_string_ops() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -538,7 +538,7 @@ fn test_proc_string_ops() {
 
 #[test]
 fn test_proc_str_cmp_case_insensitive() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -560,7 +560,7 @@ fn test_proc_str_cmp_case_insensitive() {
 
 #[test]
 fn test_proc_rpc_call_basic() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -584,7 +584,7 @@ fn test_proc_rpc_call_basic() {
 
 #[test]
 fn test_proc_list_index_blocks() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -617,7 +617,7 @@ fn test_proc_list_index_blocks() {
 
 #[test]
 fn test_proc_literal_types() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -646,7 +646,7 @@ fn test_proc_say() {
             _ => CommandStatus::UseDefault { key, command },
         })),
     };
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, config, UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, config, UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -690,7 +690,7 @@ fn test_proc_syscall() {
         })),
         ..Default::default()
     };
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, config, UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, config, UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -712,7 +712,7 @@ fn test_proc_syscall() {
 
 #[test]
 fn test_proc_timer_wait() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -731,7 +731,7 @@ fn test_proc_timer_wait() {
 
 #[test]
 fn test_proc_cons_cdr() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -758,7 +758,7 @@ fn test_proc_cons_cdr() {
 
 #[test]
 fn test_proc_list_find_contains() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -786,7 +786,7 @@ fn test_proc_list_find_contains() {
 
 #[test]
 fn test_proc_append() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -809,7 +809,7 @@ fn test_proc_append() {
 
 #[test]
 fn test_proc_foreach_mutate() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -829,7 +829,7 @@ fn test_proc_foreach_mutate() {
 
 #[test]
 fn test_proc_map() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
@@ -849,7 +849,7 @@ fn test_proc_map() {
 
 #[test]
 fn test_proc_keep_find() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
@@ -871,7 +871,7 @@ fn test_proc_keep_find() {
 
 #[test]
 fn test_proc_numeric_bases() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -893,7 +893,7 @@ fn test_proc_numeric_bases() {
 
 #[test]
 fn test_proc_combine() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
@@ -920,7 +920,7 @@ fn test_proc_combine() {
 
 #[test]
 fn test_proc_autofill_closure_params() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
@@ -942,7 +942,7 @@ fn test_proc_autofill_closure_params() {
 
 #[test]
 fn test_proc_pick_random() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1003,7 +1003,7 @@ fn test_proc_pick_random() {
 
 #[test]
 fn test_proc_rand_list_ops() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1057,7 +1057,7 @@ fn test_proc_rand_list_ops() {
 
 #[test]
 fn test_proc_variadic_sum_product() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1084,7 +1084,7 @@ fn test_proc_variadic_sum_product() {
 
 #[test]
 fn test_proc_variadic_min_max() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1100,7 +1100,7 @@ fn test_proc_variadic_min_max() {
 
 #[test]
 fn test_proc_atan2_new_cmp() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1125,7 +1125,7 @@ fn test_proc_atan2_new_cmp() {
 
 #[test]
 fn test_proc_list_columns() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1164,7 +1164,7 @@ fn test_proc_list_columns() {
 
 #[test]
 fn test_proc_compare_str() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1233,7 +1233,7 @@ fn test_proc_compare_str() {
 
 #[test]
 fn test_proc_new_min_max() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1262,7 +1262,7 @@ fn test_proc_new_min_max() {
 
 #[test]
 fn test_proc_flatten() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1283,7 +1283,7 @@ fn test_proc_flatten() {
 
 #[test]
 fn test_proc_list_len_rank_dims() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1309,7 +1309,7 @@ fn test_proc_list_len_rank_dims() {
 
 #[test]
 fn test_proc_string_index() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1332,7 +1332,7 @@ fn test_proc_string_index() {
 
 #[test]
 fn test_proc_type_query() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1361,7 +1361,7 @@ fn test_proc_type_query() {
 
 #[test]
 fn test_proc_variadic_strcat() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1382,7 +1382,7 @@ fn test_proc_variadic_strcat() {
 
 #[test]
 fn test_proc_list_lines() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1403,7 +1403,7 @@ fn test_proc_list_lines() {
 
 #[test]
 fn test_proc_binary_make_range() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1438,7 +1438,7 @@ fn test_proc_binary_make_range() {
 
 #[test]
 fn test_proc_identical_to() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1459,7 +1459,7 @@ fn test_proc_identical_to() {
 
 #[test]
 fn test_proc_variadic_list_ctors() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1487,7 +1487,7 @@ fn test_proc_variadic_list_ctors() {
 
 #[test]
 fn test_proc_list_rev() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1507,7 +1507,7 @@ fn test_proc_list_rev() {
 
 #[test]
 fn test_proc_list_reshape() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1542,7 +1542,7 @@ fn test_proc_list_reshape() {
 
 #[test]
 fn test_proc_list_json() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1565,7 +1565,7 @@ fn test_proc_list_json() {
 
 #[test]
 fn test_proc_signed_zero() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1590,7 +1590,7 @@ fn test_proc_signed_zero() {
 
 #[test]
 fn test_proc_singleton_sum_product() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1609,7 +1609,7 @@ fn test_proc_singleton_sum_product() {
 
 #[test]
 fn test_proc_list_combinations() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1652,7 +1652,7 @@ fn test_proc_list_combinations() {
 
 #[test]
 fn test_proc_index_over_bounds() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, ins_locs) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1726,7 +1726,7 @@ fn test_proc_basic_motion() {
         },
     };
 
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, config, UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, config, UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1755,7 +1755,7 @@ fn test_proc_basic_motion() {
 
 #[test]
 fn test_proc_string_cmp() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1776,7 +1776,7 @@ fn test_proc_string_cmp() {
 
 #[test]
 fn test_proc_stack_overflow() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, locs) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="g"><l>0</l></variable>"#,
         fields = r#"<variable name="f"><l>0</l></variable>"#,
@@ -1815,7 +1815,7 @@ fn test_proc_stack_overflow() {
 
 #[test]
 fn test_proc_variadic_params() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1846,7 +1846,7 @@ fn test_proc_variadic_params() {
 
 #[test]
 fn test_proc_rand_str_char_cache() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1873,7 +1873,7 @@ fn test_proc_rand_str_char_cache() {
 
 #[test]
 fn test_proc_noop_upvars() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1889,7 +1889,7 @@ fn test_proc_noop_upvars() {
 
 #[test]
 fn test_proc_try_catch_throw() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1905,7 +1905,7 @@ fn test_proc_try_catch_throw() {
 
 #[test]
 fn test_proc_exception_unregister() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1921,7 +1921,7 @@ fn test_proc_exception_unregister() {
 
 #[test]
 fn test_proc_exception_rethrow() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1937,7 +1937,7 @@ fn test_proc_exception_rethrow() {
 
 #[test]
 fn test_proc_rpc_error() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1959,7 +1959,7 @@ fn test_proc_rpc_error() {
 
 #[test]
 fn test_proc_c_rings() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -1983,7 +1983,7 @@ fn test_proc_c_rings() {
 #[test]
 fn test_proc_wall_time() {
     let utc_offset = UtcOffset::from_hms(5, 14, 20).unwrap();
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), utc_offset));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), utc_offset));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -2010,7 +2010,7 @@ fn test_proc_wall_time() {
 
 #[test]
 fn test_proc_to_csv() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -2036,7 +2036,7 @@ fn test_proc_to_csv() {
 
 #[test]
 fn test_proc_from_csv() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -2070,7 +2070,7 @@ fn test_proc_from_csv() {
 
 #[test]
 fn test_proc_extra_cmp_tests() {
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
@@ -2163,7 +2163,7 @@ fn test_proc_extra_blocks() {
         command: None,
     };
 
-    let system = Rc::new(StdSystem::new(BASE_URL.to_owned(), None, config, UtcOffset::UTC));
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, config, UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
