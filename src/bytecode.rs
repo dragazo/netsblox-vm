@@ -445,6 +445,15 @@ pub(crate) enum Instruction<'a> {
     /// The result of the async request is then pushed onto the value stack.
     UnknownBlock { name: &'a str, args: usize },
 }
+#[test]
+fn test_bin_sizes() {
+    if core::mem::size_of::<Instruction>() > 48 {
+        panic!("instructions are too big!");
+    }
+    if core::mem::size_of::<InternalInstruction>() > 48 {
+        panic!("internal instructions are too big!");
+    }
+}
 
 pub(crate) enum RelocateInfo {
     Code { code_addr: usize },
