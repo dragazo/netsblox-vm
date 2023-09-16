@@ -25,6 +25,7 @@ use bin_pool::BinPool;
 use crate::*;
 use crate::meta::*;
 use crate::runtime::{Color, Number, NumberError, Event, KeyCode, Property, PrintStyle, Type, CustomTypes, System};
+use crate::util::LosslessJoin;
 
 /// Number of bytes to display on each line of a hex dump
 #[cfg(feature = "std")]
@@ -317,17 +318,14 @@ pub(crate) enum Instruction<'a> {
     /// Pops a value from the value stack and jumps to the given location if its truthyness value is equal to `when`
     ConditionalJump { to: usize, when: bool },
 
-    /// Pushes 1 string value onto the meta stack.
-    MetaPush { value: &'a str },
-
-    /// Consumes `params` values from the meta stack (in reverse order) which are names of parameters to pass.
-    /// Then consumes `params` arguments from the value stack (in reverse order of the listed params) to assign to a new symbol table.
+    /// `tokens` is a [`LosslessJoin`] of 0+ parameter names.
+    /// Consumes `params` arguments from the value stack (in reverse order) to assign to a new symbol table.
     /// Pushes the symbol table and return address to the call stack, and finally jumps to the given location.
-    Call { pos: usize, params: usize },
-    /// Consumes `captures` values from the meta stack (in reverse order), and then `params` values from the meta stack, each representing symbol names.
-    /// Then creates a closure object with the given information.
+    Call { pos: usize, tokens: &'a str },
+    /// `param_tokens` and `capture_tokens` are [`LosslessJoin`] sequeneces of input params and captured variable names.
+    /// Consumes `captures` values from the meta stack (in reverse order), then creates a closure object with the given information.
     /// Captures are looked up and bound immediately based on the current execution context.
-    MakeClosure { pos: usize, params: usize, captures: usize },
+    MakeClosure { pos: usize, param_tokens: &'a str, capture_tokens: &'a str },
     /// Consumes `args` values, and another value, `closure`, from the value stack and calls the closure with the given arguments.
     /// If `new_entity` is true, consumes an additional value, `entity`, which is the target entity for the new execution context (otherwise the current entity is used).
     /// It is an error if the number of supplied arguments does not match the number of parameters.
@@ -348,9 +346,9 @@ pub(crate) enum Instruction<'a> {
     /// Consumes 1 value, msg, from the value stack and converts it into a hard error.
     Throw,
 
-    /// Consumes `args` values from the meta stack and value stack, representing arguments.
+    /// `tokens` is a [`LosslessJoin`] of service, rpc, and 0+ args, which are popped from the value stack.
     /// Then calls the given RPC, awaits the result, and pushes the return value onto the value stack.
-    CallRpc { service: &'a str, rpc: &'a str, args: usize },
+    CallRpc { tokens: &'a str },
     /// Pushes the last RPC error message onto the value stack.
     PushRpcError,
 
@@ -387,11 +385,12 @@ pub(crate) enum Instruction<'a> {
     /// Computes a specific query about the real-world time and pushes the result onto the value stack.
     PushRealTime { query: TimeQuery },
 
+    /// `tokens` is a [`LosslessJoin`] of msg type and 0+ field names.
     /// Consumes 1 value, `target` from the value stack, which is either a single or a list of targets.
-    /// Then consumes `values` values from the value stack and meta stack, representing the fields of a message packet to send to (each) target.
+    /// Then consumes one value from the value stack for each field to be sent.
     /// The `expect_reply` flag denotes if this is a blocking operation that awaits a response from the target(s).
     /// If `expect_reply` is true, the reply value (or empty string on timeout) is pushed onto the value stack.
-    SendNetworkMessage { msg_type: &'a str, values: usize, expect_reply: bool },
+    SendNetworkMessage { tokens: &'a str, expect_reply: bool },
     /// Consumes 1 value, `value`, from the value stack and sends it as the response to a received message.
     /// It is not an error to reply to a message that was not expecting a reply, in which case the value is simply discarded.
     SendNetworkReply,
@@ -778,70 +777,68 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             76 => read_prefixed!(Instruction::ConditionalJump { when: false, } : to),
             77 => read_prefixed!(Instruction::ConditionalJump { when: true, } : to),
 
-            78 => read_prefixed!(Instruction::MetaPush {} : value),
+            78 => read_prefixed!(Instruction::Call {} : pos, tokens),
+            79 => read_prefixed!(Instruction::MakeClosure {} : pos, param_tokens, capture_tokens),
+            80 => read_prefixed!(Instruction::CallClosure { new_entity: false, } : args),
+            81 => read_prefixed!(Instruction::CallClosure { new_entity: true, } : args),
+            82 => read_prefixed!(Instruction::ForkClosure {} : args),
+            83 => read_prefixed!(Instruction::Return),
 
-            79 => read_prefixed!(Instruction::Call {} : pos, params),
-            80 => read_prefixed!(Instruction::MakeClosure {} : pos, params, captures),
-            81 => read_prefixed!(Instruction::CallClosure { new_entity: false, } : args),
-            82 => read_prefixed!(Instruction::CallClosure { new_entity: true, } : args),
-            83 => read_prefixed!(Instruction::ForkClosure {} : args),
-            84 => read_prefixed!(Instruction::Return),
+            84 => read_prefixed!(Instruction::PushHandler {} : pos, var),
+            85 => read_prefixed!(Instruction::PopHandler),
+            86 => read_prefixed!(Instruction::Throw),
 
-            85 => read_prefixed!(Instruction::PushHandler {} : pos, var),
-            86 => read_prefixed!(Instruction::PopHandler),
-            87 => read_prefixed!(Instruction::Throw),
+            87 => read_prefixed!(Instruction::CallRpc {} : tokens),
+            88 => read_prefixed!(Instruction::PushRpcError),
 
-            88 => read_prefixed!(Instruction::CallRpc {} : service, rpc, args),
-            89 => read_prefixed!(Instruction::PushRpcError),
+            89 => read_prefixed!(Instruction::Syscall {} : len),
+            90 => read_prefixed!(Instruction::PushSyscallError),
 
-            90 => read_prefixed!(Instruction::Syscall {} : len),
-            91 => read_prefixed!(Instruction::PushSyscallError),
+            91 => read_prefixed!(Instruction::SendLocalMessage { wait: false, target: false }),
+            92 => read_prefixed!(Instruction::SendLocalMessage { wait: false, target: true }),
+            93 => read_prefixed!(Instruction::SendLocalMessage { wait: true, target: false }),
+            94 => read_prefixed!(Instruction::SendLocalMessage { wait: true, target: true }),
 
-            92 => read_prefixed!(Instruction::SendLocalMessage { wait: false, target: false }),
-            93 => read_prefixed!(Instruction::SendLocalMessage { wait: false, target: true }),
-            94 => read_prefixed!(Instruction::SendLocalMessage { wait: true, target: false }),
-            95 => read_prefixed!(Instruction::SendLocalMessage { wait: true, target: true }),
+            95 => read_prefixed!(Instruction::PushLocalMessage),
 
-            96 => read_prefixed!(Instruction::PushLocalMessage),
+            96 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
+            97 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
+            98 => read_prefixed!(Instruction::Ask),
+            99 => read_prefixed!(Instruction::PushAnswer),
 
-            97 => read_prefixed!(Instruction::Print { style: PrintStyle::Say }),
-            98 => read_prefixed!(Instruction::Print { style: PrintStyle::Think }),
-            99 => read_prefixed!(Instruction::Ask),
-            100 => read_prefixed!(Instruction::PushAnswer),
+            100 => read_prefixed!(Instruction::ResetTimer),
+            101 => read_prefixed!(Instruction::PushTimer),
+            102 => read_prefixed!(Instruction::Sleep),
+            103 => read_prefixed!(Instruction::PushRealTime {} : query),
 
-            101 => read_prefixed!(Instruction::ResetTimer),
-            102 => read_prefixed!(Instruction::PushTimer),
-            103 => read_prefixed!(Instruction::Sleep),
-            104 => read_prefixed!(Instruction::PushRealTime {} : query),
+            104 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : tokens),
+            105 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : tokens),
+            106 => read_prefixed!(Instruction::SendNetworkReply),
 
-            105 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: false, } : msg_type, values),
-            106 => read_prefixed!(Instruction::SendNetworkMessage { expect_reply: true, } : msg_type, values),
-            107 => read_prefixed!(Instruction::SendNetworkReply),
+            107 => read_prefixed!(Instruction::PushProperty {} : prop),
+            108 => read_prefixed!(Instruction::SetProperty {} : prop),
+            109 => read_prefixed!(Instruction::ChangeProperty {} : prop),
 
-            108 => read_prefixed!(Instruction::PushProperty {} : prop),
-            109 => read_prefixed!(Instruction::SetProperty {} : prop),
-            110 => read_prefixed!(Instruction::ChangeProperty {} : prop),
+            110 => read_prefixed!(Instruction::PushCostume),
+            111 => read_prefixed!(Instruction::PushCostumeNumber),
+            112 => read_prefixed!(Instruction::PushCostumeList),
+            113 => read_prefixed!(Instruction::SetCostume),
+            114 => read_prefixed!(Instruction::NextCostume),
 
-            111 => read_prefixed!(Instruction::PushCostume),
-            112 => read_prefixed!(Instruction::PushCostumeNumber),
-            113 => read_prefixed!(Instruction::PushCostumeList),
-            114 => read_prefixed!(Instruction::SetCostume),
-            115 => read_prefixed!(Instruction::NextCostume),
+            115 => read_prefixed!(Instruction::Clone),
 
-            116 => read_prefixed!(Instruction::Clone),
+            116 => read_prefixed!(Instruction::ClearEffects),
+            117 => read_prefixed!(Instruction::ClearDrawings),
 
-            117 => read_prefixed!(Instruction::ClearEffects),
-            118 => read_prefixed!(Instruction::ClearDrawings),
+            118 => read_prefixed!(Instruction::GotoXY),
+            119 => read_prefixed!(Instruction::Goto),
 
-            119 => read_prefixed!(Instruction::GotoXY),
-            120 => read_prefixed!(Instruction::Goto),
+            120 => read_prefixed!(Instruction::PointTowardsXY),
+            121 => read_prefixed!(Instruction::PointTowards),
 
-            121 => read_prefixed!(Instruction::PointTowardsXY),
-            122 => read_prefixed!(Instruction::PointTowards),
+            122 => read_prefixed!(Instruction::Forward),
 
-            123 => read_prefixed!(Instruction::Forward),
-
-            124 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
+            123 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
 
             _ => unreachable!(),
         }
@@ -971,70 +968,68 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::ConditionalJump { to, when: false } => append_prefixed!(76: move to),
             Instruction::ConditionalJump { to, when: true } => append_prefixed!(77: move to),
 
-            Instruction::MetaPush { value } => append_prefixed!(78: move str value),
+            Instruction::Call { pos, tokens } => append_prefixed!(78: move pos, move str tokens),
+            Instruction::MakeClosure { pos, param_tokens, capture_tokens } => append_prefixed!(79: move pos, move str param_tokens, move str capture_tokens),
+            Instruction::CallClosure { new_entity: false, args } => append_prefixed!(80: args),
+            Instruction::CallClosure { new_entity: true, args } => append_prefixed!(81: args),
+            Instruction::ForkClosure { args } => append_prefixed!(82: args),
+            Instruction::Return => append_prefixed!(83),
 
-            Instruction::Call { pos, params } => append_prefixed!(79: move pos, params),
-            Instruction::MakeClosure { pos, params, captures } => append_prefixed!(80: move pos, params, captures),
-            Instruction::CallClosure { new_entity: false, args } => append_prefixed!(81: args),
-            Instruction::CallClosure { new_entity: true, args } => append_prefixed!(82: args),
-            Instruction::ForkClosure { args } => append_prefixed!(83: args),
-            Instruction::Return => append_prefixed!(84),
+            Instruction::PushHandler { pos, var } => append_prefixed!(84: move pos, move str var),
+            Instruction::PopHandler => append_prefixed!(85),
+            Instruction::Throw => append_prefixed!(86),
 
-            Instruction::PushHandler { pos, var } => append_prefixed!(85: move pos, move str var),
-            Instruction::PopHandler => append_prefixed!(86),
-            Instruction::Throw => append_prefixed!(87),
+            Instruction::CallRpc { tokens } => append_prefixed!(87: move str tokens),
+            Instruction::PushRpcError => append_prefixed!(88),
 
-            Instruction::CallRpc { service, rpc, args } => append_prefixed!(88: move str service, move str rpc, args),
-            Instruction::PushRpcError => append_prefixed!(89),
+            Instruction::Syscall { len } => append_prefixed!(89: len),
+            Instruction::PushSyscallError => append_prefixed!(90),
 
-            Instruction::Syscall { len } => append_prefixed!(90: len),
-            Instruction::PushSyscallError => append_prefixed!(91),
+            Instruction::SendLocalMessage { wait: false, target: false } => append_prefixed!(91),
+            Instruction::SendLocalMessage { wait: false, target: true } => append_prefixed!(92),
+            Instruction::SendLocalMessage { wait: true, target: false } => append_prefixed!(93),
+            Instruction::SendLocalMessage { wait: true, target: true } => append_prefixed!(94),
 
-            Instruction::SendLocalMessage { wait: false, target: false } => append_prefixed!(92),
-            Instruction::SendLocalMessage { wait: false, target: true } => append_prefixed!(93),
-            Instruction::SendLocalMessage { wait: true, target: false } => append_prefixed!(94),
-            Instruction::SendLocalMessage { wait: true, target: true } => append_prefixed!(95),
+            Instruction::PushLocalMessage => append_prefixed!(95),
 
-            Instruction::PushLocalMessage => append_prefixed!(96),
+            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(96),
+            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(97),
+            Instruction::Ask => append_prefixed!(98),
+            Instruction::PushAnswer => append_prefixed!(99),
 
-            Instruction::Print { style: PrintStyle::Say } => append_prefixed!(97),
-            Instruction::Print { style: PrintStyle::Think } => append_prefixed!(98),
-            Instruction::Ask => append_prefixed!(99),
-            Instruction::PushAnswer => append_prefixed!(100),
+            Instruction::ResetTimer => append_prefixed!(100),
+            Instruction::PushTimer => append_prefixed!(101),
+            Instruction::Sleep => append_prefixed!(102),
+            Instruction::PushRealTime { query } => append_prefixed!(103: query),
 
-            Instruction::ResetTimer => append_prefixed!(101),
-            Instruction::PushTimer => append_prefixed!(102),
-            Instruction::Sleep => append_prefixed!(103),
-            Instruction::PushRealTime { query } => append_prefixed!(104: query),
+            Instruction::SendNetworkMessage { tokens, expect_reply: false } => append_prefixed!(104: move str tokens),
+            Instruction::SendNetworkMessage { tokens, expect_reply: true } => append_prefixed!(105: move str tokens),
+            Instruction::SendNetworkReply => append_prefixed!(106),
 
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: false } => append_prefixed!(105: move str msg_type, values),
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply: true } => append_prefixed!(106: move str msg_type, values),
-            Instruction::SendNetworkReply => append_prefixed!(107),
+            Instruction::PushProperty { prop } => append_prefixed!(107: prop),
+            Instruction::SetProperty { prop } => append_prefixed!(108: prop),
+            Instruction::ChangeProperty { prop } => append_prefixed!(109: prop),
 
-            Instruction::PushProperty { prop } => append_prefixed!(108: prop),
-            Instruction::SetProperty { prop } => append_prefixed!(109: prop),
-            Instruction::ChangeProperty { prop } => append_prefixed!(110: prop),
+            Instruction::PushCostume => append_prefixed!(110),
+            Instruction::PushCostumeNumber => append_prefixed!(111),
+            Instruction::PushCostumeList => append_prefixed!(112),
+            Instruction::SetCostume => append_prefixed!(113),
+            Instruction::NextCostume => append_prefixed!(114),
 
-            Instruction::PushCostume => append_prefixed!(111),
-            Instruction::PushCostumeNumber => append_prefixed!(112),
-            Instruction::PushCostumeList => append_prefixed!(113),
-            Instruction::SetCostume => append_prefixed!(114),
-            Instruction::NextCostume => append_prefixed!(115),
+            Instruction::Clone => append_prefixed!(115),
 
-            Instruction::Clone => append_prefixed!(116),
+            Instruction::ClearEffects => append_prefixed!(116),
+            Instruction::ClearDrawings => append_prefixed!(117),
 
-            Instruction::ClearEffects => append_prefixed!(117),
-            Instruction::ClearDrawings => append_prefixed!(118),
+            Instruction::GotoXY => append_prefixed!(118),
+            Instruction::Goto => append_prefixed!(119),
 
-            Instruction::GotoXY => append_prefixed!(119),
-            Instruction::Goto => append_prefixed!(120),
+            Instruction::PointTowardsXY => append_prefixed!(120),
+            Instruction::PointTowards => append_prefixed!(121),
 
-            Instruction::PointTowardsXY => append_prefixed!(121),
-            Instruction::PointTowards => append_prefixed!(122),
+            Instruction::Forward => append_prefixed!(122),
 
-            Instruction::Forward => append_prefixed!(123),
-
-            Instruction::UnknownBlock { name, args } => append_prefixed!(124: move str name, args),
+            Instruction::UnknownBlock { name, args } => append_prefixed!(123: move str name, args),
         }
     }
 }
@@ -1481,19 +1476,24 @@ impl<'a> ByteCodeBuilder<'a> {
                 self.ins.push(Instruction::CallClosure { new_entity: new_entity.is_some(), args: args.len() }.into());
             }
             ast::ExprKind::CallRpc { service, rpc, args } => {
+                let mut tokens = LosslessJoin::new();
+                tokens.push(service);
+                tokens.push(rpc);
                 for (arg_name, arg) in args {
-                    self.ins.push(Instruction::MetaPush { value: arg_name }.into());
+                    tokens.push(arg_name);
                     self.append_expr(arg, entity)?;
                 }
-                self.ins.push(Instruction::CallRpc { service, rpc, args: args.len() }.into());
+                self.ins.push(Instruction::CallRpc { tokens: &tokens.finish() }.into());
             }
             ast::ExprKind::NetworkMessageReply { target, msg_type, values } => {
+                let mut tokens = LosslessJoin::new();
+                tokens.push(msg_type);
                 for (field, value) in values {
                     self.append_expr(value, entity)?;
-                    self.ins.push(Instruction::MetaPush { value: field }.into());
+                    tokens.push(field);
                 }
                 self.append_expr(target, entity)?;
-                self.ins.push(Instruction::SendNetworkMessage { msg_type, values: values.len(), expect_reply: true }.into());
+                self.ins.push(Instruction::SendNetworkMessage { tokens: &tokens.finish(), expect_reply: true }.into());
             }
             ast::ExprKind::Closure { kind: _, params, captures, stmts } => {
                 let closure_hole_pos = self.ins.len();
@@ -1969,20 +1969,25 @@ impl<'a> ByteCodeBuilder<'a> {
                 None => self.append_simple_ins(entity, &[msg_type], Instruction::SendLocalMessage { wait: *wait, target: false })?,
             }
             ast::StmtKind::RunRpc { service, rpc, args } => {
+                let mut tokens = LosslessJoin::new();
+                tokens.push(service);
+                tokens.push(rpc);
                 for (arg_name, arg) in args {
-                    self.ins.push(Instruction::MetaPush { value: arg_name }.into());
+                    tokens.push(arg_name);
                     self.append_expr(arg, entity)?;
                 }
-                self.ins.push(Instruction::CallRpc { service, rpc, args: args.len() }.into());
+                self.ins.push(Instruction::CallRpc { tokens: &tokens.finish() }.into());
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::StmtKind::SendNetworkMessage { target, msg_type, values } => {
+                let mut tokens = LosslessJoin::new();
+                tokens.push(msg_type);
                 for (field, value) in values {
                     self.append_expr(value, entity)?;
-                    self.ins.push(Instruction::MetaPush { value: field }.into());
+                    tokens.push(field);
                 }
                 self.append_expr(target, entity)?;
-                self.ins.push(Instruction::SendNetworkMessage { msg_type, values: values.len(), expect_reply: false }.into());
+                self.ins.push(Instruction::SendNetworkMessage { tokens: &tokens.finish(), expect_reply: false }.into());
             }
             ast::StmtKind::Clone { target } => {
                 self.append_expr(target, entity)?;
@@ -2056,10 +2061,11 @@ impl<'a> ByteCodeBuilder<'a> {
             let &(pos, fn_info) = entity_fn_to_info.get(&get_ptr(*hole_ent)).and_then(|tab| tab.get(sym)).or_else(|| global_fn_to_info.get(sym)).unwrap();
 
             let mut ins_pack = Vec::with_capacity(fn_info.params.len() + 1);
+            let mut tokens = LosslessJoin::new();
             for param in fn_info.params.iter() {
-                ins_pack.push(Instruction::MetaPush { value: &param.trans_name });
+                tokens.push(&param.trans_name);
             }
-            ins_pack.push(Instruction::Call { pos, params: fn_info.params.len() });
+            ins_pack.push(Instruction::Call { pos, tokens: &tokens.finish() });
 
             self.ins[*hole_pos] = InternalInstruction::Packed(ins_pack);
         }
@@ -2225,13 +2231,15 @@ impl ByteCode {
             code.append_stmts_ret(&[], stmts, entity)?;
 
             let mut ins_pack = Vec::with_capacity(params.len() + captures.len() + 1);
+            let mut params_tokens = LosslessJoin::new();
+            let mut captures_tokens = LosslessJoin::new();
             for param in params {
-                ins_pack.push(Instruction::MetaPush { value: &param.trans_name });
+                params_tokens.push(&param.trans_name);
             }
             for param in captures {
-                ins_pack.push(Instruction::MetaPush { value: &param.trans_name });
+                captures_tokens.push(&param.trans_name);
             }
-            ins_pack.push(Instruction::MakeClosure { pos, params: params.len(), captures: captures.len() });
+            ins_pack.push(Instruction::MakeClosure { pos, param_tokens: &params_tokens.finish(), capture_tokens: &captures_tokens.finish() });
 
             code.ins[hole_pos] = InternalInstruction::Packed(ins_pack);
         }

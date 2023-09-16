@@ -25,6 +25,7 @@ use crate::gc::*;
 use crate::json::*;
 use crate::runtime::*;
 use crate::bytecode::*;
+use crate::util::*;
 
 fn empty_string() -> Rc<String> {
     #[cfg(feature = "std")]
@@ -153,7 +154,6 @@ pub struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] warp_counter: usize,
     #[collect(require_static)] value_stack_size: usize,
     #[collect(require_static)] handler_stack_size: usize,
-    #[collect(require_static)] meta_stack_size: usize,
 }
 
 struct Handler {
@@ -162,7 +162,6 @@ struct Handler {
     warp_counter: usize,
     call_stack_size: usize,
     value_stack_size: usize,
-    meta_stack_size: usize,
 }
 
 enum Defer<C: CustomTypes<S>, S: System<C>> {
@@ -204,7 +203,6 @@ pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
                                call_stack: Vec<CallStackEntry<'gc, C, S>>,
                                value_stack: Vec<Value<'gc, C, S>>,
     #[collect(require_static)] handler_stack: Vec<Handler>,
-    #[collect(require_static)] meta_stack: Vec<String>,
     #[collect(require_static)] defer: Option<Defer<C, S>>,
                                last_syscall_error: Option<Value<'gc, C, S>>,
                                last_rpc_error: Option<Value<'gc, C, S>>,
@@ -229,13 +227,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 warp_counter: 0,
                 value_stack_size: 0,
                 handler_stack_size: 0,
-                meta_stack_size: 0,
                 locals: Default::default(),
                 entity,
             }],
             value_stack: vec![],
             handler_stack: vec![],
-            meta_stack: vec![],
             defer: None,
             last_syscall_error: None,
             last_rpc_error: None,
@@ -273,7 +269,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         self.call_stack[0].locals = context.locals;
         self.value_stack.clear();
         self.handler_stack.clear();
-        self.meta_stack.clear();
         self.defer = None;
         self.last_syscall_error = None;
         self.last_rpc_error = None;
@@ -290,14 +285,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     pub fn step(&mut self, mc: &Mutation<'gc>) -> Result<ProcessStep<'gc, C, S>, ExecError<C, S>> {
         let mut res = self.step_impl(mc);
         if let Err(err) = &res {
-            if let Some(Handler { pos, var, warp_counter, call_stack_size, value_stack_size, meta_stack_size }) = self.handler_stack.last() {
+            if let Some(Handler { pos, var, warp_counter, call_stack_size, value_stack_size }) = self.handler_stack.last() {
                 self.warp_counter = *warp_counter;
                 self.call_stack.drain(*call_stack_size..);
                 self.value_stack.drain(*value_stack_size..);
-                self.meta_stack.drain(*meta_stack_size..);
                 debug_assert_eq!(self.call_stack.len(), *call_stack_size);
                 debug_assert_eq!(self.value_stack.len(), *value_stack_size);
-                debug_assert_eq!(self.meta_stack.len(), *meta_stack_size);
 
                 let msg = match err {
                     ErrorCause::Custom { msg } => msg.clone(),
@@ -940,39 +933,36 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = if value.to_bool()? == when { to } else { aft_pos };
             }
 
-            Instruction::MetaPush { value } => {
-                self.meta_stack.push(value.to_owned());
-                self.pos = aft_pos;
-            }
-
-            Instruction::Call { pos, params } => {
+            Instruction::Call { pos, tokens } => {
                 if self.call_stack.len() >= global_context.settings.max_call_depth {
                     return Err(ErrorCause::CallDepthLimit { limit: global_context.settings.max_call_depth });
                 }
 
+                let params = lossless_split(tokens).collect::<Vec<_>>();
+                let params_count = params.len();
+
                 let mut locals = SymbolTable::default();
-                for var in self.meta_stack.drain(self.meta_stack.len() - params..).rev() {
-                    locals.define_or_redefine(&var, self.value_stack.pop().unwrap().into());
+                for (var, val) in iter::zip(params.into_iter(), self.value_stack.drain(self.value_stack.len() - params_count..)) {
+                    locals.define_or_redefine(var, val.into());
                 }
+
                 self.call_stack.push(CallStackEntry {
                     called_from: self.pos,
                     return_to: aft_pos,
                     warp_counter: self.warp_counter,
                     value_stack_size: self.value_stack.len(),
                     handler_stack_size: self.handler_stack.len(),
-                    meta_stack_size: self.meta_stack.len(),
                     entity: context_entity,
                     locals,
                 });
                 self.pos = pos;
             }
-            Instruction::MakeClosure { pos, params, captures } => {
-                debug_assert!(self.meta_stack.len() >= params + captures);
-                let captures: Vec<_> = self.meta_stack.drain(self.meta_stack.len() - captures..).collect();
-                let params: Vec<_> = self.meta_stack.drain(self.meta_stack.len() - params..).collect();
+            Instruction::MakeClosure { pos, param_tokens, capture_tokens } => {
+                let captures = lossless_split(capture_tokens).collect::<Vec<_>>();
+                let params = lossless_split(param_tokens).map(ToOwned::to_owned).collect::<Vec<_>>();
 
                 let mut caps = SymbolTable::default();
-                for var in captures.iter() {
+                for &var in captures.iter() {
                     caps.define_or_redefine(var, lookup_var!(mut var).alias(mc));
                 }
                 self.value_stack.push(Gc::new(mc, RefLock::new(Closure { pos, params, captures: caps })).into());
@@ -991,7 +981,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     warp_counter: self.warp_counter,
                     value_stack_size: self.value_stack.len(),
                     handler_stack_size: self.handler_stack.len(),
-                    meta_stack_size: self.meta_stack.len(),
                     locals,
                     entity,
                 });
@@ -1003,17 +992,15 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 return Ok(ProcessStep::Fork { pos: closure_pos, locals, entity: context_entity });
             }
             Instruction::Return => {
-                let CallStackEntry { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, meta_stack_size, .. } = self.call_stack.last().unwrap();
+                let CallStackEntry { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, .. } = self.call_stack.last().unwrap();
                 let return_value = self.value_stack.pop().unwrap();
 
                 self.pos = *return_to;
                 self.warp_counter = *warp_counter;
                 self.value_stack.drain(value_stack_size..);
                 self.handler_stack.drain(handler_stack_size..);
-                self.meta_stack.drain(meta_stack_size..);
                 debug_assert_eq!(self.value_stack.len(), *value_stack_size);
                 debug_assert_eq!(self.handler_stack.len(), *handler_stack_size);
-                debug_assert_eq!(self.meta_stack.len(), *meta_stack_size);
 
                 self.value_stack.push(return_value);
 
@@ -1026,7 +1013,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     debug_assert_eq!(*warp_counter, 0);
                     debug_assert_eq!(*value_stack_size, 0);
                     debug_assert_eq!(*handler_stack_size, 0);
-                    debug_assert_eq!(*meta_stack_size, 0);
                     return Ok(ProcessStep::Terminate { result: Some(self.value_stack.pop().unwrap()) });
                 }
             }
@@ -1037,7 +1023,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     warp_counter: self.warp_counter,
                     call_stack_size: self.call_stack.len(),
                     value_stack_size: self.value_stack.len(),
-                    meta_stack_size: self.meta_stack.len(),
                 });
                 self.pos = aft_pos;
             }
@@ -1049,16 +1034,16 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let msg = self.value_stack.pop().unwrap().to_string()?.into_owned();
                 return Err(ErrorCause::Custom { msg });
             }
-            Instruction::CallRpc { service, rpc, args } => {
-                debug_assert!(self.meta_stack.len() >= args);
-                let mut args_vec = Vec::with_capacity(args);
-                for _ in 0..args {
-                    let arg_name = self.meta_stack.pop().unwrap();
-                    let value = self.value_stack.pop().unwrap();
-                    args_vec.push((arg_name, value));
-                }
-                args_vec.reverse();
-                perform_request!(Request::Rpc { service: service.to_owned(), rpc: rpc.to_owned(), args: args_vec}, RequestAction::Rpc, aft_pos);
+            Instruction::CallRpc { tokens } => {
+                let mut tokens = lossless_split(tokens);
+                let service = tokens.next().unwrap().to_owned();
+                let rpc = tokens.next().unwrap().to_owned();
+
+                let mut arg_names = tokens.map(ToOwned::to_owned).collect::<Vec<_>>();
+                let arg_count = arg_names.len();
+                let args = iter::zip(arg_names.into_iter(), self.value_stack.drain(self.value_stack.len() - arg_count..)).collect();
+
+                perform_request!(Request::Rpc { service, rpc, args }, RequestAction::Rpc, aft_pos);
             }
             Instruction::PushRpcError => {
                 self.value_stack.push(self.last_rpc_error.clone().unwrap_or_else(|| empty_string().into()));
@@ -1150,7 +1135,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(Number::new(v)?.into());
                 self.pos = aft_pos;
             }
-            Instruction::SendNetworkMessage { msg_type, values, expect_reply } => {
+            Instruction::SendNetworkMessage { tokens, expect_reply } => {
+                let mut tokens = lossless_split(tokens);
+                let msg_type = tokens.next().unwrap();
+
                 let targets = match self.value_stack.pop().unwrap() {
                     Value::String(x) => vec![x.as_str().to_owned()],
                     Value::List(x) => {
@@ -1166,15 +1154,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     }
                     x => return Err(ErrorCause::VariadicConversionError { got: x.get_type(), expected: Type::String }),
                 };
+
                 let values = {
-                    let mut res = Vec::with_capacity(values);
-                    for _ in 0..values {
-                        let value = self.value_stack.pop().unwrap().to_json()?;
-                        let field = self.meta_stack.pop().unwrap();
-                        res.push((field, value));
-                    }
-                    res
+                    let field_names = tokens.map(ToOwned::to_owned).collect::<Vec<_>>();
+                    let field_count = field_names.len();
+                    iter::zip(field_names.into_iter(), self.value_stack.drain(self.value_stack.len() - field_count..)).map(|(k, v)| v.to_json().map(|x| (k, x))).collect::<Result<_,_>>()?
                 };
+
                 match global_context.system.send_message(msg_type.into(), values, targets, expect_reply)? {
                     Some(key) => self.defer = Some(Defer::MessageReply { key, aft_pos }),
                     None => self.pos = aft_pos,

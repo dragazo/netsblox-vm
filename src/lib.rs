@@ -36,6 +36,7 @@ pub mod runtime;
 pub mod process;
 pub mod project;
 pub mod template;
+mod util;
 
 mod meta {
     include!(concat!(env!("OUT_DIR"), "/meta.rs"));
