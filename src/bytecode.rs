@@ -4,7 +4,7 @@
 
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::{String, ToString};
-use alloc::borrow::ToOwned;
+use alloc::borrow::{ToOwned, Cow};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use alloc::rc::Rc;
@@ -321,11 +321,11 @@ pub(crate) enum Instruction<'a> {
     /// `tokens` is a [`LosslessJoin`] of 0+ parameter names.
     /// Consumes `params` arguments from the value stack (in reverse order) to assign to a new symbol table.
     /// Pushes the symbol table and return address to the call stack, and finally jumps to the given location.
-    Call { pos: usize, tokens: &'a str },
+    Call { pos: usize, tokens: Cow<'a, str> },
     /// `param_tokens` and `capture_tokens` are [`LosslessJoin`] sequeneces of input params and captured variable names.
     /// Consumes `captures` values from the meta stack (in reverse order), then creates a closure object with the given information.
     /// Captures are looked up and bound immediately based on the current execution context.
-    MakeClosure { pos: usize, param_tokens: &'a str, capture_tokens: &'a str },
+    MakeClosure { pos: usize, param_tokens: Cow<'a, str>, capture_tokens: Cow<'a, str> },
     /// Consumes `args` values, and another value, `closure`, from the value stack and calls the closure with the given arguments.
     /// If `new_entity` is true, consumes an additional value, `entity`, which is the target entity for the new execution context (otherwise the current entity is used).
     /// It is an error if the number of supplied arguments does not match the number of parameters.
@@ -348,7 +348,7 @@ pub(crate) enum Instruction<'a> {
 
     /// `tokens` is a [`LosslessJoin`] of service, rpc, and 0+ args, which are popped from the value stack.
     /// Then calls the given RPC, awaits the result, and pushes the return value onto the value stack.
-    CallRpc { tokens: &'a str },
+    CallRpc { tokens: Cow<'a, str> },
     /// Pushes the last RPC error message onto the value stack.
     PushRpcError,
 
@@ -390,7 +390,7 @@ pub(crate) enum Instruction<'a> {
     /// Then consumes one value from the value stack for each field to be sent.
     /// The `expect_reply` flag denotes if this is a blocking operation that awaits a response from the target(s).
     /// If `expect_reply` is true, the reply value (or empty string on timeout) is pushed onto the value stack.
-    SendNetworkMessage { tokens: &'a str, expect_reply: bool },
+    SendNetworkMessage { tokens: Cow<'a, str>, expect_reply: bool },
     /// Consumes 1 value, `value`, from the value stack and sends it as the response to a received message.
     /// It is not an error to reply to a message that was not expecting a reply, in which case the value is simply discarded.
     SendNetworkReply,
@@ -652,6 +652,12 @@ impl<'a> BinaryRead<'a> for &'a str {
         let (data_pos, aft) = <usize as BinaryRead>::read(code, data, start);
         let (data_len, aft) = <usize as BinaryRead>::read(code, data, aft);
         (core::str::from_utf8(&data[data_pos..data_pos + data_len]).unwrap(), aft)
+    }
+}
+impl<'a> BinaryRead<'a> for Cow<'a, str> {
+    fn read(code: &'a [u8], data: &'a [u8], start: usize) -> (Self, usize) {
+        let res = <&'a str as BinaryRead>::read(code, data, start);
+        (Cow::Borrowed(res.0), res.1)
     }
 }
 
@@ -1483,7 +1489,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     tokens.push(arg_name);
                     self.append_expr(arg, entity)?;
                 }
-                self.ins.push(Instruction::CallRpc { tokens: &tokens.finish() }.into());
+                self.ins.push(Instruction::CallRpc { tokens: tokens.finish().into() }.into());
             }
             ast::ExprKind::NetworkMessageReply { target, msg_type, values } => {
                 let mut tokens = LosslessJoin::new();
@@ -1493,7 +1499,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     tokens.push(field);
                 }
                 self.append_expr(target, entity)?;
-                self.ins.push(Instruction::SendNetworkMessage { tokens: &tokens.finish(), expect_reply: true }.into());
+                self.ins.push(Instruction::SendNetworkMessage { tokens: tokens.finish().into(), expect_reply: true }.into());
             }
             ast::ExprKind::Closure { kind: _, params, captures, stmts } => {
                 let closure_hole_pos = self.ins.len();
@@ -1976,7 +1982,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     tokens.push(arg_name);
                     self.append_expr(arg, entity)?;
                 }
-                self.ins.push(Instruction::CallRpc { tokens: &tokens.finish() }.into());
+                self.ins.push(Instruction::CallRpc { tokens: tokens.finish().into() }.into());
                 self.ins.push(Instruction::PopValue.into());
             }
             ast::StmtKind::SendNetworkMessage { target, msg_type, values } => {
@@ -1987,7 +1993,7 @@ impl<'a> ByteCodeBuilder<'a> {
                     tokens.push(field);
                 }
                 self.append_expr(target, entity)?;
-                self.ins.push(Instruction::SendNetworkMessage { tokens: &tokens.finish(), expect_reply: false }.into());
+                self.ins.push(Instruction::SendNetworkMessage { tokens: tokens.finish().into(), expect_reply: false }.into());
             }
             ast::StmtKind::Clone { target } => {
                 self.append_expr(target, entity)?;
@@ -2065,7 +2071,7 @@ impl<'a> ByteCodeBuilder<'a> {
             for param in fn_info.params.iter() {
                 tokens.push(&param.trans_name);
             }
-            ins_pack.push(Instruction::Call { pos, tokens: &tokens.finish() });
+            ins_pack.push(Instruction::Call { pos, tokens: tokens.finish().into() });
 
             self.ins[*hole_pos] = InternalInstruction::Packed(ins_pack);
         }
@@ -2239,7 +2245,7 @@ impl ByteCode {
             for param in captures {
                 captures_tokens.push(&param.trans_name);
             }
-            ins_pack.push(Instruction::MakeClosure { pos, param_tokens: &params_tokens.finish(), capture_tokens: &captures_tokens.finish() });
+            ins_pack.push(Instruction::MakeClosure { pos, param_tokens: params_tokens.finish().into(), capture_tokens: captures_tokens.finish().into() });
 
             code.ins[hole_pos] = InternalInstruction::Packed(ins_pack);
         }

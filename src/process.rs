@@ -938,7 +938,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     return Err(ErrorCause::CallDepthLimit { limit: global_context.settings.max_call_depth });
                 }
 
-                let params = lossless_split(tokens).collect::<Vec<_>>();
+                let params = lossless_split(tokens.as_ref()).collect::<Vec<_>>();
                 let params_count = params.len();
 
                 let mut locals = SymbolTable::default();
@@ -958,8 +958,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = pos;
             }
             Instruction::MakeClosure { pos, param_tokens, capture_tokens } => {
-                let captures = lossless_split(capture_tokens).collect::<Vec<_>>();
-                let params = lossless_split(param_tokens).map(ToOwned::to_owned).collect::<Vec<_>>();
+                let captures = lossless_split(capture_tokens.as_ref()).collect::<Vec<_>>();
+                let params = lossless_split(param_tokens.as_ref()).map(ToOwned::to_owned).collect::<Vec<_>>();
 
                 let mut caps = SymbolTable::default();
                 for &var in captures.iter() {
@@ -1035,11 +1035,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 return Err(ErrorCause::Custom { msg });
             }
             Instruction::CallRpc { tokens } => {
-                let mut tokens = lossless_split(tokens);
+                let mut tokens = lossless_split(tokens.as_ref());
                 let service = tokens.next().unwrap().to_owned();
                 let rpc = tokens.next().unwrap().to_owned();
 
-                let mut arg_names = tokens.map(ToOwned::to_owned).collect::<Vec<_>>();
+                let arg_names = tokens.map(ToOwned::to_owned).collect::<Vec<_>>();
                 let arg_count = arg_names.len();
                 let args = iter::zip(arg_names.into_iter(), self.value_stack.drain(self.value_stack.len() - arg_count..)).collect();
 
@@ -1136,7 +1136,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::SendNetworkMessage { tokens, expect_reply } => {
-                let mut tokens = lossless_split(tokens);
+                let mut tokens = lossless_split(tokens.as_ref());
                 let msg_type = tokens.next().unwrap();
 
                 let targets = match self.value_stack.pop().unwrap() {
