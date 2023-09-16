@@ -31,6 +31,9 @@ use crate::util::LosslessJoin;
 #[cfg(feature = "std")]
 const BYTES_PER_LINE: usize = 10;
 
+/// Max number of bytes produced by [`encode_u64`].
+const MAX_U64_ENCODED_BYTES: usize = 10;
+
 /// Max number of shrinking cycles to apply to variable width encoded values in an output binary
 const SHRINK_CYCLES: usize = 3;
 
@@ -510,6 +513,8 @@ macro_rules! read_write_u8_type {
 }
 read_write_u8_type! { PrintStyle, Property, Relation, TimeQuery, BinaryOp, UnaryOp, VariadicOp, BasicType }
 
+/// encodes values as a sequence of bytes of form [1: next][7: bits] in little-endian order.
+/// `bytes` can be used to force a specific size (too small will panic), otherwise calculates and uses the smallest possible size.
 fn encode_u64(mut val: u64, out: &mut Vec<u8>, bytes: Option<usize>) {
     let mut blocks = ((64 - val.leading_zeros() as usize + 6) / 7).max(1);
     if let Some(bytes) = bytes {
@@ -517,7 +522,7 @@ fn encode_u64(mut val: u64, out: &mut Vec<u8>, bytes: Option<usize>) {
         blocks = bytes;
     }
 
-    debug_assert!((1..=10).contains(&blocks));
+    debug_assert!((1..=MAX_U64_ENCODED_BYTES).contains(&blocks));
     for _ in 1..blocks {
         out.push((val as u8 & 0x7f) | 0x80);
         val >>= 7;
@@ -537,8 +542,6 @@ fn decode_u64(data: &[u8], start: usize) -> (u64, usize) {
     (val, aft)
 }
 
-// encodes values as a sequence of bytes of form [1: next][7: bits] in little-endian order.
-// if `relocate_info` is provided to `append`, expanded mode is used, which encodes the value with the maximum of 10 bytes.
 impl BinaryRead<'_> for u64 {
     fn read(code: &[u8], _: &[u8], start: usize) -> (Self, usize) {
         decode_u64(code, start)
@@ -569,7 +572,7 @@ fn test_binary_u64() {
             for prefix_bytes in 0..8 {
                 buf.clear();
                 buf.extend(core::iter::once(0x53).cycle().take(prefix_bytes));
-                encode_u64(v, &mut buf, if expanded { Some(10) } else { None });
+                encode_u64(v, &mut buf, if expanded { Some(MAX_U64_ENCODED_BYTES) } else { None });
                 assert!(buf[..prefix_bytes].iter().all(|&x| x == 0x53));
                 assert_eq!(&buf[prefix_bytes..], expect);
                 buf.extend(core::iter::once(0xff).cycle().take(8));
@@ -884,12 +887,12 @@ impl BinaryWrite for Instruction<'_> {
             }};
             (@single move $val:ident) => {{
                 relocate_info.push(RelocateInfo::Code { code_addr: code.len() });
-                encode_u64(*$val as u64, code, Some(10));
+                encode_u64(*$val as u64, code, Some(MAX_U64_ENCODED_BYTES));
             }};
             (@single move str $val:ident) => {{
                 let pool_index = data.add($val.as_bytes());
                 relocate_info.push(RelocateInfo::Data { code_addr: code.len() });
-                encode_u64(pool_index as u64, code, Some(10));
+                encode_u64(pool_index as u64, code, Some(MAX_U64_ENCODED_BYTES));
                 BinaryWrite::append(&$val.len(), code, data, relocate_info);
             }};
             (@single $val:ident) => { BinaryWrite::append($val, code, data, relocate_info) };
@@ -2152,7 +2155,7 @@ impl<'a> ByteCodeBuilder<'a> {
             code.copy_within(src_pos..src_pos + (orig_code_size - total_shift - dest_pos), dest_pos);
             code.truncate(orig_code_size - total_shift);
 
-            let mut buf = Vec::with_capacity(10);
+            let mut buf = Vec::with_capacity(MAX_U64_ENCODED_BYTES);
             for code_addr in final_relocates.iter_mut() {
                 *code_addr = old_hole_pos_to_new_pos[code_addr];
                 let old_pos = <usize as BinaryRead>::read(code, &[], *code_addr);
@@ -2165,7 +2168,7 @@ impl<'a> ByteCodeBuilder<'a> {
             total_shift
         }
 
-        let mut fmt_buf = Vec::with_capacity(10);
+        let mut fmt_buf = Vec::with_capacity(MAX_U64_ENCODED_BYTES);
         let mut shrinking_plan = vec![];
         let mut final_relocates = vec![];
         for info in relocate_info {
