@@ -37,7 +37,6 @@ const MAX_U64_ENCODED_BYTES: usize = 10;
 /// Max number of shrinking cycles to apply to variable width encoded values in an output binary
 const SHRINK_CYCLES: usize = 3;
 
-#[derive(Debug)]
 pub(crate) enum CowStr<'a> {
     Borrowed(&'a str),
     Owned(Box<str>),
@@ -54,6 +53,11 @@ impl<'a> core::ops::Deref for CowStr<'a> {
 impl From<String> for CowStr<'_> {
     fn from(value: String) -> Self {
         Self::Owned(value.into_boxed_str())
+    }
+}
+impl core::fmt::Debug for CowStr<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:?}", &**self)
     }
 }
 
