@@ -173,10 +173,6 @@ pub(crate) enum InternalInstruction<'a> {
     /// This is an internal value that is only used to denote incomplete linking results for better testing.
     /// Properly-linked byte code should not contain this value.
     Illegal,
-    /// A special instruction which is used by the linker to simulate inserting multiple instructions at a single instruction position.
-    /// After linking, this variant will not be present in the resulting binary.
-    /// Notably, these packed instructions must be a single logical step, because addressing is only allowed at the [`InternalInstruction`] level.
-    Packed(Vec<Instruction<'a>>),
     /// A valid instruction that will be present in the resulting binary.
     Valid(Instruction<'a>),
 }
@@ -2095,14 +2091,12 @@ impl<'a> ByteCodeBuilder<'a> {
             let sym = &*hole_fn.trans_name;
             let &(pos, fn_info) = entity_fn_to_info.get(&get_ptr(*hole_ent)).and_then(|tab| tab.get(sym)).or_else(|| global_fn_to_info.get(sym)).unwrap();
 
-            let mut ins_pack = Vec::with_capacity(fn_info.params.len() + 1);
             let mut tokens = LosslessJoin::new();
             for param in fn_info.params.iter() {
                 tokens.push(&param.trans_name);
             }
-            ins_pack.push(Instruction::Call { pos, tokens: tokens.finish().into() });
 
-            self.ins[*hole_pos] = InternalInstruction::Packed(ins_pack);
+            self.ins[*hole_pos] = Instruction::Call { pos, tokens: tokens.finish().into() }.into();
         }
 
         self.finalize(funcs, entities)
@@ -2117,9 +2111,6 @@ impl<'a> ByteCodeBuilder<'a> {
             final_ins_pos.push(code.len());
             match ins {
                 InternalInstruction::Illegal => unreachable!(),
-                InternalInstruction::Packed(vals) => for val in vals {
-                    BinaryWrite::append(val, &mut code, &mut data, &mut relocate_info);
-                }
                 InternalInstruction::Valid(val) => BinaryWrite::append(val, &mut code, &mut data, &mut relocate_info),
             }
         }
@@ -2265,7 +2256,6 @@ impl ByteCode {
             let pos = code.ins.len();
             code.append_stmts_ret(&[], stmts, entity)?;
 
-            let mut ins_pack = Vec::with_capacity(params.len() + captures.len() + 1);
             let mut tokens = LosslessJoin::new();
             for param in params {
                 tokens.push(&param.trans_name);
@@ -2273,9 +2263,8 @@ impl ByteCode {
             for param in captures {
                 tokens.push(&param.trans_name);
             }
-            ins_pack.push(Instruction::MakeClosure { pos, params: params.len(), tokens: tokens.finish().into() });
 
-            code.ins[hole_pos] = InternalInstruction::Packed(ins_pack);
+            code.ins[hole_pos] = Instruction::MakeClosure { pos, params: params.len(), tokens: tokens.finish().into() }.into();
         }
 
         let (bytecode, script_info, locations) = code.link(funcs, entities)?;
