@@ -422,6 +422,8 @@ pub(crate) enum Instruction<'a> {
 
     /// Clears all graphic effects on the entity.
     ClearEffects,
+    // Requests to erase all drawings made by all sprites.
+    ClearDrawings,
 
     /// Consumes 2 values, `y` and `x`, and asynchronously moves the entity to that position.
     GotoXY,
@@ -829,16 +831,17 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             116 => read_prefixed!(Instruction::Clone),
 
             117 => read_prefixed!(Instruction::ClearEffects),
+            118 => read_prefixed!(Instruction::ClearDrawings),
 
-            118 => read_prefixed!(Instruction::GotoXY),
-            119 => read_prefixed!(Instruction::Goto),
+            119 => read_prefixed!(Instruction::GotoXY),
+            120 => read_prefixed!(Instruction::Goto),
 
-            120 => read_prefixed!(Instruction::PointTowardsXY),
-            121 => read_prefixed!(Instruction::PointTowards),
+            121 => read_prefixed!(Instruction::PointTowardsXY),
+            122 => read_prefixed!(Instruction::PointTowards),
 
-            122 => read_prefixed!(Instruction::Forward),
+            123 => read_prefixed!(Instruction::Forward),
 
-            123 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
+            124 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
 
             _ => unreachable!(),
         }
@@ -1021,16 +1024,17 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::Clone => append_prefixed!(116),
 
             Instruction::ClearEffects => append_prefixed!(117),
+            Instruction::ClearDrawings => append_prefixed!(118),
 
-            Instruction::GotoXY => append_prefixed!(118),
-            Instruction::Goto => append_prefixed!(119),
+            Instruction::GotoXY => append_prefixed!(119),
+            Instruction::Goto => append_prefixed!(120),
 
-            Instruction::PointTowardsXY => append_prefixed!(120),
-            Instruction::PointTowards => append_prefixed!(121),
+            Instruction::PointTowardsXY => append_prefixed!(121),
+            Instruction::PointTowards => append_prefixed!(122),
 
-            Instruction::Forward => append_prefixed!(122),
+            Instruction::Forward => append_prefixed!(123),
 
-            Instruction::UnknownBlock { name, args } => append_prefixed!(123: move str name, args),
+            Instruction::UnknownBlock { name, args } => append_prefixed!(124: move str name, args),
         }
     }
 }
@@ -1687,6 +1691,7 @@ impl<'a> ByteCodeBuilder<'a> {
             ast::StmtKind::SetPenSize { value } => self.append_simple_ins(entity, &[value], Instruction::SetProperty { prop: Property::PenSize })?,
             ast::StmtKind::ChangePenSize { delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeProperty { prop: Property::PenSize })?,
             ast::StmtKind::NextCostume => self.ins.push(Instruction::NextCostume.into()),
+            ast::StmtKind::PenClear => self.ins.push(Instruction::ClearDrawings.into()),
             ast::StmtKind::SetCostume { costume } => match costume {
                 Some(x) => self.append_simple_ins(entity, &[x], Instruction::SetCostume)?,
                 None => {

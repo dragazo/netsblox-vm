@@ -1313,8 +1313,11 @@ pub enum Feature {
 
     /// The ability of an entity to change the current costume.
     SetCostume,
+
     /// The ability to clear all graphic effects on an entity. This is equivalent to setting all the graphic effect properties to zero.
     ClearEffects,
+    /// The ability to clear all drawings made by all sprites.
+    ClearDrawings,
 
     /// The ability of an entity to set both its x and y positions simultaneously.
     GotoXY,
@@ -1372,6 +1375,8 @@ pub enum Command<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
 
     /// Clear all graphic effects on the entity. This is equivalent to setting all the graphic effect properties to zero.
     ClearEffects,
+    /// Clear all drawings made by all sprites.
+    ClearDrawings,
 
     /// Sets the costume on the entity. This should essentially assigns the costume to [`Entity::costume`],
     /// but is treated as a system command so that custom code can be executed when an entity switches costumes.
@@ -1399,6 +1404,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Command<'gc, '_, C, S> {
             Command::ChangeProperty { prop, .. } => Feature::ChangeProperty { prop: *prop },
             Command::SetCostume { .. } => Feature::SetCostume,
             Command::ClearEffects { .. } => Feature::ClearEffects,
+            Command::ClearDrawings => Feature::ClearDrawings,
             Command::GotoXY { .. } => Feature::GotoXY,
             Command::GotoEntity { .. } => Feature::GotoEntity,
             Command::PointTowardsXY { .. } => Feature::PointTowardsXY,

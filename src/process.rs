@@ -1264,6 +1264,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ClearEffects => {
                 perform_command!(Command::ClearEffects, aft_pos);
             }
+            Instruction::ClearDrawings => {
+                perform_command!(Command::ClearDrawings, aft_pos);
+            }
             Instruction::GotoXY => {
                 let y = self.value_stack.pop().unwrap().to_number()?;
                 let x = self.value_stack.pop().unwrap().to_number()?;
