@@ -957,9 +957,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 });
                 self.pos = pos;
             }
-            Instruction::MakeClosure { pos, param_tokens, capture_tokens } => {
-                let captures = lossless_split(capture_tokens.as_ref()).collect::<Vec<_>>();
-                let params = lossless_split(param_tokens.as_ref()).map(ToOwned::to_owned).collect::<Vec<_>>();
+            Instruction::MakeClosure { pos, params, tokens } => {
+                let mut tokens = lossless_split(tokens.as_ref());
+                let params = (&mut tokens).take(params).map(ToOwned::to_owned).collect::<Vec<_>>();
+                let captures = tokens.collect::<Vec<_>>();
 
                 let mut caps = SymbolTable::default();
                 for &var in captures.iter() {
