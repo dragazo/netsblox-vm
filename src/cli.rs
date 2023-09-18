@@ -46,7 +46,7 @@ use crate::process::*;
 use crate::project::*;
 use crate::template::*;
 
-const DEFAULT_BASE_URL: &'static str = "https://editor.netsblox.org";
+const DEFAULT_BASE_URL: &str = "https://editor.netsblox.org";
 const STEPS_PER_IO_ITER: usize = 64;
 const MAX_REQUEST_SIZE_BYTES: usize = 1024 * 1024 * 1024;
 const YIELDS_BEFORE_IDLE_SLEEP: usize = 256;
@@ -525,7 +525,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
                 let res = proj.step(mc);
                 match &res {
                     ProjectStep::Error { error, proc } => if let Some(state) = weak_state.upgrade() {
-                        let summary = ErrorSummary::extract(&error, &proc, &env.locs);
+                        let summary = ErrorSummary::extract(error, proc, &env.locs);
 
                         tee_println!(Some(&state) => "\n>>> runtime error in entity {:?}: {:?}\n>>> see red error comments...\n", summary.entity, summary.cause);
 

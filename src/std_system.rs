@@ -113,7 +113,7 @@ async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client:
     let status = res.status();
 
     let res = match res.bytes().await {
-        Ok(res) => (&*res).to_owned(),
+        Ok(res) => (*res).to_owned(),
         Err(_) => return Err("Failed to read response body".to_owned()),
     };
 
@@ -385,7 +385,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         })
     }
 
-    fn perform_command<'gc, 'a>(&self, mc: &Mutation<'gc>, command: Command<'gc, 'a, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>> {
+    fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>> {
         Ok(match self.config.command.as_ref() {
             Some(handler) => {
                 let key = CommandKey(Arc::new(Mutex::new(AsyncResult::new())));
@@ -426,7 +426,8 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         AsyncResult::Pending
     }
     fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<C, Self>> {
-        Ok(self.message_sender.send(OutgoingMessage::Reply { value, reply_key: key }).unwrap())
+        self.message_sender.send(OutgoingMessage::Reply { value, reply_key: key }).unwrap();
+        Ok(())
     }
     fn receive_message(&self) -> Option<IncomingMessage<C, Self>> {
         self.message_receiver.try_recv().ok()

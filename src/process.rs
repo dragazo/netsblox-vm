@@ -893,7 +893,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::InitUpvar { var } => {
                 let target = lookup_var!(var).get().clone();
                 let target = target.to_string()?;
-                let parent_scope = parent_scope.ok_or_else(|| ErrorCause::UpvarAtRoot)?;
+                let parent_scope = parent_scope.ok_or(ErrorCause::UpvarAtRoot)?;
                 let parent_def = match parent_scope.lookup_mut(target.as_ref()) {
                     Some(x) => x,
                     None => return Err(ErrorCause::UndefinedVariable { name: var.into() }),
@@ -938,7 +938,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     return Err(ErrorCause::CallDepthLimit { limit: global_context.settings.max_call_depth });
                 }
 
-                let params = lossless_split(tokens.as_ref()).collect::<Vec<_>>();
+                let params = lossless_split(tokens).collect::<Vec<_>>();
                 let params_count = params.len();
 
                 let mut locals = SymbolTable::default();
@@ -958,7 +958,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = pos;
             }
             Instruction::MakeClosure { pos, params, tokens } => {
-                let mut tokens = lossless_split(tokens.as_ref());
+                let mut tokens = lossless_split(tokens);
                 let params = (&mut tokens).take(params).map(ToOwned::to_owned).collect::<Vec<_>>();
                 let captures = tokens.collect::<Vec<_>>();
 
@@ -1036,13 +1036,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 return Err(ErrorCause::Custom { msg });
             }
             Instruction::CallRpc { tokens } => {
-                let mut tokens = lossless_split(tokens.as_ref());
+                let mut tokens = lossless_split(tokens);
                 let service = tokens.next().unwrap().to_owned();
                 let rpc = tokens.next().unwrap().to_owned();
 
                 let arg_names = tokens.map(ToOwned::to_owned).collect::<Vec<_>>();
                 let arg_count = arg_names.len();
-                let args = iter::zip(arg_names.into_iter(), self.value_stack.drain(self.value_stack.len() - arg_count..)).collect();
+                let args = iter::zip(arg_names, self.value_stack.drain(self.value_stack.len() - arg_count..)).collect();
 
                 perform_request!(Request::Rpc { service, rpc, args }, RequestAction::Rpc, aft_pos);
             }
@@ -1137,7 +1137,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::SendNetworkMessage { tokens, expect_reply } => {
-                let mut tokens = lossless_split(tokens.as_ref());
+                let mut tokens = lossless_split(tokens);
                 let msg_type = tokens.next().unwrap();
 
                 let targets = match self.value_stack.pop().unwrap() {
@@ -1491,7 +1491,7 @@ mod ops {
             }
         }
     }
-    pub(super) fn to_csv<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>) -> Result<String, ErrorCause<C, S>> {
+    pub(super) fn to_csv<C: CustomTypes<S>, S: System<C>>(value: &Value<C, S>) -> Result<String, ErrorCause<C, S>> {
         let value = value.as_list()?;
         let value = value.borrow();
 
@@ -1507,14 +1507,14 @@ mod ops {
             }
             if needs_quotes { res.push('"'); }
         }
-        fn process_vector<'gc, C: CustomTypes<S>, S: System<C>>(res: &mut String, value: &VecDeque<Value<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
+        fn process_vector<C: CustomTypes<S>, S: System<C>>(res: &mut String, value: &VecDeque<Value<C, S>>) -> Result<(), ErrorCause<C, S>> {
             for (i, x) in value.iter().enumerate() {
                 if i != 0 { res.push(','); }
                 process_scalar(res, x.to_string()?.as_ref())
             }
             Ok(())
         }
-        fn process_table<'gc, C: CustomTypes<S>, S: System<C>>(res: &mut String, value: &VecDeque<Value<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
+        fn process_table<C: CustomTypes<S>, S: System<C>>(res: &mut String, value: &VecDeque<Value<C, S>>) -> Result<(), ErrorCause<C, S>> {
             for (i, x) in value.iter().enumerate() {
                 if i != 0 { res.push('\n'); }
                 process_vector(res, &*x.as_list()?.borrow())?;
@@ -1672,9 +1672,9 @@ mod ops {
             UnaryOp::Atan     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::atan(x.to_number()?.get()).to_degrees())?.into())),
             UnaryOp::StrLen   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(x.to_string()?.chars().count() as f64)?.into())),
 
-            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| match x.to_string()?.chars().rev().next() {
+            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| match x.to_string()?.chars().next_back() {
                 Some(ch) => Ok(Rc::new(ch.to_string()).into()),
-                None => return Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }),
+                None => Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }),
             }),
             UnaryOp::StrGetRandom => unary_op_impl(mc, system, x, &mut cache, &|_, system, x| {
                 let x = x.to_string()?;
@@ -1703,7 +1703,7 @@ mod ops {
             }),
             UnaryOp::SplitJson => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 let value = x.to_string()?;
-                match parse_json::<Json>(&*value) {
+                match parse_json::<Json>(&value) {
                     Ok(json) => Ok(Value::from_json(mc, json)?),
                     Err(_) => Err(ErrorCause::NotJson { value: value.into_owned() }),
                 }

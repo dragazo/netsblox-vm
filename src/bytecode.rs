@@ -1139,7 +1139,7 @@ pub struct Locations {
     locs: Vec<(usize, usize)>,
 }
 impl Locations {
-    fn condense<'a>(orig_locs: BTreeMap<usize, &'a str>) -> Result<Self, CompileError<'a>> {
+    fn condense(orig_locs: BTreeMap<usize, &str>) -> Result<Self, CompileError> {
         if orig_locs.is_empty() {
             return Ok(Self {
                 tag: Default::default(),
@@ -1393,7 +1393,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
                     for arg in args {
                         self.append_expr(arg, entity)?;
                     }
-                    self.ins.push(Instruction::UnknownBlock { name: &name, args: args.len() }.into());
+                    self.ins.push(Instruction::UnknownBlock { name, args: args.len() }.into());
                 }
             }
             ast::ExprKind::TypeQuery { value, ty } => {
@@ -1406,7 +1406,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
                     ast::ValueType::Sprite => BasicType::Entity,
                     ast::ValueType::Costume => BasicType::Image,
                     ast::ValueType::Sound => BasicType::Audio,
-                    ast::ValueType::Command | ast::ValueType::Reporter | ast::ValueType::Predicate => return Err(CompileError::CurrentlyUnsupported { info: format!("closure types are indistinguishable") }),
+                    ast::ValueType::Command | ast::ValueType::Reporter | ast::ValueType::Predicate => return Err(CompileError::CurrentlyUnsupported { info: "closure types are indistinguishable".into() }),
                 };
                 self.ins.push(Instruction::TypeQuery { ty }.into());
             }
@@ -2017,7 +2017,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
                     for arg in args {
                         self.append_expr(arg, entity)?;
                     }
-                    self.ins.push(Instruction::UnknownBlock { name: &name, args: args.len() }.into());
+                    self.ins.push(Instruction::UnknownBlock { name, args: args.len() }.into());
                     self.ins.push(Instruction::PopValue.into());
                 }
             }
@@ -2203,7 +2203,7 @@ impl ByteCode {
     /// which is needed to provide human-readable error locations at runtime,
     /// as well as a [`ScriptInfo`] object that contains a symbol table of functions and scripts
     /// (needed to execute a specific segment of code).
-    pub fn compile<'a>(role: &'a ast::Role) -> Result<(ByteCode, InitInfo, Locations, ScriptInfo<'a>), CompileError<'a>> {
+    pub fn compile(role: &ast::Role) -> Result<(ByteCode, InitInfo, Locations, ScriptInfo), CompileError> {
         let string_arena = Default::default();
         let mut code = ByteCodeBuilder {
             ins: Default::default(),
@@ -2297,7 +2297,7 @@ impl ByteCode {
                     ast::Constant::Pi => InitValue::Number(Number::new(core::f64::consts::PI)?),
                 }
                 ast::Value::Ref(x) => {
-                    let idx = *refs.get(&x.0).ok_or_else(|| CompileError::UndefinedRef { value })?;
+                    let idx = *refs.get(&x.0).ok_or(CompileError::UndefinedRef { value })?;
                     InitValue::Ref(idx)
                 }
                 ast::Value::String(x) => {
@@ -2318,7 +2318,7 @@ impl ByteCode {
                     let res = RefValue::List(values.iter().map(|x| get_value(x, ref_values, refs, string_refs, image_refs)).collect::<Result<_,_>>()?);
                     match ref_id {
                         Some(ref_id) => {
-                            let idx = *refs.get(&ref_id.0).ok_or_else(|| CompileError::UndefinedRef { value })?;
+                            let idx = *refs.get(&ref_id.0).ok_or(CompileError::UndefinedRef { value })?;
                             let target = &mut ref_values[idx];
                             debug_assert!(target.0.is_none());
                             target.0 = Some(res);
@@ -2350,7 +2350,7 @@ impl ByteCode {
             let mut costumes = vec![];
 
             let visible = entity.visible;
-            let active_costume = entity.active_costume.clone();
+            let active_costume = entity.active_costume;
             let color = entity.color;
             let size = Number::new(entity.scale * 100.0)?;
             let pos = (Number::new(entity.pos.0)?, Number::new(entity.pos.1)?);
@@ -2400,7 +2400,7 @@ impl ByteCode {
             entities.push(EntityInitInfo { name, fields, costumes, scripts, active_costume, pos, heading, size, visible, color });
         }
 
-        let ref_values = ref_values.into_iter().map(|x| x.0.ok_or_else(|| CompileError::UndefinedRef { value: x.1 })).collect::<Result<_,_>>()?;
+        let ref_values = ref_values.into_iter().map(|x| x.0.ok_or(CompileError::UndefinedRef { value: x.1 })).collect::<Result<_,_>>()?;
 
         Ok(InitInfo { tag: Default::default(), proj_name, ref_values, globals, entities })
     }

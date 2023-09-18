@@ -18,7 +18,7 @@ impl LosslessJoin {
     }
 }
 
-pub fn lossless_split<'a>(src: &'a str) -> impl Iterator<Item = &'a str> {
+pub fn lossless_split(src: &str) -> impl Iterator<Item = &str> {
     assert!(src.chars().next().unwrap_or('\0') == '\0');
     src.split('\0').skip(1)
 }

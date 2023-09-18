@@ -414,9 +414,12 @@ impl Default for Properties {
     }
 }
 impl Properties {
-    fn with_value<'gc, C: CustomTypes<S>, S: System<C>, T>(&mut self, key: S::CommandKey, value: Result<T, ErrorCause<C, S>>, f: fn(&mut Self, T)) {
+    fn with_value<C: CustomTypes<S>, S: System<C>, T>(&mut self, key: S::CommandKey, value: Result<T, ErrorCause<C, S>>, f: fn(&mut Self, T)) {
         match value {
-            Ok(x) => key.complete(Ok(f(self, x))),
+            Ok(x) => {
+                f(self, x);
+                key.complete(Ok(()));
+            }
             Err(e) => key.complete(Err(format!("{e:?}"))),
         }
     }
@@ -547,12 +550,14 @@ impl Properties {
     }
 
     pub fn perform_clear_effects<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey) -> CommandStatus<'gc, 'a, C, S> {
-        key.complete(Ok(self.effects = Default::default()));
+        self.effects = Default::default();
+        key.complete(Ok(()));
         CommandStatus::Handled
     }
 
     pub fn perform_goto_xy<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, x: Number, y: Number) -> CommandStatus<'gc, 'a, C, S> {
-        key.complete(Ok(self.pos = (x, y)));
+        self.pos = (x, y);
+        key.complete(Ok(()));
         CommandStatus::Handled
     }
 
@@ -795,7 +800,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
     /// Attempts to interpret this value as a string.
     pub fn to_string(&self) -> Result<Cow<str>, ConversionError<C, S>> {
         Ok(match self {
-            Value::String(x) => Cow::Borrowed(&*x),
+            Value::String(x) => Cow::Borrowed(&**x),
             Value::Number(x) => Cow::Owned(x.to_string()),
             x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
         })
@@ -946,7 +951,7 @@ impl<'a, T> Deref for SharedRef<'a, T> {
     fn deref(&self) -> &Self::Target {
         match self {
             SharedRef::Unique(x) => x,
-            SharedRef::Aliased(x) => &**x,
+            SharedRef::Aliased(x) => x,
         }
     }
 }
@@ -1120,7 +1125,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             RefValue::List(_) => Value::List(Gc::new(mc, Default::default())),
         }).collect::<Vec<_>>();
 
-        fn get_value<'gc, C: CustomTypes<S>, S: System<C>>(value: &InitValue, allocated_refs: &Vec<Value<'gc, C, S>>) -> Value<'gc, C, S> {
+        fn get_value<'gc, C: CustomTypes<S>, S: System<C>>(value: &InitValue, allocated_refs: &[Value<'gc, C, S>]) -> Value<'gc, C, S> {
             match value {
                 InitValue::Bool(x) => Value::Bool(*x),
                 InitValue::Number(x) => Value::Number(*x),
@@ -1272,7 +1277,10 @@ impl<T> AsyncResult<T> {
     /// If this async result handle has already been completed, [`Err`] is returned with the passed value.
     pub fn complete(&mut self, value: T) -> Result<(), T> {
         match self {
-            AsyncResult::Pending => Ok(*self = AsyncResult::Completed(value)),
+            AsyncResult::Pending => {
+                *self = AsyncResult::Completed(value);
+                Ok(())
+            }
             AsyncResult::Completed(_) | AsyncResult::Consumed => Err(value),
         }
     }
@@ -1446,7 +1454,8 @@ impl<C: CustomTypes<S>, S: System<C>> Default for Config<C, S> {
             request: None,
             command: Some(Rc::new(|_, _, key, command, entity| match command {
                 Command::SetCostume { costume } => {
-                    key.complete(Ok(entity.costume = costume));
+                    entity.costume = costume;
+                    key.complete(Ok(()));
                     CommandStatus::Handled
                 }
                 _ => CommandStatus::UseDefault { key, command },
@@ -1579,7 +1588,7 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Performs a general command which does not return a value to the system.
     /// Ideally, this function should be non-blocking, and the commander will await the task's completion asynchronously.
     /// The [`Entity`] that issued the command is provided for context.
-    fn perform_command<'gc, 'a>(&self, mc: &Mutation<'gc>, command: Command<'gc, 'a, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>>;
+    fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>>;
     /// Poll for the completion of an asynchronous command.
     /// The [`Entity`] that issued the command is provided for context.
     fn poll_command<'gc>(&self, mc: &Mutation<'gc>, key: &Self::CommandKey, entity: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>>;

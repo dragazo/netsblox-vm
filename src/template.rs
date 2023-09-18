@@ -21,7 +21,7 @@ pub struct Status {
 /// An empty project.
 ///
 /// This can be used for default initializing a project runner with a no-op project.
-pub const EMPTY_PROJECT: &'static str = include_str!("assets/empty-proj.xml");
+pub const EMPTY_PROJECT: &str = include_str!("assets/empty-proj.xml");
 
 /// An entry to display in the syscall dropdown when running in server mode.
 ///

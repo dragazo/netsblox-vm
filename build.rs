@@ -3,10 +3,10 @@ use std::fs::{self, File};
 use std::io::BufWriter;
 use std::io::{Read, Write};
 
-const INCLUDES: &'static [&'static str] = &[
+const INCLUDES: &[&str] = &[
     "Cargo.toml",
 ];
-const IGNORES: &'static [&'static str] = &[
+const IGNORES: &[&str] = &[
     "src/meta.rs",
     "src/main.rs",
 ];

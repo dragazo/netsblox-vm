@@ -153,7 +153,7 @@ impl AllContextsConsumer {
     fn new() -> Self {
         Self { did_it: false }
     }
-    fn do_once<'gc, C: CustomTypes<S>, S: System<C>>(&mut self, proj: &mut Project<'gc, C, S>) {
+    fn do_once<C: CustomTypes<S>, S: System<C>>(&mut self, proj: &mut Project<C, S>) {
         if !core::mem::replace(&mut self.did_it, true) {
             for script in proj.scripts.iter_mut() {
                 script.consume_context(&mut proj.state);
@@ -176,7 +176,7 @@ pub struct Project<'gc, C: CustomTypes<S>, S: System<C>> {
     scripts: Vec<Script<'gc, C, S>>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
-    pub fn from_init<'a>(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
+    pub fn from_init(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
         let global_context = GlobalContext::from_init(mc, init_info, bytecode, settings, system);
         let mut project = Self::new(Gc::new(mc, RefLock::new(global_context)));
 

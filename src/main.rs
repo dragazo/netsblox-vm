@@ -153,17 +153,17 @@ fn main() {
                                     NativeValue::InputFile { handle } => *handle.borrow_mut() = None,
                                     NativeValue::OutputFile { handle } => *handle.borrow_mut() = None,
                                 }
-                                key.complete(Ok(Intermediate::from_json(json!("OK").into())));
-                                return RequestStatus::Handled;
+                                key.complete(Ok(Intermediate::from_json(json!("OK"))));
+                                RequestStatus::Handled
                             }
                             _ => {
                                 key.complete(Err(format!("syscall readLine - expected type {:?} or {:?}, received type {:?}", NativeType::InputFile, NativeType::OutputFile, file.get_type())));
-                                return RequestStatus::Handled;
+                                RequestStatus::Handled
                             }
                         }
                         _ => {
                             key.complete(Err(format!("syscall close - expected 1 arg, received {}", args.len())));
-                            return RequestStatus::Handled;
+                            RequestStatus::Handled
                         }
                     }
                     "readLine" => match args.as_slice() {
@@ -177,27 +177,27 @@ fn main() {
                                             return RequestStatus::Handled;
                                         }
 
-                                        key.complete(Ok(Intermediate::from_json(json!(res).into())));
-                                        return RequestStatus::Handled;
+                                        key.complete(Ok(Intermediate::from_json(json!(res))));
+                                        RequestStatus::Handled
                                     }
                                     None => {
-                                        key.complete(Err(format!("syscall readLine - this file has been closed")));
-                                        return RequestStatus::Handled;
+                                        key.complete(Err("syscall readLine - this file has been closed".into()));
+                                        RequestStatus::Handled
                                     }
                                 }
                                 _ => {
                                     key.complete(Err(format!("syscall readLine - expected type {:?}, received type {:?}", NativeType::InputFile, file.get_type())));
-                                    return RequestStatus::Handled;
+                                    RequestStatus::Handled
                                 }
                             }
                             _ => {
                                 key.complete(Err(format!("syscall readLine - expected type {:?}, received type {:?}", NativeType::InputFile, file.get_type())));
-                                return RequestStatus::Handled;
+                                RequestStatus::Handled
                             }
                         }
                         _ => {
                             key.complete(Err(format!("syscall readLine - expected 1 arg, received {}", args.len())));
-                            return RequestStatus::Handled;
+                            RequestStatus::Handled
                         }
                     }
                     "writeLine" => match args.as_slice() {
@@ -207,31 +207,31 @@ fn main() {
                                     Some(handle) => match writeln!(*handle, "{content}") {
                                         Ok(_) => {
                                             key.complete(Ok(Intermediate::Json(json!("OK"))));
-                                            return RequestStatus::Handled;
+                                            RequestStatus::Handled
                                         }
                                         Err(e) => {
                                             key.complete(Err(format!("syscall writeLine - write error: {e:?}")));
-                                            return RequestStatus::Handled;
+                                            RequestStatus::Handled
                                         }
                                     }
                                     None => {
-                                        key.complete(Err(format!("syscall writeLine - this file has been closed")));
-                                        return RequestStatus::Handled;
+                                        key.complete(Err("syscall writeLine - this file has been closed".into()));
+                                        RequestStatus::Handled
                                     }
                                 }
                                 _ => {
                                     key.complete(Err(format!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::String, file.get_type(), Type::<C, StdSystem<C>>::String)));
-                                    return RequestStatus::Handled;
+                                    RequestStatus::Handled
                                 }
                             }
                             _ => {
                                 key.complete(Err(format!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::String, file.get_type(), content.get_type())));
-                                return RequestStatus::Handled;
+                                RequestStatus::Handled
                             }
                         }
                         _ => {
                             key.complete(Err(format!("syscall writeLine - expected 2 args, received {}", args.len())));
-                            return RequestStatus::Handled;
+                            RequestStatus::Handled
                         }
                     }
                     _ => RequestStatus::UseDefault { key, request },
@@ -246,7 +246,7 @@ fn main() {
             SyscallMenu::simple_entry("close".into()),
             SyscallMenu::simple_entry("readLine".into()),
             SyscallMenu::simple_entry("writeLine".into()),
-        ].into_iter());
+        ]);
     }
     run::<C>(args.mode, config, &syscalls);
 }
