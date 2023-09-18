@@ -84,6 +84,7 @@ replace_with = { version = "0.1.7", default-features = false }
 superslice = { version = "1.0", default-features = false }
 unicase = { version = "2.7.0", default-features = false }
 time = { version = "0.3.28", default-features = false }
+typed-arena = { version = "2.0.2", default-features = false }
 
 # std deps
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"], optional = true }
