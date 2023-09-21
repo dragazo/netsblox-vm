@@ -1674,6 +1674,29 @@ fn test_proc_index_over_bounds() {
 }
 
 #[test]
+fn test_proc_neg_collab_ids() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let (mut env, ins_locs) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/neg-collab-ids.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |_, _, res| {
+        let res = res.unwrap_err();
+        match &res.cause {
+            ErrorCause::IndexOutOfBounds { index, len } => {
+                assert_eq!(*index, 11);
+                assert_eq!(*len, 10);
+            }
+            x => panic!("{x:?}"),
+        }
+        assert_eq!(ins_locs.lookup(res.pos).as_deref().unwrap(), "item_-18_4");
+    });
+}
+
+#[test]
 fn test_proc_basic_motion() {
     #[derive(PartialEq, Eq, Debug)]
     enum Action {

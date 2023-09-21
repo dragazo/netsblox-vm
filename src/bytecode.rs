@@ -1134,7 +1134,7 @@ pub struct Locations {
     #[allow(dead_code)] tag: MustBeU128<FINGERPRINT>,
 
     prefix: String,
-    base_token: usize,
+    base_token: isize,
     token_data: Vec<u8>,
     locs: Vec<(usize, usize)>,
 }
@@ -1165,7 +1165,7 @@ impl Locations {
 
             let mut tokens = vec![];
             for token in loc[prefix.len() + 1..].split('_') {
-                let v: usize = match token.parse() {
+                let v: isize = match token.parse() {
                     Ok(x) => x,
                     Err(_) => return Err(CompileError::InvalidLocation { loc }),
                 };
@@ -1223,7 +1223,7 @@ impl Locations {
 
             start = aft;
             res.push('_');
-            res.push_str(&(v as usize - 1 + self.base_token).to_string());
+            res.push_str(&(v as isize - 1 + self.base_token).to_string());
         }
     }
 }

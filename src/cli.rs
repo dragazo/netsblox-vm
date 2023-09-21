@@ -79,7 +79,7 @@ struct Env<'gc, C: CustomTypes<StdSystem<C>>> {
 type EnvArena<S> = Arena<Rootable![Env<'_, S>]>;
 
 fn get_env<C: CustomTypes<StdSystem<C>>>(role: &ast::Role, system: Rc<StdSystem<C>>) -> Result<EnvArena<C>, FromAstError> {
-    let (bytecode, init_info, locs, _) = ByteCode::compile(role).unwrap();
+    let (bytecode, init_info, locs, _) = ByteCode::compile(role)?;
     Ok(EnvArena::new(Default::default(), |mc| {
         let proj = Project::from_init(mc, &init_info, Rc::new(bytecode), Settings::default(), system);
         Env { proj: Gc::new(mc, RefLock::new(proj)), locs }
