@@ -836,7 +836,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     VariadicOp::StrCat => |_, _, values| {
                         let mut acc = String::new();
                         for item in values {
-                            acc.push_str(item.to_string()?.as_ref());
+                            core::fmt::write(&mut acc, format_args!("{item}")).unwrap();
                         }
                         Ok(Rc::new(acc).into())
                     },

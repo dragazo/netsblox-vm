@@ -676,42 +676,58 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GetType for Value<'gc, C, S> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum FormatStyle {
+    Debug, Display,
+}
 impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Value<'_, C, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn print<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>, cache: &mut BTreeSet<Identity<'gc, C, S>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            match value {
-                Value::Bool(x) => write!(f, "{x}"),
-                Value::Number(x) => write!(f, "{x}"),
-                Value::String(x) => write!(f, "{:?}", x.as_str()),
-                Value::Closure(x) => write!(f, "{:?}", &*x.borrow()),
-                Value::Entity(x) => write!(f, "{:?}", &*x.borrow()),
-                Value::Native(x) => write!(f, "{:?}", &**x),
-                Value::Image(x) => write!(f, "[Image {:?}]", Rc::as_ptr(x)),
-                Value::Audio(x) => write!(f, "[Audio {:?}]", Rc::as_ptr(x)),
-                Value::List(x) => {
-                    let identity = value.identity();
-                    if !cache.insert(identity) { return write!(f, "[...]") }
-
-                    let x = x.borrow();
-                    write!(f, "[")?;
-                    for (i, val) in x.iter().enumerate() {
-                        print(val, cache, f)?;
-                        if i != x.len() - 1 { write!(f, ",")? }
-                    }
-                    write!(f, "]")?;
-
-                    debug_assert!(cache.contains(&identity));
-                    cache.remove(&identity);
-                    Ok(())
-                }
-            }
-        }
-        let mut cache = Default::default();
-        let res = print(self, &mut cache, f);
-        if res.is_ok() { debug_assert_eq!(cache.len(), 0); }
-        res
+        format_value(self, f, FormatStyle::Debug)
     }
 }
+impl<C: CustomTypes<S>, S: System<C>> fmt::Display for Value<'_, C, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        format_value(self, f, FormatStyle::Display)
+    }
+}
+fn format_value<C: CustomTypes<S>, S: System<C>>(value: &Value<'_, C, S>, f: &mut fmt::Formatter<'_>, style: FormatStyle) -> fmt::Result {
+    fn print<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>, f: &mut fmt::Formatter<'_>, style: FormatStyle, cache: &mut BTreeSet<Identity<'gc, C, S>>) -> fmt::Result {
+        match value {
+            Value::Bool(x) => write!(f, "{x}"),
+            Value::Number(x) => write!(f, "{x}"),
+            Value::String(x) => match style {
+                FormatStyle::Debug => write!(f, "{:?}", x.as_str()),
+                FormatStyle::Display => write!(f, "{}", x.as_str()),
+            }
+            Value::Closure(x) => write!(f, "{:?}", &*x.borrow()),
+            Value::Entity(x) => write!(f, "{:?}", &*x.borrow()),
+            Value::Native(x) => write!(f, "{:?}", &**x),
+            Value::Image(x) => write!(f, "[Image {:?}]", Rc::as_ptr(x)),
+            Value::Audio(x) => write!(f, "[Audio {:?}]", Rc::as_ptr(x)),
+            Value::List(x) => {
+                let identity = value.identity();
+                if !cache.insert(identity) { return write!(f, "[...]") }
+
+                let x = x.borrow();
+                write!(f, "[")?;
+                for (i, val) in x.iter().enumerate() {
+                    print(val, f, style, cache)?;
+                    if i != x.len() - 1 { write!(f, ",")? }
+                }
+                write!(f, "]")?;
+
+                debug_assert!(cache.contains(&identity));
+                cache.remove(&identity);
+                Ok(())
+            }
+        }
+    }
+    let mut cache = Default::default();
+    let res = print(value, f, style, &mut cache);
+    if res.is_ok() { debug_assert_eq!(cache.len(), 0); }
+    res
+}
+
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<bool> for Value<'gc, C, S> { fn from(v: bool) -> Self { Value::Bool(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Number> for Value<'gc, C, S> { fn from(v: Number) -> Self { Value::Number(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Rc<String>> for Value<'gc, C, S> { fn from(v: Rc<String>) -> Self { Value::String(v) } }
