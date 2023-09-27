@@ -1612,6 +1612,28 @@ fn test_proc_empty_variadic_no_auto_insert() {
 }
 
 #[test]
+fn test_proc_c_ring_no_auto_insert() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/c-ring-no-auto-insert.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            [[""], ["", 1, ""], "", [], "", ["", "", 1, ""], "", 1],
+            [[""], ["", 2, ""], "", [], "", ["", "", 2, ""], "", 2],
+            [[""], ["", 3, ""], "", [], "", ["", "", 3, ""], "", 3],
+            [[""], ["", 4, ""], "", [], "", ["", "", 4, ""], "", 4],
+            [[""], ["", 5, ""], "", [], "", ["", "", 5, ""], "", 5],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "no auto insert");
+    });
+}
+
+#[test]
 fn test_proc_signed_zero() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
