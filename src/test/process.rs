@@ -1590,6 +1590,28 @@ fn test_proc_explicit_to_string_cvt() {
 }
 
 #[test]
+fn test_proc_empty_variadic_no_auto_insert() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/empty-variadic-no-auto-insert.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            [[], [], [], []],
+            [[], [], [], []],
+            [[], [], [], []],
+            [[], [], [], []],
+            [[], [], [], []],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "no auto insert");
+    });
+}
+
+#[test]
 fn test_proc_signed_zero() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
