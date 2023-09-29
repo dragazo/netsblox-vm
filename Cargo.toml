@@ -91,7 +91,7 @@ tokio = { version = "1", default-features = false, features = ["macros", "rt-mul
 futures = { version = "0.3.28", default-features = false, optional = true }
 async-channel = { version = "1.9.0", default-features = false, optional = true }
 reqwest = { version = "0.11", default-features = false, features = ["json"], optional = true }
-tokio-tungstenite = { version = "0.19.0", default-features = false, features = ["connect"], optional = true }
+tokio-tungstenite = { version = "0.20.1", default-features = false, features = ["connect"], optional = true }
 names = { version = "0.14.0", default-features = false, optional = true }
 uuid = { version = "1.4.1", default-features = false, features = ["v4", "fast-rng"], optional = true }
 rand_chacha = { version = "0.3.1", default-features = false, optional = true }
