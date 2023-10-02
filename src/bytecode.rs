@@ -2267,11 +2267,16 @@ impl ByteCode {
             match value {
                 ast::Value::Bool(_) | ast::Value::Number(_) | ast::Value::Constant(_) => (), // non-ref types
                 ast::Value::Ref(_) | ast::Value::String(_) | ast::Value::Image(_) => (), // lazily link
-                ast::Value::List(_, ref_id) => if let Some(ref_id) = ref_id {
-                    refs.entry(ref_id.0).or_insert_with(|| {
-                        ref_values.push((None, value)); // we don't have the value yet (might contain undefined refs, so can't be handled yet)
-                        ref_values.len() - 1
-                    });
+                ast::Value::List(values, ref_id) => {
+                    if let Some(ref_id) = ref_id {
+                        refs.entry(ref_id.0).or_insert_with(|| {
+                            ref_values.push((None, value)); // we don't have the value yet (might contain undefined refs, so can't be handled yet)
+                            ref_values.len() - 1
+                        });
+                    }
+                    for value in values {
+                        register_ref_values(value, ref_values, refs);
+                    }
                 }
             }
         }

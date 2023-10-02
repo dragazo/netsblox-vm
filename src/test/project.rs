@@ -701,3 +701,17 @@ fn test_proj_wait_until() {
         assert_values_eq(&global_context.globals.lookup("counter").unwrap().get(), &Value::from_json(mc, json!(128)).unwrap(), 1e-20, "final counter value");
     });
 }
+
+#[test]
+fn test_proj_nested_lists_consts() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let proj = get_running_project(include_str!("projects/nested-lists-consts.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
+
+        let expected = Value::from_json(mc, json!([ "a", "b", ["c", "d", ["e", "f", "g"], "h"], "i", "j" ])).unwrap();
+        assert_values_eq(&global_context.globals.lookup("abc").unwrap().get(), &expected, 1e-20, "nested lists consts");
+    });
+}
