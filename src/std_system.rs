@@ -48,6 +48,7 @@ pub struct InternReplyKey {
 struct Context {
     base_url: String,
     client_id: String,
+    services_url: String,
 
     project_name: String,
     project_id: String,
@@ -100,8 +101,8 @@ type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
 
 async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<C::Intermediate, String> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-    let url = format!("{base_url}/services/{service}/{rpc}?uuid={client_id}&projectId={project_id}&roleId={role_id}&t={time}",
-        base_url = context.base_url, client_id = context.client_id, project_id = context.project_id, role_id = context.role_id);
+    let url = format!("{services_url}/{service}/{rpc}?clientId={client_id}&t={time}",
+        services_url = context.services_url, client_id = context.client_id);
     let args: BTreeMap<&str, &Json> = args.iter().copied().collect();
 
     let res = match client.post(url).json(&args).send().await {
@@ -156,11 +157,15 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     pub async fn new_sync(base_url: String, project_name: Option<&str>, config: Config<C, Self>, utc_offset: UtcOffset) -> Self {
         Self::new_async(base_url, project_name, config, utc_offset).await
     }
-    /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://editor.netsblox.org`).
+    /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://cloud.netsblox.org`).
     pub async fn new_async(base_url: String, project_name: Option<&str>, config: Config<C, Self>, utc_offset: UtcOffset) -> Self {
+        let configuration = reqwest::get(format!("{}/configuration", base_url)).await.unwrap().json::<BTreeMap<String, Json>>().await.unwrap();
+        let services_hosts = configuration["servicesHosts"].as_array().unwrap();
+
         let mut context = Context {
             base_url,
-            client_id: format!("vm-{}", names::Generator::default().next().unwrap()),
+            services_url: services_hosts[0].as_object().unwrap().get("url").unwrap().as_str().unwrap().to_owned(),
+            client_id: configuration["clientId"].as_str().unwrap().to_owned(),
             project_name: project_name.unwrap_or("untitled").to_owned(),
 
             project_id: String::new(),
@@ -176,7 +181,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
 
             #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
             async fn handler<C: CustomTypes<StdSystem<C>>>(base_url: String, client_id: String, project_name: String, message_replies: Arc<Mutex<MessageReplies>>, out_receiver: Receiver<OutgoingMessage<C, StdSystem<C>>>, in_sender: Sender<IncomingMessage<C, StdSystem<C>>>) {
-                let ws_url = if let Some(x) = base_url.strip_prefix("http") { format!("ws{}", x) } else { format!("wss://{}", base_url) };
+                let ws_url = format!("{}/network/{}/connect", if let Some(x) = base_url.strip_prefix("http") { format!("ws{}", x) } else { format!("wss://{}", base_url) }, client_id);
                 let (ws, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
                 let (mut ws_sender, ws_receiver) = ws.split();
                 let (ws_sender_sender, ws_sender_receiver) = async_channel::unbounded();
@@ -272,19 +277,17 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
         };
 
         let client = Arc::new(reqwest::Client::builder().build().unwrap());
-        let meta = client.post(format!("{}/api/newProject", context.base_url))
-            .json(&json!({ "clientId": context.client_id, "roleName": "monad" }))
+        let meta = client.post(format!("{}/projects/", context.base_url))
+            .json(&json!({ "clientId": context.client_id, "name": context.project_name }))
             .send().await.unwrap()
             .json::<BTreeMap<String, Json>>().await.unwrap();
-        context.project_id = meta["projectId"].as_str().unwrap().to_owned();
-        context.role_id = meta["roleId"].as_str().unwrap().to_owned();
-        context.role_name = meta["roleName"].as_str().unwrap().to_owned();
+        context.project_id = meta["id"].as_str().unwrap().to_owned();
 
-        let meta = client.post(format!("{}/api/setProjectName", context.base_url))
-            .json(&json!({ "projectId": context.project_id, "name": context.project_name }))
-            .send().await.unwrap()
-            .json::<BTreeMap<String, Json>>().await.unwrap();
-        context.project_name = meta["name"].as_str().unwrap().to_owned();
+        let roles = &meta["roles"].as_object().unwrap();
+        let (first_role_id, first_role_meta) = roles.get_key_value(roles.keys().next().unwrap()).unwrap();
+        let first_role_meta = first_role_meta.as_object().unwrap();
+        context.role_id = first_role_id.to_owned();
+        context.role_name = first_role_meta.get("name").unwrap().as_str().unwrap().to_owned();
 
         let context = Arc::new(context);
         let rpc_request_pipe = {
