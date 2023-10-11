@@ -46,7 +46,7 @@ use crate::process::*;
 use crate::project::*;
 use crate::template::*;
 
-const DEFAULT_BASE_URL: &str = "https://editor.netsblox.org";
+const DEFAULT_BASE_URL: &str = "https://cloud.netsblox.org";
 const STEPS_PER_IO_ITER: usize = 64;
 const MAX_REQUEST_SIZE_BYTES: usize = 1024 * 1024 * 1024;
 const YIELDS_BEFORE_IDLE_SLEEP: usize = 256;
