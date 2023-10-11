@@ -48,6 +48,7 @@ pub struct InternReplyKey {
 struct Context {
     base_url: String,
     client_id: String,
+    services_url: String,
 
     project_name: String,
     project_id: String,
@@ -100,8 +101,8 @@ type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
 
 async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<C::Intermediate, String> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-    let url = format!("{base_url}/{service}/{rpc}?uuid={client_id}&projectId={project_id}&roleId={role_id}&t={time}",
-        base_url = context.base_url, client_id = context.client_id, project_id = context.project_id, role_id = context.role_id);
+    let url = format!("{services_url}/{service}/{rpc}?clientId={client_id}&t={time}",
+        services_url = context.services_url, client_id = context.client_id);
     let args: BTreeMap<&str, &Json> = args.iter().copied().collect();
 
     let res = match client.post(url).json(&args).send().await {
@@ -159,9 +160,11 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://cloud.netsblox.org`).
     pub async fn new_async(base_url: String, project_name: Option<&str>, config: Config<C, Self>, utc_offset: UtcOffset) -> Self {
         let configuration = reqwest::get(format!("{}/configuration", base_url)).await.unwrap().json::<BTreeMap<String, Json>>().await.unwrap();
+        let services_hosts = configuration["servicesHosts"].as_array().unwrap();
 
         let mut context = Context {
             base_url,
+            services_url: services_hosts[0].as_object().unwrap().get("url").unwrap().as_str().unwrap().to_owned(),
             client_id: configuration["clientId"].as_str().unwrap().to_owned(),
             project_name: project_name.unwrap_or("untitled").to_owned(),
 
