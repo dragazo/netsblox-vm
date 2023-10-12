@@ -159,13 +159,13 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     }
     /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://cloud.netsblox.org`).
     pub async fn new_async(base_url: String, project_name: Option<&str>, config: Config<C, Self>, utc_offset: UtcOffset) -> Self {
-        let configuration = reqwest::get(format!("{}/configuration", base_url)).await.unwrap().json::<BTreeMap<String, Json>>().await.unwrap();
+        let configuration = reqwest::get(format!("{base_url}/configuration")).await.unwrap().json::<BTreeMap<String, Json>>().await.unwrap();
         let services_hosts = configuration["servicesHosts"].as_array().unwrap();
 
         let mut context = Context {
             base_url,
             services_url: services_hosts[0].as_object().unwrap().get("url").unwrap().as_str().unwrap().to_owned(),
-            client_id: configuration["clientId"].as_str().unwrap().to_owned(),
+            client_id: format!("_vm-{}", names::Generator::default().next().unwrap()),
             project_name: project_name.unwrap_or("untitled").to_owned(),
 
             project_id: String::new(),
@@ -181,7 +181,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
 
             #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
             async fn handler<C: CustomTypes<StdSystem<C>>>(base_url: String, client_id: String, project_name: String, message_replies: Arc<Mutex<MessageReplies>>, out_receiver: Receiver<OutgoingMessage<C, StdSystem<C>>>, in_sender: Sender<IncomingMessage<C, StdSystem<C>>>) {
-                let ws_url = format!("{}/network/{}/connect", if let Some(x) = base_url.strip_prefix("http") { format!("ws{}", x) } else { format!("wss://{}", base_url) }, client_id);
+                let ws_url = format!("{}/network/{client_id}/connect", if let Some(x) = base_url.strip_prefix("http") { format!("ws{x}") } else { format!("wss://{base_url}") });
                 let (ws, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
                 let (mut ws_sender, ws_receiver) = ws.split();
                 let (ws_sender_sender, ws_sender_receiver) = async_channel::unbounded();
@@ -247,14 +247,14 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                         OutgoingMessage::Normal { msg_type, values, targets } => json!({
                             "type": "message",
                             "dstId": targets,
-                            "srcId": format!("{}@{}", project_name, client_id),
+                            "srcId": format!("{project_name}@{client_id}"),
                             "msgType": msg_type,
                             "content": values.into_iter().collect::<JsonMap<_,_>>(),
                         }),
                         OutgoingMessage::Blocking { msg_type, values, targets, reply_key } => json!({
                             "type": "message",
                             "dstId": targets,
-                            "srcId": format!("{}@{}", project_name, client_id),
+                            "srcId": format!("{project_name}@{client_id}"),
                             "msgType": msg_type,
                             "requestId": reply_key.request_id,
                             "content": values.into_iter().collect::<JsonMap<_,_>>(),
