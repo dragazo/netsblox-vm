@@ -471,17 +471,17 @@ impl Properties {
     }
     pub fn perform_set_property<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, prop: Property, value: Value<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S> {
         match prop {
-            Property::XPos => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.pos.0 = value),
-            Property::YPos => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.pos.1 = value),
-            Property::Heading => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.heading = value),
+            Property::XPos => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.pos.0 = value),
+            Property::YPos => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.pos.1 = value),
+            Property::Heading => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.heading = value),
 
-            Property::Visible => self.with_value(key, value.to_bool().map_err(Into::into), |props, value| props.visible = value),
-            Property::Size => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().max(0.0)).map_err(Into::into)), |props, value| props.size = value),
+            Property::Visible => self.with_value(key, value.as_bool().map_err(Into::into), |props, value| props.visible = value),
+            Property::Size => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().max(0.0)).map_err(Into::into)), |props, value| props.size = value),
 
-            Property::PenDown => self.with_value(key, value.to_bool().map_err(Into::into), |props, value| props.pen_down = value),
-            Property::PenSize => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().max(0.0)).map_err(Into::into)), |props, value| props.pen_size = value),
+            Property::PenDown => self.with_value(key, value.as_bool().map_err(Into::into), |props, value| props.pen_down = value),
+            Property::PenSize => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().max(0.0)).map_err(Into::into)), |props, value| props.pen_size = value),
 
-            Property::PenColor => self.with_value(key, value.to_number().map_err(Into::into), |props, value| {
+            Property::PenColor => self.with_value(key, value.as_number().map_err(Into::into), |props, value| {
                 let [a, r, g, b] = (value.get() as u32).to_be_bytes();
                 let (h, s, v, a) = Color { a, r, g, b }.to_hsva();
                 props.pen_color_h = Number::new(h as f64).unwrap();
@@ -490,61 +490,61 @@ impl Properties {
                 props.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
             }),
 
-            Property::PenColorH => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.pen_color_h = value),
-            Property::PenColorS => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_s = value),
-            Property::PenColorV => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_v = value),
-            Property::PenColorT => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_t = value),
+            Property::PenColorH => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.pen_color_h = value),
+            Property::PenColorS => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_s = value),
+            Property::PenColorV => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_v = value),
+            Property::PenColorT => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_t = value),
 
-            Property::Tempo => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.tempo = value),
-            Property::Volume => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.volume = value),
-            Property::Balance => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.balance = value),
+            Property::Tempo => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.tempo = value),
+            Property::Volume => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.volume = value),
+            Property::Balance => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.balance = value),
 
-            Property::ColorH => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.effects.color_h = value),
-            Property::ColorS => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_s = value),
-            Property::ColorV => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_v = value),
-            Property::ColorT => self.with_value(key, value.to_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_t = value),
+            Property::ColorH => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.effects.color_h = value),
+            Property::ColorS => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_s = value),
+            Property::ColorV => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_v = value),
+            Property::ColorT => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_t = value),
 
-            Property::Fisheye => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.effects.fisheye = value),
-            Property::Whirl => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.effects.whirl = value),
-            Property::Pixelate => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.effects.pixelate = value),
-            Property::Mosaic => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.effects.mosaic = value),
-            Property::Negative => self.with_value(key, value.to_number().map_err(Into::into), |props, value| props.effects.negative = value),
+            Property::Fisheye => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.effects.fisheye = value),
+            Property::Whirl => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.effects.whirl = value),
+            Property::Pixelate => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.effects.pixelate = value),
+            Property::Mosaic => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.effects.mosaic = value),
+            Property::Negative => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.effects.negative = value),
         }
         CommandStatus::Handled
     }
     pub fn perform_change_property<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, prop: Property, delta: Value<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S> {
         match prop {
-            Property::XPos => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.pos.0.add(x).map_err(Into::into)), |props, value| props.pos.0 = value),
-            Property::YPos => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.pos.1.add(x).map_err(Into::into)), |props, value| props.pos.1 = value),
-            Property::Heading => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.heading.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.heading = value),
+            Property::XPos => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.pos.0.add(x).map_err(Into::into)), |props, value| props.pos.0 = value),
+            Property::YPos => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.pos.1.add(x).map_err(Into::into)), |props, value| props.pos.1 = value),
+            Property::Heading => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.heading.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.heading = value),
 
-            Property::Visible => self.with_value(key, delta.to_bool().map_err(Into::into), |props, value| props.visible ^= value),
-            Property::Size => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.size.get() + x.get()).max(0.0)).map_err(Into::into)), |props, value| props.size = value),
+            Property::Visible => self.with_value(key, delta.as_bool().map_err(Into::into), |props, value| props.visible ^= value),
+            Property::Size => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.size.get() + x.get()).max(0.0)).map_err(Into::into)), |props, value| props.size = value),
 
-            Property::PenDown => self.with_value(key, delta.to_bool().map_err(Into::into), |props, value| props.pen_down ^= value),
-            Property::PenSize => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.pen_size.get() + x.get()).max(0.0)).map_err(Into::into)), |props, value| props.pen_size = value),
+            Property::PenDown => self.with_value(key, delta.as_bool().map_err(Into::into), |props, value| props.pen_down ^= value),
+            Property::PenSize => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.pen_size.get() + x.get()).max(0.0)).map_err(Into::into)), |props, value| props.pen_size = value),
 
             Property::PenColor => key.complete(Err("attempt to apply relative change to a color".into())),
 
-            Property::PenColorH => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_h.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.pen_color_h = value),
-            Property::PenColorS => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_s.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_s = value),
-            Property::PenColorV => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_v.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_v = value),
-            Property::PenColorT => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_t.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_t = value),
+            Property::PenColorH => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_h.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.pen_color_h = value),
+            Property::PenColorS => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_s.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_s = value),
+            Property::PenColorV => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_v.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_v = value),
+            Property::PenColorT => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_t.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_t = value),
 
-            Property::Tempo => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.tempo.add(x).map_err(Into::into)), |props, value| props.tempo = value),
-            Property::Volume => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.volume.add(x).map_err(Into::into)), |props, value| props.volume = value),
-            Property::Balance => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.balance.add(x).map_err(Into::into)), |props, value| props.balance = value),
+            Property::Tempo => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.tempo.add(x).map_err(Into::into)), |props, value| props.tempo = value),
+            Property::Volume => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.volume.add(x).map_err(Into::into)), |props, value| props.volume = value),
+            Property::Balance => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.balance.add(x).map_err(Into::into)), |props, value| props.balance = value),
 
-            Property::ColorH => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_h.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.effects.color_h = value),
-            Property::ColorS => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_s.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_s = value),
-            Property::ColorV => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_v.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_v = value),
-            Property::ColorT => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_t.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_t = value),
+            Property::ColorH => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_h.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.effects.color_h = value),
+            Property::ColorS => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_s.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_s = value),
+            Property::ColorV => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_v.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_v = value),
+            Property::ColorT => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_t.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_t = value),
 
-            Property::Fisheye => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.effects.fisheye.add(x).map_err(Into::into)), |props, value| props.effects.fisheye = value),
-            Property::Whirl => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.effects.whirl.add(x).map_err(Into::into)), |props, value| props.effects.whirl = value),
-            Property::Pixelate => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.effects.pixelate.add(x).map_err(Into::into)), |props, value| props.effects.pixelate = value),
-            Property::Mosaic => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.effects.mosaic.add(x).map_err(Into::into)), |props, value| props.effects.mosaic = value),
-            Property::Negative => self.with_value(key, delta.to_number().map_err(Into::into).and_then(|x| self.effects.negative.add(x).map_err(Into::into)), |props, value| props.effects.negative = value),
+            Property::Fisheye => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.effects.fisheye.add(x).map_err(Into::into)), |props, value| props.effects.fisheye = value),
+            Property::Whirl => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.effects.whirl.add(x).map_err(Into::into)), |props, value| props.effects.whirl = value),
+            Property::Pixelate => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.effects.pixelate.add(x).map_err(Into::into)), |props, value| props.effects.pixelate = value),
+            Property::Mosaic => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.effects.mosaic.add(x).map_err(Into::into)), |props, value| props.effects.mosaic = value),
+            Property::Negative => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.effects.negative.add(x).map_err(Into::into)), |props, value| props.effects.negative = value),
         }
         CommandStatus::Handled
     }
@@ -791,14 +791,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         }
     }
     /// Attempts to interpret this value as a bool.
-    pub fn to_bool(&self) -> Result<bool, ConversionError<C, S>> {
+    pub fn as_bool(&self) -> Result<bool, ConversionError<C, S>> {
         Ok(match self {
             Value::Bool(x) => *x,
             x => return Err(ConversionError { got: x.get_type(), expected: Type::Bool }),
         })
     }
     /// Attempts to interpret this value as a number.
-    pub fn to_number(&self) -> Result<Number, ConversionError<C, S>> {
+    pub fn as_number(&self) -> Result<Number, ConversionError<C, S>> {
         match self {
             Value::Number(x) => Ok(*x),
             Value::String(x) => {
@@ -814,7 +814,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         }
     }
     /// Attempts to interpret this value as a string.
-    pub fn to_string(&self) -> Result<Cow<str>, ConversionError<C, S>> {
+    pub fn as_string(&self) -> Result<Cow<str>, ConversionError<C, S>> {
         Ok(match self {
             Value::String(x) => Cow::Borrowed(&**x),
             Value::Number(x) => Cow::Owned(x.to_string()),

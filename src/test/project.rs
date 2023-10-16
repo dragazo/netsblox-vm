@@ -657,14 +657,14 @@ fn test_proj_parallel_rpcs() {
 
         assert_eq!(global_context.globals.lookup("input").unwrap().get().as_list().unwrap().borrow().len(), 0);
 
-        let meta: Vec<_> = global_context.globals.lookup("meta").unwrap().get().as_list().unwrap().borrow().iter().map(|x| x.to_number().unwrap()).collect();
+        let meta: Vec<_> = global_context.globals.lookup("meta").unwrap().get().as_list().unwrap().borrow().iter().map(|x| x.as_number().unwrap()).collect();
         if meta.len() != 4 || meta.iter().map(|x| x.get()).sum::<f64>() != 216.0 || !meta.iter().all(|&x| x.get() >= 30.0) {
             panic!("{meta:?}");
         }
 
         let mut output: Vec<_> = global_context.globals.lookup("output").unwrap().get().as_list().unwrap().borrow().iter().map(|row| {
             let vals: Vec<_> = row.as_list().unwrap().borrow().iter().map(|x| {
-                let v = x.to_number().unwrap().get();
+                let v = x.as_number().unwrap().get();
                 assert_eq!(v as i64 as f64, v);
                 v as i64
             }).collect();

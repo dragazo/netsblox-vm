@@ -105,7 +105,7 @@ fn main() {
                 Request::Syscall { name, args } => match name.as_str() {
                     "open" => {
                         let (path, mode) = match args.as_slice() {
-                            [path, mode] => match (path.to_string(), mode.to_string()) {
+                            [path, mode] => match (path.as_string(), mode.as_string()) {
                                 (Ok(path), Ok(mode)) => (path, mode),
                                 _ => {
                                     key.complete(Err(format!("syscall open - expected 2 string args, received {:?} and {:?}", path.get_type(), mode.get_type())));
@@ -201,8 +201,8 @@ fn main() {
                         }
                     }
                     "writeLine" => match args.as_slice() {
-                        [file, content] => match (file, content.to_string()) {
-                            (Value::Native(x), Ok(content)) => match &**x {
+                        [file, content] => match file {
+                            Value::Native(x) => match &**x {
                                 NativeValue::OutputFile { handle } => match handle.borrow_mut().as_mut() {
                                     Some(handle) => match writeln!(*handle, "{content}") {
                                         Ok(_) => {

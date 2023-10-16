@@ -549,12 +549,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::ToBool => {
                 let val = self.value_stack.pop().unwrap();
-                self.value_stack.push(val.to_bool()?.into());
+                self.value_stack.push(val.as_bool()?.into());
                 self.pos = aft_pos;
             }
             Instruction::ToNumber => {
                 let val = self.value_stack.pop().unwrap();
-                self.value_stack.push(val.to_number()?.into());
+                self.value_stack.push(val.as_number()?.into());
                 self.pos = aft_pos;
             }
 
@@ -629,7 +629,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 let mut dims = Vec::with_capacity(raw_dims.len());
                 for dim in raw_dims {
-                    let dim = dim.to_number()?.get();
+                    let dim = dim.as_number()?.get();
                     if dim < 0.0 || dim > usize::MAX as f64 { return Err(ErrorCause::InvalidSize { value: dim }) }
                     let int_dim = dim as usize;
                     if int_dim as f64 != dim { return Err(ErrorCause::InvalidSize { value: dim }) }
@@ -673,10 +673,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let mut values = value.iter();
                 let res = match values.next() {
                     Some(x) => {
-                        let mut res = x.to_string()?.into_owned();
+                        let mut res = x.as_string()?.into_owned();
                         for x in values {
                             res.push('\n');
-                            res.push_str(x.to_string()?.as_ref());
+                            res.push_str(x.as_string()?.as_ref());
                         }
                         Rc::new(res)
                     }
@@ -892,7 +892,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::InitUpvar { var } => {
                 let target = lookup_var!(var).get().clone();
-                let target = target.to_string()?;
+                let target = target.as_string()?;
                 let parent_scope = parent_scope.ok_or(ErrorCause::UpvarAtRoot)?;
                 let parent_def = match parent_scope.lookup_mut(target.as_ref()) {
                     Some(x) => x,
@@ -930,7 +930,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::Jump { to } => self.pos = to,
             Instruction::ConditionalJump { to, when } => {
                 let value = self.value_stack.pop().unwrap();
-                self.pos = if value.to_bool()? == when { to } else { aft_pos };
+                self.pos = if value.as_bool()? == when { to } else { aft_pos };
             }
 
             Instruction::Call { pos, tokens } => {
@@ -1032,7 +1032,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::Throw => {
-                let msg = self.value_stack.pop().unwrap().to_string()?.into_owned();
+                let msg = self.value_stack.pop().unwrap().as_string()?.into_owned();
                 return Err(ErrorCause::Custom { msg });
             }
             Instruction::CallRpc { tokens } => {
@@ -1058,7 +1058,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     }
                     VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.borrow().iter().cloned().collect(),
                 };
-                let name = self.value_stack.pop().unwrap().to_string()?.into_owned();
+                let name = self.value_stack.pop().unwrap().as_string()?.into_owned();
                 perform_request!(Request::Syscall { name, args }, RequestAction::Syscall, aft_pos);
             }
             Instruction::PushSyscallError => {
@@ -1073,7 +1073,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                         x => vec![x.as_entity()?],
                     }),
                 };
-                let msg_type = self.value_stack.pop().unwrap().to_string()?.into_owned();
+                let msg_type = self.value_stack.pop().unwrap().as_string()?.into_owned();
                 let barrier = match wait {
                     false => {
                         self.pos = aft_pos;
@@ -1114,7 +1114,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::Sleep => {
-                let ms = self.value_stack.pop().unwrap().to_number()?.get() * 1000.0;
+                let ms = self.value_stack.pop().unwrap().as_number()?.get() * 1000.0;
                 if ms <= 0.0 {
                     self.pos = aft_pos;
                     return Ok(ProcessStep::Yield);
@@ -1255,15 +1255,15 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 perform_command!(Command::ClearDrawings, aft_pos);
             }
             Instruction::GotoXY => {
-                let y = self.value_stack.pop().unwrap().to_number()?;
-                let x = self.value_stack.pop().unwrap().to_number()?;
+                let y = self.value_stack.pop().unwrap().as_number()?;
+                let x = self.value_stack.pop().unwrap().as_number()?;
                 perform_command!(Command::GotoXY { x, y }, aft_pos);
             }
             Instruction::Goto => match self.value_stack.pop().unwrap() {
                 Value::List(target) => {
                     let target = target.borrow();
                     if target.len() != 2 { return Err(ErrorCause::InvalidListLength { expected: 2, got: target.len() }); }
-                    let (x, y) = (target[0].to_number()?, target[1].to_number()?);
+                    let (x, y) = (target[0].as_number()?, target[1].as_number()?);
                     perform_command!(Command::GotoXY { x, y }, aft_pos);
                 }
                 Value::Entity(target) => {
@@ -1273,15 +1273,15 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 target => return Err(ErrorCause::ConversionError { got: target.get_type(), expected: Type::Entity }),
             }
             Instruction::PointTowardsXY => {
-                let x = self.value_stack.pop().unwrap().to_number()?;
-                let y = self.value_stack.pop().unwrap().to_number()?;
+                let x = self.value_stack.pop().unwrap().as_number()?;
+                let y = self.value_stack.pop().unwrap().as_number()?;
                 perform_command!(Command::PointTowardsXY { x, y }, aft_pos);
             }
             Instruction::PointTowards => match self.value_stack.pop().unwrap() {
                 Value::List(target) => {
                     let target = target.borrow();
                     if target.len() != 2 { return Err(ErrorCause::InvalidListLength { expected: 2, got: target.len() }); }
-                    let (x, y) = (target[0].to_number()?, target[1].to_number()?);
+                    let (x, y) = (target[0].as_number()?, target[1].as_number()?);
                     perform_command!(Command::PointTowardsXY { x, y }, aft_pos);
                 }
                 Value::Entity(target) => {
@@ -1291,7 +1291,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 target => return Err(ErrorCause::ConversionError { got: target.get_type(), expected: Type::Entity }),
             }
             Instruction::Forward => {
-                let distance = self.value_stack.pop().unwrap().to_number()?;
+                let distance = self.value_stack.pop().unwrap().as_number()?;
                 perform_command!(Command::Forward { distance }, aft_pos);
             }
             Instruction::UnknownBlock { name, args } => {
@@ -1320,7 +1320,7 @@ mod ops {
     }
 
     pub(super) fn prep_index<C: CustomTypes<S>, S: System<C>>(index: &Value<'_, C, S>, len: usize) -> Result<usize, ErrorCause<C, S>> {
-        let raw_index = index.to_number()?.get();
+        let raw_index = index.as_number()?.get();
         let index = raw_index as i64;
         if index as f64 != raw_index { return Err(ErrorCause::IndexNotInteger { index: raw_index }) }
         if index < 1 || index > len as i64 { return Err(ErrorCause::IndexOutOfBounds { index, len }) }
@@ -1510,7 +1510,7 @@ mod ops {
         fn process_vector<C: CustomTypes<S>, S: System<C>>(res: &mut String, value: &VecDeque<Value<C, S>>) -> Result<(), ErrorCause<C, S>> {
             for (i, x) in value.iter().enumerate() {
                 if i != 0 { res.push(','); }
-                process_scalar(res, x.to_string()?.as_ref())
+                process_scalar(res, x.as_string()?.as_ref())
             }
             Ok(())
         }
@@ -1577,31 +1577,31 @@ mod ops {
     pub(super) fn binary_op<'gc, 'a, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, a: &'a Value<'gc, C, S>, b: &'a Value<'gc, C, S>, op: BinaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let mut cache = Default::default();
         match op {
-            BinaryOp::Add       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.add(b.to_number()?)?.into())),
-            BinaryOp::Sub       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.sub(b.to_number()?)?.into())),
-            BinaryOp::Mul       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.mul(b.to_number()?)?.into())),
-            BinaryOp::Div       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.div(b.to_number()?)?.into())),
-            BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.powf(b.to_number()?)?.into())),
-            BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(b.to_number()?.log(a.to_number()?)?.into())),
-            BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.to_number()?.atan2(b.to_number()?)?.to_degrees()?.into())),
+            BinaryOp::Add       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.as_number()?.add(b.as_number()?)?.into())),
+            BinaryOp::Sub       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.as_number()?.sub(b.as_number()?)?.into())),
+            BinaryOp::Mul       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.as_number()?.mul(b.as_number()?)?.into())),
+            BinaryOp::Div       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.as_number()?.div(b.as_number()?)?.into())),
+            BinaryOp::Pow       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.as_number()?.powf(b.as_number()?)?.into())),
+            BinaryOp::Log       => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(b.as_number()?.log(a.as_number()?)?.into())),
+            BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.as_number()?.atan2(b.as_number()?)?.to_degrees()?.into())),
 
             BinaryOp::StrGet => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
-                let string = b.to_string()?;
+                let string = b.as_string()?;
                 let index = prep_index(a, string.chars().count())?;
                 Ok(Rc::new(string.chars().nth(index).unwrap().to_string()).into())
             }),
 
             BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
-                let (a, b) = (a.to_number()?.get(), b.to_number()?.get());
+                let (a, b) = (a.as_number()?.get(), b.as_number()?.get());
                 Ok(Number::new(if a.is_sign_positive() == b.is_sign_positive() { a % b } else { b + (a % -b) })?.into())
             }),
             BinaryOp::SplitBy => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
-                let (text, pattern) = (a.to_string()?, b.to_string()?);
+                let (text, pattern) = (a.as_string()?, b.as_string()?);
                 Ok(Gc::new(mc, RefLock::new(text.split(pattern.as_ref()).map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
 
             BinaryOp::Range => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
-                let (mut a, b) = (a.to_number()?.get(), b.to_number()?.get());
+                let (mut a, b) = (a.as_number()?.get(), b.as_number()?.get());
                 let mut res = VecDeque::new();
                 if a.is_finite() && b.is_finite() {
                     if a <= b {
@@ -1619,7 +1619,7 @@ mod ops {
                 Ok(Gc::new(mc, RefLock::new(res)).into())
             }),
             BinaryOp::Random => binary_op_impl(mc, system, a, b, true, &mut cache, |_, system, a, b| {
-                let (mut a, mut b) = (a.to_number()?.get(), b.to_number()?.get());
+                let (mut a, mut b) = (a.as_number()?.get(), b.as_number()?.get());
                 if a > b { (a, b) = (b, a); }
                 let res = if a == libm::round(a) && b == libm::round(b) {
                     let (a, b) = (a as i64, b as i64);
@@ -1656,53 +1656,53 @@ mod ops {
     pub(super) fn unary_op<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, x: &Value<'gc, C, S>, op: UnaryOp) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
         let mut cache = Default::default();
         match op {
-            UnaryOp::ToNumber => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.into())),
-            UnaryOp::Not      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok((!x.to_bool()?).into())),
-            UnaryOp::Abs      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.abs()?.into())),
-            UnaryOp::Neg      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.neg()?.into())),
-            UnaryOp::Sqrt     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.sqrt()?.into())),
-            UnaryOp::Round    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.round()?.into())),
-            UnaryOp::Floor    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.floor()?.into())),
-            UnaryOp::Ceil     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.to_number()?.ceil()?.into())),
-            UnaryOp::Sin      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::sin(x.to_number()?.get().to_radians()))?.into())),
-            UnaryOp::Cos      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::cos(x.to_number()?.get().to_radians()))?.into())),
-            UnaryOp::Tan      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::tan(x.to_number()?.get().to_radians()))?.into())),
-            UnaryOp::Asin     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::asin(x.to_number()?.get()).to_degrees())?.into())),
-            UnaryOp::Acos     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::acos(x.to_number()?.get()).to_degrees())?.into())),
-            UnaryOp::Atan     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::atan(x.to_number()?.get()).to_degrees())?.into())),
-            UnaryOp::StrLen   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(x.to_string()?.chars().count() as f64)?.into())),
+            UnaryOp::ToNumber => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.as_number()?.into())),
+            UnaryOp::Not      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok((!x.as_bool()?).into())),
+            UnaryOp::Abs      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.as_number()?.abs()?.into())),
+            UnaryOp::Neg      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.as_number()?.neg()?.into())),
+            UnaryOp::Sqrt     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.as_number()?.sqrt()?.into())),
+            UnaryOp::Round    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.as_number()?.round()?.into())),
+            UnaryOp::Floor    => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.as_number()?.floor()?.into())),
+            UnaryOp::Ceil     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(x.as_number()?.ceil()?.into())),
+            UnaryOp::Sin      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::sin(x.as_number()?.get().to_radians()))?.into())),
+            UnaryOp::Cos      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::cos(x.as_number()?.get().to_radians()))?.into())),
+            UnaryOp::Tan      => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::tan(x.as_number()?.get().to_radians()))?.into())),
+            UnaryOp::Asin     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::asin(x.as_number()?.get()).to_degrees())?.into())),
+            UnaryOp::Acos     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::acos(x.as_number()?.get()).to_degrees())?.into())),
+            UnaryOp::Atan     => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(libm::atan(x.as_number()?.get()).to_degrees())?.into())),
+            UnaryOp::StrLen   => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| Ok(Number::new(x.as_string()?.chars().count() as f64)?.into())),
 
-            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| match x.to_string()?.chars().next_back() {
+            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| match x.as_string()?.chars().next_back() {
                 Some(ch) => Ok(Rc::new(ch.to_string()).into()),
                 None => Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }),
             }),
             UnaryOp::StrGetRandom => unary_op_impl(mc, system, x, &mut cache, &|_, system, x| {
-                let x = x.to_string()?;
+                let x = x.as_string()?;
                 let i = prep_rand_index(system, x.chars().count())?;
                 Ok(Rc::new(x.chars().nth(i).unwrap().to_string()).into())
             }),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.to_string()?.chars().map(|x| Rc::new(x.to_string()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.chars().map(|x| Rc::new(x.to_string()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitWord => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.to_string()?.split_whitespace().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split_whitespace().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitTab => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.to_string()?.split('\t').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split('\t').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitCR => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.to_string()?.split('\r').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split('\r').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitLF => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.to_string()?.lines().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.lines().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitCsv => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                let value = from_csv(mc, x.to_string()?.as_ref())?;
+                let value = from_csv(mc, x.as_string()?.as_ref())?;
                 Ok(Gc::new(mc, RefLock::new(value)).into())
             }),
             UnaryOp::SplitJson => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                let value = x.to_string()?;
+                let value = x.as_string()?;
                 match parse_json::<Json>(&value) {
                     Ok(json) => Ok(Value::from_json(mc, json)?),
                     Err(_) => Err(ErrorCause::NotJson { value: value.into_owned() }),
@@ -1710,7 +1710,7 @@ mod ops {
             }),
 
             UnaryOp::UnicodeToChar => unary_op_impl(mc, system, x, &mut cache, &|_, _, x| {
-                let fnum = x.to_number()?.get();
+                let fnum = x.as_number()?.get();
                 if fnum < 0.0 || fnum > u32::MAX as f64 { return Err(ErrorCause::InvalidUnicode { value: fnum }) }
                 let num = fnum as u32;
                 if num as f64 != fnum { return Err(ErrorCause::InvalidUnicode { value: fnum }) }
@@ -1720,7 +1720,7 @@ mod ops {
                 }
             }),
             UnaryOp::CharToUnicode => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
-                let src = x.to_string()?;
+                let src = x.as_string()?;
                 let values: VecDeque<_> = src.chars().map(|ch| Ok(Number::new(ch as u32 as f64)?.into())).collect::<Result<_, NumberError>>()?;
                 Ok(match values.len() {
                     1 => values.into_iter().next().unwrap(),

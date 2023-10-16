@@ -669,7 +669,7 @@ fn test_proc_syscall() {
                     false => {
                         let mut buffer = buffer_cpy.borrow_mut();
                         for value in args {
-                            buffer.push_str(value.to_string().unwrap().as_ref());
+                            buffer.push_str(value.as_string().unwrap().as_ref());
                         }
                         key.complete(Ok(Intermediate::from_json(json!(buffer.len() as f64))));
                         RequestStatus::Handled
@@ -1789,7 +1789,7 @@ fn test_proc_basic_motion() {
             Some(Rc::new(move |_, _, key, command, _| {
                 match command {
                     Command::Forward { distance } => sequence.borrow_mut().push(Action::Forward(to_i32(distance))),
-                    Command::ChangeProperty { prop: Property::Heading, delta } => sequence.borrow_mut().push(Action::Turn(to_i32(delta.to_number().unwrap()))),
+                    Command::ChangeProperty { prop: Property::Heading, delta } => sequence.borrow_mut().push(Action::Turn(to_i32(delta.as_number().unwrap()))),
                     _ => return CommandStatus::UseDefault { key, command },
                 }
                 key.complete(Ok(()));
@@ -1948,7 +1948,7 @@ fn test_proc_rand_str_char_cache() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |_, _, res| {
-        let res = res.unwrap().0.unwrap().to_string().unwrap().into_owned();
+        let res = res.unwrap().0.unwrap().as_string().unwrap().into_owned();
         assert_eq!(res.len(), 8192);
         let mut counts: BTreeMap<char, usize> = BTreeMap::new();
         for ch in res.chars() {
@@ -2090,14 +2090,14 @@ fn test_proc_wall_time() {
         let res = res.borrow();
         assert_eq!(res.len(), 8);
 
-        assert!((res[0].to_number().unwrap().get() - (t.unix_timestamp_nanos() / 1000000) as f64).abs() < 10.0);
-        assert_eq!(res[1].to_number().unwrap().get(), t.year() as f64);
-        assert_eq!(res[2].to_number().unwrap().get(), t.month() as u8 as f64);
-        assert_eq!(res[3].to_number().unwrap().get(), t.day() as f64);
-        assert_eq!(res[4].to_number().unwrap().get(), t.date().weekday().number_from_sunday() as f64);
-        assert_eq!(res[5].to_number().unwrap().get(), t.hour() as f64);
-        assert_eq!(res[6].to_number().unwrap().get(), t.minute() as f64);
-        assert_eq!(res[7].to_number().unwrap().get(), t.second() as f64);
+        assert!((res[0].as_number().unwrap().get() - (t.unix_timestamp_nanos() / 1000000) as f64).abs() < 10.0);
+        assert_eq!(res[1].as_number().unwrap().get(), t.year() as f64);
+        assert_eq!(res[2].as_number().unwrap().get(), t.month() as u8 as f64);
+        assert_eq!(res[3].as_number().unwrap().get(), t.day() as f64);
+        assert_eq!(res[4].as_number().unwrap().get(), t.date().weekday().number_from_sunday() as f64);
+        assert_eq!(res[5].as_number().unwrap().get(), t.hour() as f64);
+        assert_eq!(res[6].as_number().unwrap().get(), t.minute() as f64);
+        assert_eq!(res[7].as_number().unwrap().get(), t.second() as f64);
     });
 }
 
@@ -2205,39 +2205,39 @@ fn test_proc_extra_blocks() {
                 match name.as_str() {
                     "tuneScopeSetInstrument" => {
                         assert_eq!(args.len(), 1);
-                        let ins = args[0].to_string().unwrap();
+                        let ins = args[0].as_string().unwrap();
                         actions_clone.borrow_mut().push(vec!["set ins".to_owned(), ins.into_owned()]);
                         key.complete(Ok(Intermediate::from_json(json!("OK"))));
                     }
                     "tuneScopeSetVolume" => {
                         assert_eq!(args.len(), 1);
-                        let vol = args[0].to_number().unwrap().get();
+                        let vol = args[0].as_number().unwrap().get();
                         actions_clone.borrow_mut().push(vec!["set vol".to_owned(), vol.to_string()]);
                         key.complete(Ok(Intermediate::from_json(json!("OK"))));
                     }
                     "tuneScopePlayChordForDuration" => {
                         assert_eq!(args.len(), 2);
                         let notes = args[0].to_json().unwrap();
-                        let duration = args[1].to_string().unwrap();
+                        let duration = args[1].as_string().unwrap();
                         actions_clone.borrow_mut().push(vec!["play chord".to_owned(), notes.to_string(), duration.into_owned()]);
                         key.complete(Ok(Intermediate::from_json(json!("OK"))));
                     }
                     "tuneScopePlayTracks" => {
                         assert_eq!(args.len(), 2);
-                        let time = args[0].to_string().unwrap();
+                        let time = args[0].as_string().unwrap();
                         let tracks = args[1].to_json().unwrap();
                         actions_clone.borrow_mut().push(vec!["play tracks".to_owned(), time.into_owned(), tracks.to_string()]);
                         key.complete(Ok(Intermediate::from_json(json!("OK"))));
                     }
                     "tuneScopeNote" => {
                         assert_eq!(args.len(), 1);
-                        let note = args[0].to_string().unwrap();
+                        let note = args[0].as_string().unwrap();
                         actions_clone.borrow_mut().push(vec!["get note".to_owned(), note.as_ref().to_owned()]);
                         key.complete(Ok(Intermediate::from_json(json!(format!("nte {note}")))));
                     }
                     "tuneScopeDuration" => {
                         assert_eq!(args.len(), 1);
-                        let duration = args[0].to_string().unwrap();
+                        let duration = args[0].as_string().unwrap();
                         actions_clone.borrow_mut().push(vec!["get duration".to_owned(), duration.as_ref().to_owned()]);
                         key.complete(Ok(Intermediate::from_json(json!(format!("drt {duration}")))));
                     }

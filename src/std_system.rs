@@ -76,7 +76,7 @@ impl<C: CustomTypes<StdSystem<C>>> Key<Result<C::Intermediate, String>> for Requ
     /// A value of [`Ok`] denotes a successful request, whose value will be returned to the system
     /// after conversion under [`CustomTypes::from_intermediate`].
     /// A value of [`Err`] denotes a failed request, which will be returned as an error to the runtime,
-    /// subject to the caller's [`ErrorScheme`](crate::runtime::ErrorScheme) setting.
+    /// subject to the caller's [`ErrorScheme`] setting.
     fn complete(self, value: Result<C::Intermediate, String>) {
         assert!(self.0.lock().unwrap().complete(value).is_ok())
     }
@@ -91,7 +91,7 @@ impl Key<Result<(), String>> for CommandKey {
     /// Completes the command.
     /// A value of [`Ok`] denotes a successful command.
     /// A value of [`Err`] denotes a failed command, which will be returned as an error to the runtime,
-    /// subject to the caller's [`ErrorScheme`](crate::runtime::ErrorScheme) setting.
+    /// subject to the caller's [`ErrorScheme`] setting.
     fn complete(self, value: Result<(), String>) {
         assert!(self.0.lock().unwrap().complete(value).is_ok())
     }
