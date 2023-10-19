@@ -1401,7 +1401,7 @@ mod ops {
         let src = src.borrow();
 
         let columns = src.iter().map(|x| match x {
-            Value::List(x) => x.borrow().len().max(1),
+            Value::List(x) => x.borrow().len(),
             _ => 1,
         }).max().unwrap_or(0);
 

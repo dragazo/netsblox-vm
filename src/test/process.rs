@@ -1153,12 +1153,38 @@ fn test_proc_list_columns() {
                 ["1", ["6"], "", "9"],
             ],
             [["6"]],
-            [[""]],
+            [],
             [[[]]],
             [],
             false,
         ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "columns");
+    });
+}
+
+#[test]
+fn test_proc_transpose_consistency() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/transpose-consistency.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            [0],
+            [1, 0],
+            [2, 0],
+            [],
+            [],
+            [],
+            [0],
+            [0],
+            [0],
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "transpose consistency");
     });
 }
 
