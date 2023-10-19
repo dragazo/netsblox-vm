@@ -1135,6 +1135,11 @@ fn test_proc_list_columns() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_json(mc, json!([
+            [
+                ["1", "4", "6"],
+                ["2", "5", ""],
+                ["3", "", ""],
+            ],
             [[1,2,3,4,5,6,7,8,9,10]],
             [
                 ["1", "2", "3", "6", "7"],
