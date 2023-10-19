@@ -1561,11 +1561,12 @@ fn test_proc_list_reshape() {
                 [["e", "l", "l", "1", "h"]],
                 [["e", "l", "l", "gh", "3"]],
             ],
-            [],
+            [[], [], [], []],
             "3",
             "3",
             [[6, 6, 6], [6, 6, 6]],
-            [["", ""], ["", ""]],
+            "EmptyList",
+            "EmptyList",
         ])).unwrap();
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list reshape");
     });

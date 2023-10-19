@@ -1379,13 +1379,9 @@ mod ops {
         Ok(res)
     }
     pub(super) fn reshape<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, src: &Value<'gc, C, S>, dims: &[usize]) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
-        if dims.iter().any(|&x| x == 0) {
-            return Ok(Gc::new(mc, RefLock::new(VecDeque::default())).into())
-        }
-
-        let mut src = ops::flatten(src)?;
+        let src = ops::flatten(src)?;
         if src.is_empty() {
-            src.push_back(empty_string().into());
+            return Err(ErrorCause::EmptyList);
         }
 
         fn reshape_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, src: &mut Cycle<VecDequeIter<Value<'gc, C, S>>>, dims: &[usize]) -> Value<'gc, C, S> {
