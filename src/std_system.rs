@@ -289,6 +289,12 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
         context.role_id = first_role_id.to_owned();
         context.role_name = first_role_meta.get("name").unwrap().as_str().unwrap().to_owned();
 
+        let res = client.post(format!("{}/network/{}/state", context.base_url, context.client_id))
+            .json(&json!({ "state": { "external": { "address": context.project_name, "appId": "vm" } } }))
+            .send().await.unwrap()
+            .text().await.unwrap();
+        assert!(res.starts_with(&format!("{}@{}", context.project_name, context.client_id)));
+
         let context = Arc::new(context);
         let rpc_request_pipe = {
             let (client, context) = (client.clone(), context.clone());
@@ -312,15 +318,22 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
         let mut seed: <ChaChaRng as SeedableRng>::Seed = Default::default();
         getrandom::getrandom(&mut seed).expect("failed to generate random seed");
 
+        let context_clone = context.clone();
         let config = config.fallback(&Config {
-            request: Some(Rc::new(|system, _, key, request, _| {
+            request: Some(Rc::new(move |system, _, key, request, _| {
                 match request {
-                    Request::Rpc { service, rpc, args } => {
-                        match args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_,_>>>() {
-                            Ok(args) => system.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap(),
-                            Err(err) => key.complete(Err(format!("failed to convert RPC args to json: {err:?}"))),
+                    Request::Rpc { service, rpc, args } => match (service.as_str(), rpc.as_str(), args.as_slice()) {
+                        ("PublicRoles", "getPublicRoleId", []) => {
+                            key.complete(Ok(C::Intermediate::from_json(json!(format!("{}@{}#vm", context_clone.project_name, context_clone.client_id)))));
+                            RequestStatus::Handled
                         }
-                        RequestStatus::Handled
+                        _ => {
+                            match args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_,_>>>() {
+                                Ok(args) => system.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap(),
+                                Err(err) => key.complete(Err(format!("failed to convert RPC args to json: {err:?}"))),
+                            }
+                            RequestStatus::Handled
+                        }
                     }
                     _ => RequestStatus::UseDefault { key, request },
                 }
@@ -344,7 +357,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
 
     /// Gets the public id of the running system that can be used to send messages to this client.
     pub fn get_public_id(&self) -> String {
-        format!("{}@{}", self.context.project_name, self.context.client_id)
+        format!("{}@{}#vm", self.context.project_name, self.context.client_id)
     }
 
     /// Injects a message into the receiving queue as if received over the network.
