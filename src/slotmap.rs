@@ -41,7 +41,7 @@ struct Slot<T> {
 
 /// A dense, resizable array that supports generational indexing.
 /// 
-/// You can use the [`new_key`] macro to create a new key type to use.
+/// You can use the [`new_key`](crate::new_key) macro to create a new key type to use.
 /// It is recommended to use different key types for different collections to avoid accidentally using a key from a different map.
 #[derive(Clone, Collect)]
 #[collect(no_drop)]
