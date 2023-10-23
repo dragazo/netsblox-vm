@@ -1752,6 +1752,25 @@ fn test_proc_list_combinations() {
     });
 }
 
+
+#[test]
+fn test_proc_unevaluated_inputs() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/unevaluated-inputs.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_json(mc, json!([
+            "before", "waiting... 1", "waiting... 2", "waiting... 3", "waiting... 4", "waiting... 5", "waiting... 6", "after",
+        ])).unwrap();
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "unevaluated inputs");
+    });
+}
+
 #[test]
 fn test_proc_index_over_bounds() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
