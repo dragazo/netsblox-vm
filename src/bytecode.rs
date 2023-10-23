@@ -1324,7 +1324,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             ast::ExprKind::ListGet { list, index } => self.append_simple_ins(entity, &[index, list], Instruction::ListGet)?,
             ast::ExprKind::ListGetLast { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetLast)?,
             ast::ExprKind::ListGetRandom { list } => self.append_simple_ins(entity, &[list], Instruction::ListGetRandom)?,
-            ast::ExprKind::ListLength { value } => self.append_simple_ins(entity, &[value], Instruction::ListLength)?,
+            ast::ExprKind::ListLen { value } => self.append_simple_ins(entity, &[value], Instruction::ListLength)?,
             ast::ExprKind::ListDims { value } => self.append_simple_ins(entity, &[value], Instruction::ListDims)?,
             ast::ExprKind::ListRank { value } => self.append_simple_ins(entity, &[value], Instruction::ListRank)?,
             ast::ExprKind::ListRev { value } => self.append_simple_ins(entity, &[value], Instruction::ListRev)?,
@@ -1757,7 +1757,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
 
                 self.call_holes.push((call_hole_pos, function, entity));
             }
-            ast::StmtKind::RunClosure { new_entity, closure, args } => {
+            ast::StmtKind::CallClosure { new_entity, closure, args } => {
                 if let Some(new_entity) = new_entity {
                     self.append_expr(new_entity, entity)?;
                 }
@@ -1976,7 +1976,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
                 Some(target) => self.append_simple_ins(entity, &[msg_type, target], Instruction::SendLocalMessage { wait: *wait, target: true })?,
                 None => self.append_simple_ins(entity, &[msg_type], Instruction::SendLocalMessage { wait: *wait, target: false })?,
             }
-            ast::StmtKind::RunRpc { service, rpc, args } => {
+            ast::StmtKind::CallRpc { service, rpc, args } => {
                 let mut tokens = LosslessJoin::new();
                 tokens.push(service);
                 tokens.push(rpc);
