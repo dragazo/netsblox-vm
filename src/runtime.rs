@@ -50,22 +50,6 @@ pub enum FromAstError<'a> {
 impl From<NumberError> for FromAstError<'_> { fn from(error: NumberError) -> Self { Self::BadNumber { error } } }
 impl<'a> From<CompileError<'a>> for FromAstError<'a> { fn from(error: CompileError<'a>) -> Self { Self::CompileError { error } } }
 
-#[derive(Debug)]
-pub enum FromJsonError {
-    HadNull,
-    HadBadNumber,
-}
-#[derive(Educe)]
-#[educe(Debug)]
-pub enum ToJsonError<C: CustomTypes<S>, S: System<C>> {
-    /// The value was or contained a number which could not be expressed as [`f64`].
-    BadNumber(f64),
-    /// The value was or contained a type that cannot be exported as primitive [`Json`].
-    ComplexType(Type<C, S>),
-    /// The value contained a cycle, which [`Json`] forbids.
-    Cyclic,
-}
-
 /// The type of a [`Value`].
 #[derive(Educe)]
 #[educe(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,9 +105,11 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     NotCsv { value: String },
     /// Attempt to parse an invalid JSON-encoded string.
     NotJson { value: String },
-    /// A failed attempt to convert a native vm [`Value`] to [`Json`] for use outside the vm.
-    ToJsonError { error: ToJsonError<C, S> },
-    /// A failed attempt to convert a [`Json`] value into a [`Value`] for use in the vm.
+    /// A failed attempt to convert a native vm [`Value`] to [`SimpleValue`] for use outside the vm.
+    ToSimpleError { error: ToSimpleError<C, S> },
+    /// A failed attempt to convert a [`SimpleValue`] to [`Json`] for use outside the vm.
+    IntoJsonError { error: IntoJsonError<C, S> },
+    /// A failed attempt to convert a [`Json`] value into a [`SimpleValue`] for use in the vm.
     FromJsonError { error: FromJsonError },
     /// A numeric value took on an invalid value such as NaN.
     NumberError { error: NumberError },
@@ -135,7 +121,8 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     Custom { msg: String },
 }
 impl<C: CustomTypes<S>, S: System<C>> From<ConversionError<C, S>> for ErrorCause<C, S> { fn from(e: ConversionError<C, S>) -> Self { Self::ConversionError { got: e.got, expected: e.expected } } }
-impl<C: CustomTypes<S>, S: System<C>> From<ToJsonError<C, S>> for ErrorCause<C, S> { fn from(error: ToJsonError<C, S>) -> Self { Self::ToJsonError { error } } }
+impl<C: CustomTypes<S>, S: System<C>> From<IntoJsonError<C, S>> for ErrorCause<C, S> { fn from(error: IntoJsonError<C, S>) -> Self { Self::IntoJsonError { error } } }
+impl<C: CustomTypes<S>, S: System<C>> From<ToSimpleError<C, S>> for ErrorCause<C, S> { fn from(error: ToSimpleError<C, S>) -> Self { Self::ToSimpleError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<FromJsonError> for ErrorCause<C, S> { fn from(error: FromJsonError) -> Self { Self::FromJsonError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<NumberError> for ErrorCause<C, S> { fn from(error: NumberError) -> Self { Self::NumberError { error } } }
 
@@ -425,16 +412,16 @@ impl Properties {
     }
 
     pub fn perform_get_property<'gc, C: CustomTypes<S>, S: System<C>>(&self, key: S::RequestKey, prop: Property) -> RequestStatus<'gc, C, S> {
-        let value: Json = match prop {
-            Property::XPos => self.pos.0.get().into(),
-            Property::YPos => self.pos.1.get().into(),
-            Property::Heading => self.heading.get().into(),
+        let value: SimpleValue = match prop {
+            Property::XPos => self.pos.0.into(),
+            Property::YPos => self.pos.1.into(),
+            Property::Heading => self.heading.into(),
 
             Property::Visible => self.visible.into(),
-            Property::Size => self.size.get().into(),
+            Property::Size => self.size.into(),
 
             Property::PenDown => self.pen_down.into(),
-            Property::PenSize => self.pen_size.get().into(),
+            Property::PenSize => self.pen_size.into(),
 
             Property::PenColor => {
                 let Color { a, r, g, b } = Color::from_hsva(
@@ -443,30 +430,30 @@ impl Properties {
                     self.pen_color_v.get() as f32 / 100.0,
                     1.0 - self.pen_color_t.get() as f32 / 100.0
                 );
-                json!(u32::from_be_bytes([a, r, g, b]))
+                Number::new(u32::from_be_bytes([a, r, g, b]) as f64).unwrap().into()
             }
 
-            Property::PenColorH => self.pen_color_h.get().into(),
-            Property::PenColorS => self.pen_color_s.get().into(),
-            Property::PenColorV => self.pen_color_v.get().into(),
-            Property::PenColorT => self.pen_color_t.get().into(),
+            Property::PenColorH => self.pen_color_h.into(),
+            Property::PenColorS => self.pen_color_s.into(),
+            Property::PenColorV => self.pen_color_v.into(),
+            Property::PenColorT => self.pen_color_t.into(),
 
-            Property::Tempo => self.tempo.get().into(),
-            Property::Volume => self.volume.get().into(),
-            Property::Balance => self.balance.get().into(),
+            Property::Tempo => self.tempo.into(),
+            Property::Volume => self.volume.into(),
+            Property::Balance => self.balance.into(),
 
-            Property::ColorH => self.effects.color_h.get().into(),
-            Property::ColorS => self.effects.color_s.get().into(),
-            Property::ColorV => self.effects.color_v.get().into(),
-            Property::ColorT => self.effects.color_t.get().into(),
+            Property::ColorH => self.effects.color_h.into(),
+            Property::ColorS => self.effects.color_s.into(),
+            Property::ColorV => self.effects.color_v.into(),
+            Property::ColorT => self.effects.color_t.into(),
 
-            Property::Fisheye => self.effects.fisheye.get().into(),
-            Property::Whirl => self.effects.whirl.get().into(),
-            Property::Pixelate => self.effects.pixelate.get().into(),
-            Property::Mosaic => self.effects.mosaic.get().into(),
-            Property::Negative => self.effects.negative.get().into(),
+            Property::Fisheye => self.effects.fisheye.into(),
+            Property::Whirl => self.effects.whirl.into(),
+            Property::Pixelate => self.effects.pixelate.into(),
+            Property::Mosaic => self.effects.mosaic.into(),
+            Property::Negative => self.effects.negative.into(),
         };
-        key.complete(Ok(C::Intermediate::from_json(value)));
+        key.complete(Ok(value.into()));
         RequestStatus::Handled
     }
     pub fn perform_set_property<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, prop: Property, value: Value<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S> {
@@ -634,6 +621,65 @@ pub trait Key<T> {
     fn complete(self, value: T);
 }
 
+#[derive(Educe)]
+#[educe(Debug)]
+pub enum ToSimpleError<C: CustomTypes<S>, S: System<C>> {
+    Cyclic,
+    ComplexType(Type<C, S>),
+}
+
+#[derive(Educe)]
+#[educe(Debug)]
+pub enum IntoJsonError<C: CustomTypes<S>, S: System<C>> {
+    BadNumber(Number),
+    ComplexType(Type<C, S>),
+}
+#[derive(Debug)]
+pub enum FromJsonError {
+    Null,
+    BadNumber(JsonNumber),
+}
+
+#[derive(Debug, Clone)]
+pub enum SimpleValue {
+    Bool(bool),
+    Number(Number),
+    String(String),
+    Image(Vec<u8>),
+    Audio(Vec<u8>),
+    List(Vec<SimpleValue>),
+}
+
+impl From<bool> for SimpleValue { fn from(x: bool) -> Self { Self::Bool(x) } }
+impl From<Number> for SimpleValue { fn from(x: Number) -> Self { Self::Number(x) } }
+impl From<String> for SimpleValue { fn from(x: String) -> Self { Self::String(x) } }
+impl From<Vec<SimpleValue>> for SimpleValue { fn from(x: Vec<SimpleValue>) -> Self { Self::List(x) } }
+
+impl SimpleValue {
+    pub fn into_json<C: CustomTypes<S>, S: System<C>>(self) -> Result<Json, IntoJsonError<C, S>> {
+        Ok(match self {
+            SimpleValue::Bool(x) => Json::Bool(x),
+            SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).ok_or(IntoJsonError::BadNumber(x))?),
+            SimpleValue::String(x) => Json::String(x),
+            SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_json).collect::<Result<_,_>>()?),
+            SimpleValue::Image(_) => return Err(IntoJsonError::ComplexType(Type::Image)),
+            SimpleValue::Audio(_) => return Err(IntoJsonError::ComplexType(Type::Audio)),
+        })
+    }
+    pub fn from_json(value: Json) -> Result<Self, FromJsonError> {
+        Ok(match value {
+            Json::Null => return Err(FromJsonError::Null),
+            Json::Bool(x) => SimpleValue::Bool(x),
+            Json::Number(x) => SimpleValue::Number(x.as_f64().and_then(|x| Number::new(x).ok()).ok_or(FromJsonError::BadNumber(x))?),
+            Json::String(x) => SimpleValue::String(x),
+            Json::Array(x) => SimpleValue::List(x.into_iter().map(SimpleValue::from_json).collect::<Result<_,_>>()?),
+            Json::Object(x) => SimpleValue::List(x.into_iter().map(|(k, v)| {
+                Ok(SimpleValue::List(vec![SimpleValue::String(k), SimpleValue::from_json(v)?]))
+            }).collect::<Result<_,_>>()?),
+        })
+    }
+}
+
 /// Any primitive value.
 #[derive(Educe, Collect)]
 #[educe(Clone)]
@@ -735,38 +781,23 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<VecDeque<Value<'
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<Closure<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<Closure<'gc, C, S>>>) -> Self { Value::Closure(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<Entity<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<Entity<'gc, C, S>>>) -> Self { Value::Entity(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
-    /// Create a new [`Value`] from a [`Json`] value.
-    pub fn from_json(mc: &Mutation<'gc>, value: Json) -> Result<Self, FromJsonError> {
-        Ok(match value {
-            Json::Null => return Err(FromJsonError::HadNull),
-            Json::Bool(x) => Value::Bool(x),
-            Json::Number(x) => Value::Number(x.as_f64().and_then(|x| Number::new(x).ok()).ok_or(FromJsonError::HadBadNumber)?),
-            Json::String(x) => Value::String(Rc::new(x)),
-            Json::Array(x) => Value::List(Gc::new(mc, RefLock::new(x.into_iter().map(|x| Value::from_json(mc, x)).collect::<Result<_,_>>()?))),
-            Json::Object(x) => Value::List(Gc::new(mc, RefLock::new(x.into_iter().map(|(k, v)| {
-                let mut entry = VecDeque::with_capacity(2);
-                entry.push_back(Value::String(Rc::new(k)));
-                entry.push_back(Value::from_json(mc, v)?);
-                Ok(Value::List(Gc::new(mc, RefLock::new(entry))))
-            }).collect::<Result<_,_>>()?))),
-        })
-    }
-    /// Converts a [`Value`] into [`Json`]. Note that not all values can be converted to json (e.g., cyclic lists or complex types).
-    pub fn to_json(&self) -> Result<Json, ToJsonError<C, S>> {
-        fn simplify<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>, cache: &mut BTreeSet<Identity<'gc, C, S>>) -> Result<Json, ToJsonError<C, S>> {
+    pub fn to_simple(&self) -> Result<SimpleValue, ToSimpleError<C, S>> {
+        fn simplify<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>, cache: &mut BTreeSet<Identity<'gc, C, S>>) -> Result<SimpleValue, ToSimpleError<C, S>> {
             Ok(match value {
-                Value::Bool(x) => Json::Bool(*x),
-                Value::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).ok_or_else(|| ToJsonError::BadNumber(x.get()))?),
-                Value::String(x) => Json::String(x.as_str().to_owned()),
-                Value::Image(_) | Value::Audio(_) | Value::Closure(_) | Value::Entity(_) | Value::Native(_) => return Err(ToJsonError::ComplexType(value.get_type())),
+                Value::Bool(x) => SimpleValue::Bool(*x),
+                Value::Number(x) => SimpleValue::Number(*x),
+                Value::String(x) => SimpleValue::String((**x).clone()),
+                Value::Image(x) => SimpleValue::Image((**x).clone()),
+                Value::Audio(x) => SimpleValue::Audio((**x).clone()),
                 Value::List(x) => {
                     let identity = value.identity();
-                    if !cache.insert(identity) { return Err(ToJsonError::Cyclic) }
-                    let res = Json::Array(x.borrow().iter().map(|x| simplify(x, cache)).collect::<Result<_,_>>()?);
+                    if !cache.insert(identity) { return Err(ToSimpleError::Cyclic) }
+                    let res = SimpleValue::List(x.borrow().iter().map(|x| simplify(x, cache)).collect::<Result<_,_>>()?);
                     debug_assert!(cache.contains(&identity));
                     cache.remove(&identity);
                     res
                 }
+                Value::Closure(_) | Value::Entity(_) | Value::Native(_) => return Err(ToSimpleError::ComplexType(value.get_type())),
             })
         }
         let mut cache = Default::default();
@@ -774,6 +805,17 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         if res.is_ok() { debug_assert_eq!(cache.len(), 0); }
         res
     }
+    pub fn from_simple(mc: &Mutation<'gc>, value: SimpleValue) -> Self {
+        match value {
+            SimpleValue::Bool(x) => Value::Bool(x),
+            SimpleValue::Number(x) => Value::Number(x),
+            SimpleValue::String(x) => Value::String(Rc::new(x)),
+            SimpleValue::Audio(x) => Value::Audio(Rc::new(x)),
+            SimpleValue::Image(x) => Value::Image(Rc::new(x)),
+            SimpleValue::List(x) => Value::List(Gc::new(mc, RefLock::new(x.into_iter().map(|x| Value::from_simple(mc, x)).collect()))),
+        }
+    }
+
     /// Returns a value representing this object that implements [`Eq`] such that
     /// two values are equal if and only if they are references to the same object.
     /// This is primarily useful for testing for reference equality of lists.
@@ -790,6 +832,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
             Value::Native(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
         }
     }
+
     /// Attempts to interpret this value as a bool.
     pub fn as_bool(&self) -> Result<bool, ConversionError<C, S>> {
         Ok(match self {
@@ -826,6 +869,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         match self {
             Value::Image(x) => Ok(x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Image }),
+        }
+    }
+    /// Attempts to interpret this value as an audio clip.
+    pub fn as_audio(&self) -> Result<&Rc<Vec<u8>>, ConversionError<C, S>> {
+        match self {
+            Value::Audio(x) => Ok(x),
+            x => Err(ConversionError { got: x.get_type(), expected: Type::Audio }),
         }
     }
     /// Attempts to interpret this value as a list.
@@ -1507,13 +1557,6 @@ impl<C: CustomTypes<S>, S: System<C>> Config<C, S> {
     }
 }
 
-/// The required interface used by [`CustomTypes::Intermediate`].
-pub trait IntermediateType {
-    fn from_json(json: Json) -> Self;
-    fn from_image(img: Vec<u8>) -> Self;
-    fn from_audio(audio: Vec<u8>) -> Self;
-}
-
 /// A collection of static settings for using custom native types.
 pub trait CustomTypes<S: System<Self>>: 'static + Sized {
     /// A native type that can be exposed directly to the VM as a value of type [`Value::Native`].
@@ -1526,7 +1569,7 @@ pub trait CustomTypes<S: System<Self>>: 'static + Sized {
     /// The reason this is needed is that [`Value`] can only be used during the lifetime of an associated [`Mutation`] handle,
     /// which cannot be extended into the larger lifetime required for async operations.
     /// Conversions are automatically performed from this type to [`Value`] via [`CustomTypes::from_intermediate`].
-    type Intermediate: 'static + Send + IntermediateType;
+    type Intermediate: 'static + Send + From<SimpleValue>;
 
     /// Type used to represent an entity's system-specific state.
     /// This should include any details outside of core process functionality (e.g., graphics, position, orientation).

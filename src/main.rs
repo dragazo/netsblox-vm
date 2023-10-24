@@ -7,10 +7,9 @@ use std::io::{BufRead, Write, BufReader, BufWriter};
 
 use netsblox_vm::cli::{run, Mode};
 use netsblox_vm::template::SyscallMenu;
-use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, Request, RequestStatus, Config, CustomTypes, IntermediateType, Key};
+use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, Request, RequestStatus, Config, CustomTypes, Key, SimpleValue};
 use netsblox_vm::std_system::StdSystem;
 use netsblox_vm::gc::Mutation;
-use netsblox_vm::json::{Json, json};
 use clap::Parser;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,20 +48,12 @@ impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
 }
 
 enum Intermediate {
-    Json(Json),
-    Image(Vec<u8>),
-    Audio(Vec<u8>),
+    Simple(SimpleValue),
     Native(NativeValue),
 }
-impl IntermediateType for Intermediate {
-    fn from_json(json: Json) -> Self {
-        Self::Json(json)
-    }
-    fn from_image(img: Vec<u8>) -> Self {
-        Self::Image(img)
-    }
-    fn from_audio(audio: Vec<u8>) -> Self {
-        Self::Audio(audio)
+impl From<SimpleValue> for Intermediate {
+    fn from(value: SimpleValue) -> Self {
+        Intermediate::Simple(value)
     }
 }
 
@@ -75,9 +66,7 @@ impl CustomTypes<StdSystem<C>> for C {
 
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Result<Value<'gc, C, StdSystem<C>>, ErrorCause<C, StdSystem<C>>> {
         Ok(match value {
-            Intermediate::Json(x) => Value::from_json(mc, x)?,
-            Intermediate::Image(x) => Value::Image(Rc::new(x)),
-            Intermediate::Audio(x) => Value::Audio(Rc::new(x)),
+            Intermediate::Simple(x) => Value::from_simple(mc, x),
             Intermediate::Native(x) => Value::Native(Rc::new(x)),
         })
     }
@@ -153,7 +142,7 @@ fn main() {
                                     NativeValue::InputFile { handle } => *handle.borrow_mut() = None,
                                     NativeValue::OutputFile { handle } => *handle.borrow_mut() = None,
                                 }
-                                key.complete(Ok(Intermediate::from_json(json!("OK"))));
+                                key.complete(Ok(SimpleValue::String("OK".into()).into()));
                                 RequestStatus::Handled
                             }
                             _ => {
@@ -177,7 +166,7 @@ fn main() {
                                             return RequestStatus::Handled;
                                         }
 
-                                        key.complete(Ok(Intermediate::from_json(json!(res))));
+                                        key.complete(Ok(SimpleValue::String(res).into()));
                                         RequestStatus::Handled
                                     }
                                     None => {
@@ -206,7 +195,7 @@ fn main() {
                                 NativeValue::OutputFile { handle } => match handle.borrow_mut().as_mut() {
                                     Some(handle) => match writeln!(*handle, "{content}") {
                                         Ok(_) => {
-                                            key.complete(Ok(Intermediate::Json(json!("OK"))));
+                                            key.complete(Ok(SimpleValue::String("OK".into()).into()));
                                             RequestStatus::Handled
                                         }
                                         Err(e) => {

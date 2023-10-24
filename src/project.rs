@@ -237,7 +237,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                         let mut locals = SymbolTable::default();
                         for field in fields.iter() {
                             locals.define_or_redefine(field,
-                                args.get(field).and_then(|x| Value::from_json(mc, x.clone()).ok())
+                                args.get(field).and_then(|x| SimpleValue::from_json(x.clone()).ok().map(|x| Value::from_simple(mc, x)))
                                 .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
                         }
 
@@ -280,7 +280,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     let mut locals = SymbolTable::default();
                     for field in fields.iter() {
                         locals.define_or_redefine(field,
-                            values.get(field).and_then(|x| Value::from_json(mc, x.clone()).ok())
+                            values.get(field).and_then(|x| SimpleValue::from_json(x.clone()).ok().map(|x| Value::from_simple(mc, x)))
                             .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
                     }
 

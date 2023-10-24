@@ -99,7 +99,7 @@ impl Key<Result<(), String>> for CommandKey {
 
 type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
 
-async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<C::Intermediate, String> {
+async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<SimpleValue, String> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
     let url = format!("{services_url}/{service}/{rpc}?clientId={client_id}&t={time}",
         services_url = context.services_url, client_id = context.client_id);
@@ -123,13 +123,13 @@ async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client:
     }
 
     if content_type.contains("image/") {
-        Ok(C::Intermediate::from_image(res))
+        Ok(SimpleValue::Image(res))
     } else if content_type.contains("audio/") {
-        Ok(C::Intermediate::from_audio(res))
-    } else if let Ok(x) = parse_json_slice::<Json>(&res) {
-        Ok(C::Intermediate::from_json(x))
+        Ok(SimpleValue::Audio(res))
+    } else if let Some(x) = parse_json_slice::<Json>(&res).ok().and_then(|x| SimpleValue::from_json(x).ok()) {
+        Ok(x)
     } else if let Ok(x) = String::from_utf8(res) {
-        Ok(C::Intermediate::from_json(Json::String(x)))
+        Ok(SimpleValue::String(x))
     } else {
         Err("Received ill-formed success value".into())
     }
@@ -304,7 +304,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                     let (client, context) = (client.clone(), context.clone());
                     tokio::spawn(async move {
                         let res = call_rpc_async::<C>(&context, &client, &request.service, &request.rpc, &request.args.iter().map(|x| (x.0.as_str(), &x.1)).collect::<Vec<_>>()).await;
-                        request.key.complete(res);
+                        request.key.complete(res.map(Into::into));
                     });
                 }
             }
@@ -322,11 +322,11 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                 match request {
                     Request::Rpc { service, rpc, args } => match (service.as_str(), rpc.as_str(), args.as_slice()) {
                         ("PublicRoles", "getPublicRoleId", []) => {
-                            key.complete(Ok(C::Intermediate::from_json(json!(format!("{}@{}#vm", context_clone.project_name, context_clone.client_id)))));
+                            key.complete(Ok(SimpleValue::String(format!("{}@{}#vm", context_clone.project_name, context_clone.client_id)).into()));
                             RequestStatus::Handled
                         }
                         _ => {
-                            match args.into_iter().map(|(k, v)| Ok((k, v.to_json()?))).collect::<Result<_,ToJsonError<_,_>>>() {
+                            match args.into_iter().map(|(k, v)| Ok((k, v.to_simple()?.into_json()?))).collect::<Result<_,ErrorCause<_,_>>>() {
                                 Ok(args) => system.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap(),
                                 Err(err) => key.complete(Err(format!("failed to convert RPC args to json: {err:?}"))),
                             }
@@ -349,7 +349,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
 
     /// Asynchronously calls an RPC and returns the result.
     /// This function directly makes requests to NetsBlox, bypassing any RPC hook defined by [`Config`].
-    pub async fn call_rpc_async(&self, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<C::Intermediate, String> {
+    pub async fn call_rpc_async(&self, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<SimpleValue, String> {
         call_rpc_async::<C>(&self.context, &self.client, service, rpc, args).await
     }
 

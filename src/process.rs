@@ -392,7 +392,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Some(Defer::MessageReply { key, aft_pos }) => match global_context.system.poll_reply(key) {
                 AsyncResult::Completed(x) => {
                     let value = match x {
-                        Some(x) => Value::from_json(mc, x)?,
+                        Some(x) => Value::from_simple(mc, SimpleValue::from_json(x)?),
                         None => empty_string().into(),
                     };
                     self.value_stack.push(value);
@@ -652,7 +652,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
 
             Instruction::ListJson => {
-                let value = self.value_stack.pop().unwrap().to_json()?;
+                let value = self.value_stack.pop().unwrap().to_simple()?.into_json()?;
                 self.value_stack.push(Rc::new(value.to_string()).into());
                 self.pos = aft_pos;
             }
@@ -1159,7 +1159,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let values = {
                     let field_names = tokens.map(ToOwned::to_owned).collect::<Vec<_>>();
                     let field_count = field_names.len();
-                    iter::zip(field_names.into_iter(), self.value_stack.drain(self.value_stack.len() - field_count..)).map(|(k, v)| v.to_json().map(|x| (k, x))).collect::<Result<_,_>>()?
+                    iter::zip(field_names.into_iter(), self.value_stack.drain(self.value_stack.len() - field_count..)).map(|(k, v)| Ok((k, v.to_simple()?.into_json()?))).collect::<Result<_,ErrorCause<C, S>>>()?
                 };
 
                 match global_context.system.send_message(msg_type.into(), values, targets, expect_reply)? {
@@ -1168,7 +1168,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 }
             }
             Instruction::SendNetworkReply => {
-                let value = self.value_stack.pop().unwrap().to_json()?;
+                let value = self.value_stack.pop().unwrap().to_simple()?.into_json()?;
                 if let Some(key) = self.reply_key.take() {
                     global_context.system.send_reply(key, value)?;
                 }
@@ -1700,7 +1700,7 @@ mod ops {
             UnaryOp::SplitJson => unary_op_impl(mc, system, x, &mut cache, &|mc, _, x| {
                 let value = x.as_string()?;
                 match parse_json::<Json>(&value) {
-                    Ok(json) => Ok(Value::from_json(mc, json)?),
+                    Ok(json) => Ok(Value::from_simple(mc, SimpleValue::from_json(json)?)),
                     Err(_) => Err(ErrorCause::NotJson { value: value.into_owned() }),
                 }
             }),

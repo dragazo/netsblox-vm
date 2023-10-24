@@ -110,7 +110,7 @@ fn test_proc_sum_123n() {
             env.proc.borrow_mut(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         });
         run_till_term(&mut env, |mc, _, res| {
-            let expect = Value::from_json(mc, expect).unwrap();
+            let expect = Value::from_simple(mc, SimpleValue::from_json(expect).unwrap());
             assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "sum 123n");
         });
     }
@@ -133,7 +133,7 @@ fn test_proc_recursive_factorial() {
             env.proc.borrow_mut(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
         });
         run_till_term(&mut env, |mc, _, res| {
-            let expect = Value::from_json(mc, expect).unwrap();
+            let expect = Value::from_simple(mc, SimpleValue::from_json(expect).unwrap());
             assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "recursive factorial");
         });
     }
@@ -150,7 +150,7 @@ fn test_proc_loops_lists_basic() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             [1,2,3,4,5,6,7,8,9,10],
             [1,2,3,4,5,6,7,8,9,10],
             [1,2,3,4,5,6,7],
@@ -174,7 +174,7 @@ fn test_proc_loops_lists_basic() {
             [6.5,5.5,4.5,3.5,2.5],
             [6.5,5.5,4.5,3.5,2.5,1.5],
             ["56","44","176"],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expected, 1e-10, "loops lists");
     });
 }
@@ -215,10 +215,10 @@ fn test_proc_recursively_self_containing_lists() {
                 }
             }
 
-            check("left mode", mc, &res[0], &Value::from_json(mc, json!([1,4,9,16,25,36,49,64,81,100])).unwrap());
-            check("right mode", mc, &res[1], &Value::from_json(mc, json!([2,4,8,16,32,64,128,256,512,1024])).unwrap());
-            check("both mode", mc, &res[2], &Value::from_json(mc, json!([1,4,27,256,3125,46656,823543,16777216,387420489,10000000000.0])).unwrap());
-            check("unary mode", mc, &res[3], &Value::from_json(mc, json!([-1,-2,-3,-4,-5,-6,-7,-8,-9,-10])).unwrap());
+            check("left mode", mc, &res[0], &Value::from_simple(mc, SimpleValue::from_json(json!([1,4,9,16,25,36,49,64,81,100])).unwrap()));
+            check("right mode", mc, &res[1], &Value::from_simple(mc, SimpleValue::from_json(json!([2,4,8,16,32,64,128,256,512,1024])).unwrap()));
+            check("both mode", mc, &res[2], &Value::from_simple(mc, SimpleValue::from_json(json!([1,4,27,256,3125,46656,823543,16777216,387420489,10000000000.0])).unwrap()));
+            check("unary mode", mc, &res[3], &Value::from_simple(mc, SimpleValue::from_json(json!([-1,-2,-3,-4,-5,-6,-7,-8,-9,-10])).unwrap()));
         }
         x => panic!("{:?}", x),
     });
@@ -245,7 +245,7 @@ fn test_proc_sieve_of_eratosthenes() {
     });
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "primes");
     });
 }
@@ -261,7 +261,7 @@ fn test_proc_early_return() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([1,3])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([1,3])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "res");
     });
 }
@@ -277,7 +277,7 @@ fn test_proc_short_circuit() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [true, "xed"],
             [false, "sergb"],
             [true, true],
@@ -289,7 +289,7 @@ fn test_proc_short_circuit() {
             [false, true],
             [false, false],
             ["xed", "sergb", true, false, false, false, true, true, true, false],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "short circuit test");
     });
 }
@@ -349,7 +349,7 @@ fn test_proc_lambda_local_shadow_capture() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!(["1", "1", "1"])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!(["1", "1", "1"])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "local shadow capture");
     });
 }
@@ -365,7 +365,7 @@ fn test_proc_upvars() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [0.6427876096865393,0.766044443118978],
             [0.984807753012208,0.17364817766693041],
             [0.8660254037844387,-0.4999999999999998],
@@ -408,7 +408,7 @@ fn test_proc_upvars() {
             "---",
             ["gfdgr","rjhrthr"],
             "---",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-10, "upvars");
     });
 }
@@ -424,7 +424,7 @@ fn test_proc_generators_nested() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "nested generators");
     });
 }
@@ -440,10 +440,10 @@ fn test_proc_call_in_closure() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [2, 4, 6, 8, 10],
             [1, 3, 5, 7, 9],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "call in closure");
     });
 }
@@ -467,7 +467,7 @@ fn test_proc_warp_yields() {
 
         run_till_term(&mut env, |mc, env, res| {
             let (res, yields) = res.unwrap();
-            assert_values_eq(res.as_ref().unwrap(), &Value::from_json(mc, json!("x")).unwrap(), 1e-20, &format!("yield test (mode {mode}) res"));
+            assert_values_eq(res.as_ref().unwrap(), &Value::from_simple(mc, SimpleValue::from_json(json!("x")).unwrap()), 1e-20, &format!("yield test (mode {mode}) res"));
             let counter = env.glob.borrow().globals.lookup("counter").unwrap().get().clone();
             assert_values_eq(&counter, &Number::new(expected_counter as f64).unwrap().into(), 1e-20, &format!("yield test (mode {mode}) value"));
             if yields != expected_yields { panic!("yield test (mode {}) yields - got {} expected {}", mode, yields, expected_yields) }
@@ -486,7 +486,7 @@ fn test_proc_string_ops() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             "hello 5 world",
             [ "these", "are", "some", "words" ],
             [
@@ -531,7 +531,7 @@ fn test_proc_string_ops() {
             [5, 2, 1],
             [ "hello", "world" ],
             { "a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10 },
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "string ops");
     });
 }
@@ -547,13 +547,13 @@ fn test_proc_str_cmp_case_insensitive() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             false, true, true, true, true,
             [
                 false, true,
                 [false, true, true, false],
             ],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "str cmp case insensitive");
     });
 }
@@ -593,7 +593,7 @@ fn test_proc_list_index_blocks() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
             [2, 3, 4, 5, 6, 7, 8, 9, 10],
             [2, 3, 4, 5, 6, 7, 8, 9],
@@ -610,7 +610,7 @@ fn test_proc_list_index_blocks() {
             ["50"],
             [],
             ["51"],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "index ops");
     });
 }
@@ -626,7 +626,7 @@ fn test_proc_literal_types() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ "50e4", "50e4s" ])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "50e4", "50e4s" ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "literal types check");
     });
 }
@@ -671,7 +671,7 @@ fn test_proc_syscall() {
                         for value in args {
                             buffer.push_str(value.as_string().unwrap().as_ref());
                         }
-                        key.complete(Ok(Intermediate::from_json(json!(buffer.len() as f64))));
+                        key.complete(Ok(SimpleValue::Number(Number::new(buffer.len() as f64).unwrap()).into()));
                         RequestStatus::Handled
                     }
                     true => {
@@ -681,7 +681,7 @@ fn test_proc_syscall() {
                 }
                 "foo" => {
                     let content = buffer_cpy.borrow().clone();
-                    key.complete(Ok(Intermediate::from_json(json!(content))));
+                    key.complete(Ok(SimpleValue::String(content).into()));
                     RequestStatus::Handled
                 }
                 _ => RequestStatus::UseDefault { key, request },
@@ -699,13 +699,13 @@ fn test_proc_syscall() {
     ), Settings { syscall_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["", ""],
             "",
             ["5test9", ""],
             "beep beep - called with empty args",
             ["5test9", ""],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "syscall checks");
     });
 }
@@ -722,7 +722,7 @@ fn test_proc_timer_wait() {
 
     let start = std::time::Instant::now();
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([0.0, 0.05, 0.15, 0.3, 0.5, 0.75, 1.05, 1.4, 1.8, 2.25, 2.75])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([0.0, 0.05, 0.15, 0.3, 0.5, 0.75, 1.05, 1.4, 1.8, 2.25, 2.75])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 0.01, "timer checks");
     });
     let duration = start.elapsed().as_millis();
@@ -740,7 +740,7 @@ fn test_proc_cons_cdr() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [1],
             [2,1],
             [3,2,1],
@@ -751,7 +751,7 @@ fn test_proc_cons_cdr() {
             [2,1],
             [1],
             []
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "cons cdr checks");
     });
 }
@@ -767,7 +767,7 @@ fn test_proc_list_find_contains() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["1", 0, false],
             ["2", 2, true],
             ["3", 0, false],
@@ -779,7 +779,7 @@ fn test_proc_list_find_contains() {
             [["1","2","3","4"], 0, false],
             [["1","2"], 0, false],
             [[], 5, true],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "cons cdr checks");
     });
 }
@@ -795,14 +795,14 @@ fn test_proc_append() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [1,2,3,4,"test"],
             [],
             [1,2,3,4],
             [1,2,3,4,1,2,3,4],
             [1,2,3,4,2,3,"4"],
             [1,2,3,4,2,3,"4"],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "append result");
     });
 }
@@ -818,11 +818,11 @@ fn test_proc_foreach_mutate() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [1,2,3,4,5,6,7,8,9,10,2,3,4,5,6,7,8,9,10,11],
             [2,4,6,8,10,12,14,16,18,20],
             [2, 1.5, 1.3333333, 3, 2, 1.6666666, 4, 2.5, 2, 3, 2.5, 2.33333, 4, 3, 2.666666, 5, 3.5, 3, 4, 3.5, 3.333333, 5, 4, 3.666666, 6, 4.5, 4],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "map result");
     });
 }
@@ -838,11 +838,11 @@ fn test_proc_map() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [1,2,3,4,5,6,7,8,9,10,2,4,6,8,10,12,14,16,18,20],
             [1,4,9,16,25,36,49,64,81,100],
             [1.0, 1.4142135623730951, 1.7320508075688772, 2.0, 2.23606797749979, 2.449489742783178, 2.6457513110645907, 2.8284271247461903, 3.0, 3.1622776601683795, 1.4142135623730951, 2.0, 2.449489742783178, 2.8284271247461903, 3.1622776601683795, 3.4641016151377544, 3.7416573867739413, 4.0, 4.242640687119285, 4.47213595499958],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "map result");
     });
 }
@@ -858,13 +858,13 @@ fn test_proc_keep_find() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [1,2,3,4,5,6,7,8,9,10,4,5,6,7,8,9,10,11,12,13],
             [3,6,9],
             [10,11,12,13,14,15,16,17,18,19,20,17,18,19,20,21],
             14,
             "",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "keep/find results");
     });
 }
@@ -880,13 +880,13 @@ fn test_proc_numeric_bases() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["34", 34, 68, 1156],
             ["025", 25, 50, 625],
             ["0x43", 67, 134, 4489],
             ["0o34", 28, 56, 784],
             ["0b101101", 45, 90, 2025],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "numeric bases results");
     });
 }
@@ -902,7 +902,7 @@ fn test_proc_combine() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [1,2,3,4,5,6,7,8,9,10,[1,2],[2,3],[6,4],[24,5],[120,6],[720,7],[5040,8],[40320,9],[362880,10]],
             3628800,
             ["7"],
@@ -913,7 +913,7 @@ fn test_proc_combine() {
             "1, 2, 3, 4, 5, 6, 7, 8, 9, 10",
             0,
             0,
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "keep/find results");
     });
 }
@@ -929,13 +929,13 @@ fn test_proc_autofill_closure_params() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [3,6,9,12,15,18,21,24,27,30],
             [3,4,5,6,7,8,9,10,11,12],
             [1,3,5,7,9],
             55,
             3628800,
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "autofill closure params");
     });
 }
@@ -1066,7 +1066,7 @@ fn test_proc_variadic_sum_product() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             15,
             21,
             [17, 16, 18],
@@ -1077,7 +1077,7 @@ fn test_proc_variadic_sum_product() {
             [150, 180, 180],
             [240, 320, 20],
             1,
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic sum product");
     });
 }
@@ -1093,7 +1093,7 @@ fn test_proc_variadic_min_max() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ "1", "2", "9", "17" ])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "1", "2", "9", "17" ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic min/max");
     });
 }
@@ -1109,7 +1109,7 @@ fn test_proc_atan2_new_cmp() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [18.43494882, 116.5650511, -32.0053832, -158.198590],
             [14.03624346, 53.13010235, -18.4349488],
             [false, true, true],
@@ -1118,7 +1118,7 @@ fn test_proc_atan2_new_cmp() {
             true,
             false,
             [false, true],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "atan2 and new cmp");
     });
 }
@@ -1134,7 +1134,7 @@ fn test_proc_list_columns() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [
                 ["1", "4", "6"],
                 ["2", "5", ""],
@@ -1162,7 +1162,7 @@ fn test_proc_list_columns() {
             [[[]]],
             [],
             false,
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "columns");
     });
 }
@@ -1178,7 +1178,7 @@ fn test_proc_transpose_consistency() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [0],
             [1, 0],
             [2, 0],
@@ -1188,7 +1188,7 @@ fn test_proc_transpose_consistency() {
             [0],
             [0],
             [0],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "transpose consistency");
     });
 }
@@ -1204,7 +1204,7 @@ fn test_proc_compare_str() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [false, true, true, false, false, true],
             [true, true, false, true, false, false],
             [false, false, false, true, true, true],
@@ -1257,7 +1257,7 @@ fn test_proc_compare_str() {
             [true, true, false, true, false, false],
             [true, true, false, true, false, false],
             [true, true, false, true, false, false],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "compare str");
     });
 }
@@ -1273,7 +1273,7 @@ fn test_proc_new_min_max() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["12", "12", "23", "23"],
             ["12", "12", "023", "023"],
             ["12", "12", 23, 23],
@@ -1286,7 +1286,7 @@ fn test_proc_new_min_max() {
             [["4"], ["4"], ["7"], ["7"]],
             [["4"], ["4"], ["4", "1", "2"], ["4", "1", "2"]],
             [["4", "1", "2"], ["4", "1", "2"], ["4", "2"], ["4", "2"]],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "new min max");
     });
 }
@@ -1302,12 +1302,12 @@ fn test_proc_flatten() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["3", "6", "7", "10", "12", "16", "20"],
             ["6", "1", "3", "6", "1", "3", "6", "1", "3"],
             ["hello world"],
             [""],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "flatten");
     });
 }
@@ -1323,7 +1323,7 @@ fn test_proc_list_len_rank_dims() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [0, 1, [0]],
             [3, 1, [3]],
             [3, 2, [3, 0]],
@@ -1333,7 +1333,7 @@ fn test_proc_list_len_rank_dims() {
             [2, 2, [2, 10]],
             [2, 2, [2, 10]],
             [0, []],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list len, rank, dims");
     });
 }
@@ -1349,14 +1349,14 @@ fn test_proc_string_index() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["안", "요", "세"],
             ["h", "w", ["t", "i"], "d"],
             ["o", "d", ["s", "s"], "g"],
             ["셋", "하", ["섯", "둘"], "다"],
             ["요", "d", "수", "r", "일"],
             [3, 2],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "string index");
     });
 }
@@ -1372,7 +1372,7 @@ fn test_proc_type_query() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [false, true, false, false, false, false, false],
             [false, true, false, false, false, false, false],
             [false, true, false, false, false, false, false],
@@ -1385,7 +1385,7 @@ fn test_proc_type_query() {
             [false, false, false, true, false, false, false],
             [false, false, false, true, false, false, false],
             [false, false, false, false, true, false, false],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "type query");
     });
 }
@@ -1401,12 +1401,12 @@ fn test_proc_variadic_strcat() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             "hello world test13",
             "this is a test15",
             "",
             "",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic strcat");
     });
 }
@@ -1422,12 +1422,12 @@ fn test_proc_list_lines() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             "",
             "hello",
             "hello\nworld",
             "hello\nworld\n69",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list lines");
     });
 }
@@ -1443,7 +1443,7 @@ fn test_proc_binary_make_range() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [1,2,3,4,5],
             [
                 [1,2,3,4,5],
@@ -1462,7 +1462,7 @@ fn test_proc_binary_make_range() {
                 [8,7,6,5,4,3,2],
                 [5,6,7,8],
             ],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "binary make range");
     });
 }
@@ -1478,12 +1478,12 @@ fn test_proc_identical_to() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [true, false, false, true],
             [true, true, true, true],
             [false, false, true, true, true],
             [false, false, false, true],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "identical to");
     });
 }
@@ -1499,7 +1499,7 @@ fn test_proc_variadic_list_ctors() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [],
             ["1","2","3"],
             ["1","5","3","8"],
@@ -1511,7 +1511,7 @@ fn test_proc_variadic_list_ctors() {
             [true, false],
             [true, false],
             [true, false],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic list ctors");
     });
 }
@@ -1527,11 +1527,11 @@ fn test_proc_list_rev() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["2", "4", "1"],
             ["2", ["6", "4", "3"], "8", "1"],
             [["6", ["6", "4", "3"], "3"], ["6", "4", "3"], "8", "1"],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list rev");
     });
 }
@@ -1547,7 +1547,7 @@ fn test_proc_list_reshape() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["3", "1", "h", "e", "l", "l", "1", "h", "e", "l"],
             [["3", "1", "h", "e", "l"], ["l", "1", "h", "e", "l"]],
             [
@@ -1567,7 +1567,7 @@ fn test_proc_list_reshape() {
             [[6, 6, 6], [6, 6, 6]],
             "EmptyList",
             "EmptyList",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list reshape");
     });
 }
@@ -1583,14 +1583,14 @@ fn test_proc_list_json() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             r#"[]"#,
             r#"["test"]"#,
             r#"["test",25.0,"12"]"#,
             r#"[["1",["2"],[],[["2"]]],"\"another\"",["1",["2"],[],[["2"]]],"[{}]"]"#,
             r#"14.0"#,
             r#""hello world \"again\"""#,
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list json");
     });
 }
@@ -1606,7 +1606,7 @@ fn test_proc_explicit_to_string_cvt() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             "hello world 1",
             "hello 67 2",
             "hello 69 3",
@@ -1616,7 +1616,7 @@ fn test_proc_explicit_to_string_cvt() {
             "hello [test] 7",
             "hello [test,more] 8",
             "hello [1,2,3,4] 9",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "explicit tostr");
     });
 }
@@ -1632,13 +1632,13 @@ fn test_proc_empty_variadic_no_auto_insert() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [[], [], [], []],
             [[], [], [], []],
             [[], [], [], []],
             [[], [], [], []],
             [[], [], [], []],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "no auto insert");
     });
 }
@@ -1654,13 +1654,13 @@ fn test_proc_c_ring_no_auto_insert() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [[""], ["", 1, ""], "", [], "", ["", "", 1, ""], "", 1],
             [[""], ["", 2, ""], "", [], "", ["", "", 2, ""], "", 2],
             [[""], ["", 3, ""], "", [], "", ["", "", 3, ""], "", 3],
             [[""], ["", 4, ""], "", [], "", ["", "", 4, ""], "", 4],
             [[""], ["", 5, ""], "", [], "", ["", "", 5, ""], "", 5],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "no auto insert");
     });
 }
@@ -1676,7 +1676,7 @@ fn test_proc_signed_zero() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [0.0, -0.0, -0.0],
             ["0", "-0", "-0"],
             [false, true, true, false, true, false, false],
@@ -1685,7 +1685,7 @@ fn test_proc_signed_zero() {
             [false, true, true, false, true, false, false],
             [false, true, true, false, true, false, true],
             [false, true, true, false, true, false, false],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "signed zero");
     });
 }
@@ -1701,10 +1701,10 @@ fn test_proc_singleton_sum_product() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             9, 9, [6, [4, 2], 1], [6, [4, 2], 1],
             9, 9, [6, [4, 2], 1], [6, [4, 2], 1],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "singleton sum product");
     });
 }
@@ -1720,7 +1720,7 @@ fn test_proc_list_combinations() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [],
             [[1], [2], [3], [4], [5], [6], [7], [8], [9], [10]],
             [
@@ -1747,7 +1747,7 @@ fn test_proc_list_combinations() {
                 ["goodbye", "old", "friend", "!"], ["goodbye", "old", "friend", "."],
             ],
             [],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list combinations");
     });
 }
@@ -1764,9 +1764,9 @@ fn test_proc_unevaluated_inputs() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             "before", "waiting... 1", "waiting... 2", "waiting... 3", "waiting... 4", "waiting... 5", "waiting... 6", "after",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "unevaluated inputs");
     });
 }
@@ -1853,15 +1853,15 @@ fn test_proc_basic_motion() {
                 match request {
                     Request::Property { prop: Property::XPos } => {
                         sequence.borrow_mut().push(Action::Position);
-                        key.complete(Ok(Intermediate::from_json(json!(13))));
+                        key.complete(Ok(SimpleValue::Number(Number::new(13.0).unwrap()).into()));
                     }
                     Request::Property { prop: Property::YPos } => {
                         sequence.borrow_mut().push(Action::Position);
-                        key.complete(Ok(Intermediate::from_json(json!(54))));
+                        key.complete(Ok(SimpleValue::Number(Number::new(54.0).unwrap()).into()));
                     }
                     Request::Property { prop: Property::Heading } => {
                         sequence.borrow_mut().push(Action::Heading);
-                        key.complete(Ok(Intermediate::from_json(json!(39))));
+                        key.complete(Ok(SimpleValue::Number(Number::new(39.0).unwrap()).into()));
                     }
                     _ => return RequestStatus::UseDefault { key, request },
                 }
@@ -1879,7 +1879,7 @@ fn test_proc_basic_motion() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expected = Value::from_json(mc, json!([ 13, 54, 39 ])).unwrap();
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([ 13, 54, 39 ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expected, 1e-4, "basic motion test")
     });
 
@@ -1908,12 +1908,12 @@ fn test_proc_string_cmp() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [true, false, false, true, false, false, false],
             [true, false, false, true, true, true, true],
             [false, true, true, false, false, false, false],
             [false, true, true, false, true, true, true],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "string cmp");
     });
 }
@@ -1968,7 +1968,7 @@ fn test_proc_variadic_params() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [],
             ["5"],
             ["5", "g"],
@@ -1983,7 +1983,7 @@ fn test_proc_variadic_params() {
             [["3", "1"], ["re", "ds", "w"]],
             [["3", "1"], [1, 2, 3, 4]],
             [["gf", "fd", "", "d"], [1, 2, 3, 4]],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic params");
     });
 }
@@ -2026,7 +2026,7 @@ fn test_proc_noop_upvars() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ 0, 0, 1, 0 ])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ 0, 0, 1, 0 ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "noop upvars");
     });
 }
@@ -2042,7 +2042,7 @@ fn test_proc_try_catch_throw() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ "starting", "start code", "got error", "test error", "done" ])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "starting", "start code", "got error", "test error", "done" ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "try catch throw");
     });
 }
@@ -2058,7 +2058,7 @@ fn test_proc_exception_unregister() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ "top start", "before test", "before inner", "inner error", "IndexOutOfBounds { index: 332534, len: 3 }", "after test", "top error", "IndexOutOfBounds { index: 332534, len: 6 }", "top done"])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "top start", "before test", "before inner", "inner error", "IndexOutOfBounds { index: 332534, len: 3 }", "after test", "top error", "IndexOutOfBounds { index: 332534, len: 6 }", "top done"])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "exception res");
     });
 }
@@ -2074,7 +2074,7 @@ fn test_proc_exception_rethrow() {
     ), Settings::default(), system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([ "IndexOutOfBounds { index: 543548, len: 0 }", "test error here" ])).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "IndexOutOfBounds { index: 543548, len: 0 }", "test error here" ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "exception res");
     });
 }
@@ -2090,13 +2090,13 @@ fn test_proc_rpc_error() {
     ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["Nashville", ""],
             ["latitude is required.", "latitude is required."],
             ["Nashville", ""],
             ["latitude is required.", "latitude is required."],
             ["Nashville", ""],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "rpc error");
     });
 }
@@ -2112,14 +2112,14 @@ fn test_proc_c_rings() {
     ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             "foo 1", "foo 1", "foo 1", "foo 1", "foo 1", "foo 1", "foo 1", "foo 1", "foo 1", "---",
             "foo 2", "foo 2", "foo 2", "foo 2", "---",
             "bar 1", "bar 1", "bar 1", "bar 1", "bar 1", "bar 1", "bar 1", "bar 1", "---",
             "bar 1", "---",
             "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "---",
             "bar 2", "---",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "c-rings");
     });
 }
@@ -2163,7 +2163,7 @@ fn test_proc_to_csv() {
     ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             "",
             "test,,again",
             "a,d,c,ef,8",
@@ -2173,7 +2173,7 @@ fn test_proc_to_csv() {
             " a b c ,\"ain,t\",\",aint\",\"aint,\",\",ain,t,\", x y z ,\",\"",
             "hello,\"one\ntwo\nthree\",world",
             "hello,\"one\ntwo\nthree\"\nworld,test,\"one\ntwo\n\"\nagain,\"\ntwo\",\"\ntwo\n\"",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "to-csv");
     });
 }
@@ -2189,7 +2189,7 @@ fn test_proc_from_csv() {
     ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [],
             [["test", "", "again"]],
             [["a", "d", "c", "ef", "8"]],
@@ -2207,7 +2207,7 @@ fn test_proc_from_csv() {
             "NotCsv { value: \"abc\\\"xyz\\\"\" }",
             "NotCsv { value: \"\\\"abc\\\"xyz\" }",
             "NotCsv { value: \"\\\"abcxyz\" }",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "from-csv");
     });
 }
@@ -2223,7 +2223,7 @@ fn test_proc_extra_cmp_tests() {
     ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!([
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]],
             [[3, 1], [3, 2], [4, 1], [4, 2]],
             [false, true, false],
@@ -2241,7 +2241,7 @@ fn test_proc_extra_cmp_tests() {
             [false, true, false],
             [true, false, true],
             [false, true, false],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "extra-cmp-tests");
     });
 }
@@ -2258,45 +2258,45 @@ fn test_proc_extra_blocks() {
                         assert_eq!(args.len(), 1);
                         let ins = args[0].as_string().unwrap();
                         actions_clone.borrow_mut().push(vec!["set ins".to_owned(), ins.into_owned()]);
-                        key.complete(Ok(Intermediate::from_json(json!("OK"))));
+                        key.complete(Ok(SimpleValue::String("OK".into()).into()));
                     }
                     "tuneScopeSetVolume" => {
                         assert_eq!(args.len(), 1);
                         let vol = args[0].as_number().unwrap().get();
                         actions_clone.borrow_mut().push(vec!["set vol".to_owned(), vol.to_string()]);
-                        key.complete(Ok(Intermediate::from_json(json!("OK"))));
+                        key.complete(Ok(SimpleValue::String("OK".into()).into()));
                     }
                     "tuneScopePlayChordForDuration" => {
                         assert_eq!(args.len(), 2);
-                        let notes = args[0].to_json().unwrap();
+                        let notes = args[0].to_simple().unwrap().into_json::<C, StdSystem<C>>().unwrap();
                         let duration = args[1].as_string().unwrap();
                         actions_clone.borrow_mut().push(vec!["play chord".to_owned(), notes.to_string(), duration.into_owned()]);
-                        key.complete(Ok(Intermediate::from_json(json!("OK"))));
+                        key.complete(Ok(SimpleValue::String("OK".into()).into()));
                     }
                     "tuneScopePlayTracks" => {
                         assert_eq!(args.len(), 2);
                         let time = args[0].as_string().unwrap();
-                        let tracks = args[1].to_json().unwrap();
+                        let tracks = args[1].to_simple().unwrap().into_json::<C, StdSystem<C>>().unwrap();
                         actions_clone.borrow_mut().push(vec!["play tracks".to_owned(), time.into_owned(), tracks.to_string()]);
-                        key.complete(Ok(Intermediate::from_json(json!("OK"))));
+                        key.complete(Ok(SimpleValue::String("OK".into()).into()));
                     }
                     "tuneScopeNote" => {
                         assert_eq!(args.len(), 1);
                         let note = args[0].as_string().unwrap();
                         actions_clone.borrow_mut().push(vec!["get note".to_owned(), note.as_ref().to_owned()]);
-                        key.complete(Ok(Intermediate::from_json(json!(format!("nte {note}")))));
+                        key.complete(Ok(SimpleValue::String(format!("nte {note}")).into()));
                     }
                     "tuneScopeDuration" => {
                         assert_eq!(args.len(), 1);
                         let duration = args[0].as_string().unwrap();
                         actions_clone.borrow_mut().push(vec!["get duration".to_owned(), duration.as_ref().to_owned()]);
-                        key.complete(Ok(Intermediate::from_json(json!(format!("drt {duration}")))));
+                        key.complete(Ok(SimpleValue::String(format!("drt {duration}")).into()));
                     }
                     "tuneScopeSection" => {
                         assert_eq!(args.len(), 1);
-                        let items = args[0].to_json().unwrap();
+                        let items = args[0].to_simple().unwrap().into_json::<C, StdSystem<C>>().unwrap();
                         actions_clone.borrow_mut().push(vec!["make section".to_owned(), items.to_string()]);
-                        key.complete(Ok(Intermediate::from_json(items)));
+                        key.complete(Ok(SimpleValue::from_json(items).unwrap().into()));
                     }
                     _ => return RequestStatus::UseDefault { key, request },
                 }
@@ -2316,7 +2316,7 @@ fn test_proc_extra_blocks() {
     ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
 
     run_till_term(&mut env, |mc, _, res| {
-        let expect = Value::from_json(mc, json!("cool")).unwrap();
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!("cool")).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "extra blocks");
     });
 

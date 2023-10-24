@@ -65,9 +65,9 @@ fn test_proj_counting() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             1, 3, 6, 7, 9, 12, 13, 15, 18, 19, 21, 24, 25, 27, 30, 31, 33, 36, 37, 39, 42, 43, 45, 48, 49, 51, 54, 55, 57, 60,
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-20, "res");
         assert_values_eq(&global_context.globals.lookup("counter").unwrap().get(), &Number::new(60.0).unwrap().into(), 1e-20, "counter");
     });
@@ -82,7 +82,7 @@ fn test_proj_effects() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
             [12, 47, 32, 14, 11, -37, 123, 65, 74],
             [54, 79, 87, 7, 23, 37, 168, 66, -6],
@@ -91,7 +91,7 @@ fn test_proj_effects() {
             [120, 0, 0, 0, 23, 37, 168, 66, -6],
             [301, 100, 100, 100, 23, 37, 168, 66, -6],
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-20, "res");
     });
 }
@@ -105,7 +105,7 @@ fn test_proj_size_visible() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             [81, false],
             [44, false],
             [44, true],
@@ -118,7 +118,7 @@ fn test_proj_size_visible() {
             [15, false],
             [0, false],
             [4, false],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-20, "res");
     });
 }
@@ -132,7 +132,7 @@ fn test_proj_motion() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             [-42, 67, 287],
             [-48.69413329174131, 69.04660193305915, 287],
             [-48.69413329174131, 69.04660193305915, 307],
@@ -159,7 +159,7 @@ fn test_proj_motion() {
             [0, 0, 110.74616226255603],
             [31, -120, 110.74616226255603],
             [31, -120, 355.7636052009412],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-10, "res");
     });
 }
@@ -173,7 +173,7 @@ fn test_proj_pen_basic() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             [1, 187.1287078857422, 79.21568751335144, 100, 71.37254774570465, false],
             [1, 187.1287078857422, 79.21568751335144, 100, 71.37254774570465, false],
             [1, 187.1287078857422, 79.21568751335144, 100, 71.37254774570465, false],
@@ -215,7 +215,7 @@ fn test_proj_pen_basic() {
             [0, 345, 0, 0, 27, true],
             [0, 345, 0, 0, 100, true],
             [0, 345, 0, 0, 0, true],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-10, "res");
     });
 }
@@ -419,7 +419,7 @@ fn test_proj_broadcast() {
         let global_context = global_context.borrow();
 
         assert_values_eq(&global_context.globals.lookup("counter").unwrap().get().clone(), &Number::new(320.0).unwrap().into(), 1e-20, "counter");
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             "before 1",
             1, 3, 6, 7, 9, 12, 13, 15, 18, 19, 21, 24, 25, 27, 30, 31, 33, 36, 37, 39, 42, 43, 45, 48, 49, 51, 54, 55, 57, 60,
             "after 1",
@@ -427,7 +427,7 @@ fn test_proj_broadcast() {
             "before 2",
             "after 2",
             170, 171, 173, 176, 186, 187, 189, 192, 202, 203, 205, 208, 218, 219, 221, 224, 234, 235, 237, 240, 250, 251, 253, 256, 266, 267, 269, 272, 282, 283, 285, 288, 298, 299, 301, 304, 314, 315, 317, 320,
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 1e-20, "res");
     });
 }
@@ -441,7 +441,7 @@ fn test_proj_broadcast_to() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             "stage 1", "stage 2", "turtle 1", "turtle 2", "duck 1", "duck 2", "dog 1", "dog 2", "---",
             "stage 1", "stage 2", "turtle 1", "turtle 2", "duck 1", "duck 2", "dog 1", "dog 2", "---",
             "duck 1", "duck 2", "---",
@@ -452,7 +452,7 @@ fn test_proj_broadcast_to() {
             "---",
             "dog 1", "dog 2", "---",
             "turtle 1", "turtle 2", "duck 1", "duck 2", "---",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("log").unwrap().get().clone(), &expected, 1e-20, "log");
     });
 }
@@ -466,7 +466,7 @@ fn test_proj_any_msg() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["initial", ""],
             ["dog msg 1", "msg 1"],
             ["dog any", "msg 1"],
@@ -497,7 +497,7 @@ fn test_proj_any_msg() {
             ["dog any", "msg 3"],
             ["horse any", "msg 3"],
             "---",
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("log").unwrap().get().clone(), &expected, 1e-20, "log");
     });
 }
@@ -511,7 +511,7 @@ fn test_proj_launch() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["start", 0],
             ["run", 0.05],
             ["run", 0.1],
@@ -535,7 +535,7 @@ fn test_proj_launch() {
             ["launch", 0.55],
             ["launch", 0.55],
             ["launch", 0.55],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 0.005, "res");
     });
 }
@@ -549,9 +549,9 @@ fn test_proj_cloning() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             "0", 1, 2, 3, 4, 5, 6, 7, 8,
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("foo").unwrap().get().clone(), &expected, 0.005, "foo");
     });
 }
@@ -565,7 +565,7 @@ fn test_proj_pause() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!("5")).unwrap();
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!("5")).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 1e-20, "res");
     });
 }
@@ -580,10 +580,10 @@ fn test_proj_loop_yields() {
         let global_context = global_context.borrow();
 
         assert_values_eq(&global_context.globals.lookup("counter").unwrap().get().clone(), &Number::new(150.0).unwrap().into(), 1e-20, "counter");
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             1, 3, 6, 10, 15, 16, 18, 21, 25, 30, 31, 33, 36, 40, 45, 46, 48, 51, 55, 60, 61, 63, 66, 70, 75,
             76, 78, 81, 85, 90, 91, 93, 96, 100, 105, 106, 108, 111, 115, 120, 121, 123, 126, 130, 135, 136, 138, 141, 145, 150
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("history").unwrap().get().clone(), &expected, 1e-20, "history");
     });
 }
@@ -597,7 +597,7 @@ fn test_proj_run_call_ask_tell() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             [0.0, [87, 25, 10], [74, 65, 14], [45, 25, 201]],
             [0.1, [87, 25, 10], [74, 65, 14], [45, 25, 201]],
             [0.2, [87, 25, 10], [74, 65, 14], [45, 25, 201]],
@@ -608,7 +608,7 @@ fn test_proj_run_call_ask_tell() {
             [0.4, [17, -95, 23], [74, 65, 14], [45, 25, 201]],
             [0.4, [17, -95, 23], [41, 35, 65], [45, 25, 201]],
             [0.4, [17, -95, 23], [41, 35, 65], [-108, 105, 356]],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 0.1, "res");
     });
 }
@@ -630,7 +630,7 @@ fn test_proj_custom_events() {
         let global_context = proj.get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
             ["here 1"],
             ["here 2"],
             ["here 5", 34, 12, 22],
@@ -641,7 +641,7 @@ fn test_proj_custom_events() {
             ["here 2"],
             ["here 1"],
             ["here 2"],
-        ])).unwrap();
+        ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 0.1, "res");
     });
 }
@@ -697,8 +697,8 @@ fn test_proj_wait_until() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        assert_values_eq(&global_context.globals.lookup("mark").unwrap().get(), &Value::from_json(mc, json!(64)).unwrap(), 1e-20, "after wait value");
-        assert_values_eq(&global_context.globals.lookup("counter").unwrap().get(), &Value::from_json(mc, json!(128)).unwrap(), 1e-20, "final counter value");
+        assert_values_eq(&global_context.globals.lookup("mark").unwrap().get(), &Value::from_simple(mc, SimpleValue::from_json(json!(64)).unwrap()), 1e-20, "after wait value");
+        assert_values_eq(&global_context.globals.lookup("counter").unwrap().get(), &Value::from_simple(mc, SimpleValue::from_json(json!(128)).unwrap()), 1e-20, "final counter value");
     });
 }
 
@@ -711,7 +711,7 @@ fn test_proj_nested_lists_consts() {
         let global_context = proj.proj.borrow().get_global_context();
         let global_context = global_context.borrow();
 
-        let expected = Value::from_json(mc, json!([ "a", "b", ["c", "d", ["e", "f", "g"], "h"], "i", "j" ])).unwrap();
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([ "a", "b", ["c", "d", ["e", "f", "g"], "h"], "i", "j" ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("abc").unwrap().get(), &expected, 1e-20, "nested lists consts");
     });
 }

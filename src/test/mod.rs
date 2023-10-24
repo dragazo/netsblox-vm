@@ -6,7 +6,6 @@ use core::iter;
 use crate::runtime::*;
 use crate::process::*;
 use crate::std_system::*;
-use crate::json::*;
 use crate::gc::*;
 
 mod process;
@@ -56,36 +55,15 @@ fn default_properties_config() -> Config<C, StdSystem<C>> {
     }
 }
 
-enum Intermediate {
-    Json(Json),
-    Image(Vec<u8>),
-    Audio(Vec<u8>),
-}
-impl IntermediateType for Intermediate {
-    fn from_json(json: Json) -> Self {
-        Self::Json(json)
-    }
-    fn from_image(img: Vec<u8>) -> Self {
-        Self::Image(img)
-    }
-    fn from_audio(audio: Vec<u8>) -> Self {
-        Self::Audio(audio)
-    }
-}
-
 struct C;
 impl CustomTypes<StdSystem<C>> for C {
     type NativeValue = NativeValue;
-    type Intermediate = Intermediate;
+    type Intermediate = SimpleValue;
 
     type EntityState = EntityState;
 
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Result<Value<'gc, C, StdSystem<C>>, ErrorCause<C, StdSystem<C>>> {
-        Ok(match value {
-            Intermediate::Json(x) => Value::from_json(mc, x)?,
-            Intermediate::Image(x) => Value::Image(Rc::new(x)),
-            Intermediate::Audio(x) => Value::Audio(Rc::new(x)),
-        })
+        Ok(Value::from_simple(mc, value))
     }
 }
 
