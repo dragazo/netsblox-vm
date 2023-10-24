@@ -289,11 +289,9 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
         context.role_id = first_role_id.to_owned();
         context.role_name = first_role_meta.get("name").unwrap().as_str().unwrap().to_owned();
 
-        let res = client.post(format!("{}/network/{}/state", context.base_url, context.client_id))
+        client.post(format!("{}/network/{}/state", context.base_url, context.client_id))
             .json(&json!({ "state": { "external": { "address": context.project_name, "appId": "vm" } } }))
-            .send().await.unwrap()
-            .text().await.unwrap();
-        assert!(res.starts_with(&format!("{}@{}", context.project_name, context.client_id)));
+            .send().await.unwrap();
 
         let context = Arc::new(context);
         let rpc_request_pipe = {
