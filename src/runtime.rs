@@ -621,6 +621,23 @@ pub trait Key<T> {
     fn complete(self, value: T);
 }
 
+/// An image type that can be used in the VM.
+#[derive(Debug, Clone)]
+pub struct Image {
+    /// The raw binary content of the image
+    pub content: Vec<u8>,
+    /// The center `(x, y)` of the image as used for NetsBlox sprites.
+    /// [`None`] is implied to represent `(w / 2, h / 2)` based on the true image size (size decoding cannot be done in no-std).
+    pub center: Option<(i32, i32)>
+}
+
+/// An audio clip type that can be used in the VM.
+#[derive(Debug, Clone)]
+pub struct Audio {
+    /// The raw binary content of the audio clip
+    pub content: Vec<u8>,
+}
+
 #[derive(Educe)]
 #[educe(Debug)]
 pub enum ToSimpleError<C: CustomTypes<S>, S: System<C>> {
@@ -645,14 +662,16 @@ pub enum SimpleValue {
     Bool(bool),
     Number(Number),
     String(String),
-    Image(Vec<u8>),
-    Audio(Vec<u8>),
+    Image(Image),
+    Audio(Audio),
     List(Vec<SimpleValue>),
 }
 
 impl From<bool> for SimpleValue { fn from(x: bool) -> Self { Self::Bool(x) } }
 impl From<Number> for SimpleValue { fn from(x: Number) -> Self { Self::Number(x) } }
 impl From<String> for SimpleValue { fn from(x: String) -> Self { Self::String(x) } }
+impl From<Image> for SimpleValue { fn from(x: Image) -> Self { Self::Image(x) } }
+impl From<Audio> for SimpleValue { fn from(x: Audio) -> Self { Self::Audio(x) } }
 impl From<Vec<SimpleValue>> for SimpleValue { fn from(x: Vec<SimpleValue>) -> Self { Self::List(x) } }
 
 impl SimpleValue {
@@ -692,9 +711,9 @@ pub enum Value<'gc, C: CustomTypes<S>, S: System<C>> {
     /// A primitive string value, which is an immutable reference type.
     String(#[collect(require_static)] Rc<String>),
     /// An image stored as a binary buffer.
-    Image(#[collect(require_static)] Rc<Vec<u8>>),
+    Image(#[collect(require_static)] Rc<Image>),
     /// An audio clip stored as as a binary buffer.
-    Audio(#[collect(require_static)] Rc<Vec<u8>>),
+    Audio(#[collect(require_static)] Rc<Audio>),
     /// A reference to a native object handle produced by [`System`].
     Native(#[collect(require_static)] Rc<C::NativeValue>),
     /// A primitive list type, which is a mutable reference type.
@@ -865,14 +884,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         })
     }
     /// Attempts to interpret this value as an image.
-    pub fn as_image(&self) -> Result<&Rc<Vec<u8>>, ConversionError<C, S>> {
+    pub fn as_image(&self) -> Result<&Rc<Image>, ConversionError<C, S>> {
         match self {
             Value::Image(x) => Ok(x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Image }),
         }
     }
     /// Attempts to interpret this value as an audio clip.
-    pub fn as_audio(&self) -> Result<&Rc<Vec<u8>>, ConversionError<C, S>> {
+    pub fn as_audio(&self) -> Result<&Rc<Audio>, ConversionError<C, S>> {
         match self {
             Value::Audio(x) => Ok(x),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Audio }),

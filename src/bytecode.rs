@@ -1069,7 +1069,7 @@ pub(crate) enum InitValue {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) enum RefValue {
     List(Vec<InitValue>),
-    Image(Vec<u8>),
+    Image(Vec<u8>, Option<(Number, Number)>),
     String(String),
 }
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
