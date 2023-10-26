@@ -123,9 +123,9 @@ async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client:
     }
 
     if content_type.contains("image/") {
-        Ok(SimpleValue::Image(res))
+        Ok(SimpleValue::Image(Image { content: res, center: None }))
     } else if content_type.contains("audio/") {
-        Ok(SimpleValue::Audio(res))
+        Ok(SimpleValue::Audio(Audio { content: res }))
     } else if let Some(x) = parse_json_slice::<Json>(&res).ok().and_then(|x| SimpleValue::from_json(x).ok()) {
         Ok(x)
     } else if let Ok(x) = String::from_utf8(res) {

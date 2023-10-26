@@ -1070,6 +1070,7 @@ pub(crate) enum InitValue {
 pub(crate) enum RefValue {
     List(Vec<InitValue>),
     Image(Vec<u8>, Option<(Number, Number)>),
+    Audio(Vec<u8>),
     String(String),
 }
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -1077,6 +1078,7 @@ pub(crate) struct EntityInitInfo {
     pub(crate) name: String,
     pub(crate) fields: Vec<(String, InitValue)>,
     pub(crate) costumes: Vec<(String, InitValue)>,
+    pub(crate) sounds: Vec<(String, InitValue)>,
     pub(crate) scripts: Vec<(Event, usize)>,
 
     pub(crate) visible: bool,
@@ -1284,6 +1286,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
                 self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Fixed(values.len()) }.into());
             }
             ast::Value::Image(_) => unreachable!(), // Snap! doesn't have image literals
+            ast::Value::Audio(_) => unreachable!(), // Snap! doesn't have audio literals
             ast::Value::Ref(_) => unreachable!(), // Snap! doesn't have reference literals
         }
         Ok(())
@@ -2262,11 +2265,12 @@ impl ByteCode {
         let mut refs = BTreeMap::new();
         let mut string_refs = BTreeMap::new();
         let mut image_refs = BTreeMap::new();
+        let mut audio_refs = BTreeMap::new();
 
         fn register_ref_values<'a>(value: &'a ast::Value, ref_values: &mut Vec<(Option<RefValue>, &'a ast::Value)>, refs: &mut BTreeMap<usize, usize>) {
             match value {
                 ast::Value::Bool(_) | ast::Value::Number(_) | ast::Value::Constant(_) => (), // non-ref types
-                ast::Value::Ref(_) | ast::Value::String(_) | ast::Value::Image(_) => (), // lazily link
+                ast::Value::Ref(_) | ast::Value::String(_) | ast::Value::Image(_) | ast::Value::Audio(_) => (), // lazily link
                 ast::Value::List(values, ref_id) => {
                     if let Some(ref_id) = ref_id {
                         refs.entry(ref_id.0).or_insert_with(|| {
@@ -2293,7 +2297,7 @@ impl ByteCode {
             }
         }
 
-        fn get_value<'a>(value: &'a ast::Value, ref_values: &mut Vec<(Option<RefValue>, &'a ast::Value)>, refs: &BTreeMap<usize, usize>, string_refs: &mut BTreeMap<&'a str, usize>, image_refs: &mut BTreeMap<*const Vec<u8>, usize>) -> Result<InitValue, CompileError<'a>> {
+        fn get_value<'a>(value: &'a ast::Value, ref_values: &mut Vec<(Option<RefValue>, &'a ast::Value)>, refs: &BTreeMap<usize, usize>, string_refs: &mut BTreeMap<&'a str, usize>, image_refs: &mut BTreeMap<*const (Vec<u8>, Option<(f64, f64)>), usize>, audio_refs: &mut BTreeMap<*const Vec<u8>, usize>) -> Result<InitValue, CompileError<'a>> {
             Ok(match value {
                 ast::Value::Bool(x) => InitValue::Bool(*x),
                 ast::Value::Number(x) => InitValue::Number(Number::new(*x)?),
@@ -2313,14 +2317,22 @@ impl ByteCode {
                     InitValue::Ref(idx)
                 }
                 ast::Value::Image(x) => {
+                    let center = x.1.map(|(x, y)| Ok::<_,NumberError>((Number::new(x)?, Number::new(y)?))).transpose()?;
                     let idx = *image_refs.entry(Rc::as_ptr(x)).or_insert_with(|| {
-                        ref_values.push((Some(RefValue::Image((**x).clone())), value));
+                        ref_values.push((Some(RefValue::Image(x.0.clone(), center)), value));
+                        ref_values.len() - 1
+                    });
+                    InitValue::Ref(idx)
+                }
+                ast::Value::Audio(x) => {
+                    let idx = *audio_refs.entry(Rc::as_ptr(x)).or_insert_with(|| {
+                        ref_values.push((Some(RefValue::Audio((**x).clone())), value));
                         ref_values.len() - 1
                     });
                     InitValue::Ref(idx)
                 }
                 ast::Value::List(values, ref_id) => {
-                    let res = RefValue::List(values.iter().map(|x| get_value(x, ref_values, refs, string_refs, image_refs)).collect::<Result<_,_>>()?);
+                    let res = RefValue::List(values.iter().map(|x| get_value(x, ref_values, refs, string_refs, image_refs, audio_refs)).collect::<Result<_,_>>()?);
                     match ref_id {
                         Some(ref_id) => {
                             let idx = *refs.get(&ref_id.0).ok_or(CompileError::UndefinedRef { value })?;
@@ -2345,7 +2357,7 @@ impl ByteCode {
         let mut entities = vec![];
 
         for global in role.globals.iter() {
-            globals.push((global.def.name.clone(), get_value(&global.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs)?));
+            globals.push((global.def.name.clone(), get_value(&global.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?));
         }
 
         for (entity, entity_info) in script_info.entities.iter() {
@@ -2353,6 +2365,7 @@ impl ByteCode {
             let mut fields = vec![];
             let mut scripts = vec![];
             let mut costumes = vec![];
+            let mut sounds = vec![];
 
             let visible = entity.visible;
             let active_costume = entity.active_costume;
@@ -2362,11 +2375,13 @@ impl ByteCode {
             let heading = Number::new(entity.heading.rem_euclid(360.0))?;
 
             for field in entity.fields.iter() {
-                fields.push((field.def.name.clone(), get_value(&field.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs)?));
+                fields.push((field.def.name.clone(), get_value(&field.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?));
             }
-
             for costume in entity.costumes.iter() {
-                costumes.push((costume.def.name.clone(), get_value(&costume.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs)?));
+                costumes.push((costume.def.name.clone(), get_value(&costume.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?));
+            }
+            for sound in entity.sounds.iter() {
+                sounds.push((sound.def.name.clone(), get_value(&sound.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?));
             }
 
             for (script, pos) in entity_info.scripts.iter().copied() {
@@ -2402,7 +2417,7 @@ impl ByteCode {
                 scripts.push((event, pos));
             }
 
-            entities.push(EntityInitInfo { name, fields, costumes, scripts, active_costume, pos, heading, size, visible, color });
+            entities.push(EntityInitInfo { name, fields, sounds, costumes, scripts, active_costume, pos, heading, size, visible, color });
         }
 
         let ref_values = ref_values.into_iter().map(|x| x.0.ok_or(CompileError::UndefinedRef { value: x.1 })).collect::<Result<_,_>>()?;

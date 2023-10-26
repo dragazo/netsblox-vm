@@ -1203,7 +1203,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     Value::Image(x) => Some(x),
                     Value::String(x) => match x.as_str() {
                         "" => None,
-                        x => match entity.costume_list.iter().find(|c| c.0 == x) {
+                        x => match entity.costume_list.iter().find(|&c| c.0 == x) {
                             Some(c) => Some(c.1.clone()),
                             None => return Err(ErrorCause::UndefinedCostume { name: x.into() }),
                         }
@@ -1237,6 +1237,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let target = target_cell.borrow();
                 let new_entity = Gc::new(mc, RefLock::new(Entity {
                     name: target.name.clone(),
+                    sound_list: target.sound_list.clone(),
                     costume_list: target.costume_list.clone(),
                     costume: target.costume.clone(),
                     state: C::EntityState::from(EntityKind::Clone { parent: &*target }),

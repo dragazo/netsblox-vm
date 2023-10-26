@@ -628,7 +628,7 @@ pub struct Image {
     pub content: Vec<u8>,
     /// The center `(x, y)` of the image as used for NetsBlox sprites.
     /// [`None`] is implied to represent `(w / 2, h / 2)` based on the true image size (size decoding cannot be done in no-std).
-    pub center: Option<(i32, i32)>
+    pub center: Option<(Number, Number)>
 }
 
 /// An audio clip type that can be used in the VM.
@@ -946,8 +946,9 @@ pub enum EntityKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
 #[collect(no_drop, bound = "")]
 pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub name: Rc<String>,
-    #[collect(require_static)] pub costume_list: Rc<Vec<(String, Rc<Vec<u8>>)>>,
-    #[collect(require_static)] pub costume: Option<Rc<Vec<u8>>>,
+    #[collect(require_static)] pub sound_list: Rc<Vec<(String, Rc<Audio>)>>,
+    #[collect(require_static)] pub costume_list: Rc<Vec<(String, Rc<Image>)>>,
+    #[collect(require_static)] pub costume: Option<Rc<Image>>,
     #[collect(require_static)] pub state: C::EntityState,
     #[collect(require_static)] pub alive: bool,
                                pub root: Option<Gc<'gc, RefLock<Entity<'gc, C, S>>>>,
@@ -1206,7 +1207,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
     pub fn from_init(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
         let allocated_refs = init_info.ref_values.iter().map(|ref_value| match ref_value {
             RefValue::String(value) => Value::String(Rc::new(value.clone())),
-            RefValue::Image(content) => Value::Image(Rc::new(content.clone())),
+            RefValue::Image(content, center) => Value::Image(Rc::new(Image {content: content.clone(), center: *center })),
+            RefValue::Audio(content) => Value::Audio(Rc::new(Audio { content: content.clone() })),
             RefValue::List(_) => Value::List(Gc::new(mc, Default::default())),
         }).collect::<Vec<_>>();
 
@@ -1220,7 +1222,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
 
         for (allocated_ref, ref_value) in iter::zip(&allocated_refs, &init_info.ref_values) {
             match ref_value {
-                RefValue::String(_) | RefValue::Image(_) => continue, // we already populated these values in the first pass
+                RefValue::String(_) | RefValue::Image(_, _) | RefValue::Audio(_) => continue, // we already populated these values in the first pass
                 RefValue::List(values) => {
                     let allocated_ref = match allocated_ref {
                         Value::List(x) => x,
@@ -1245,6 +1247,18 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             for (field, value) in entity_info.fields.iter() {
                 fields.define_or_redefine(field, Shared::Unique(get_value(value, &allocated_refs)));
             }
+
+            let sound_list = {
+                let mut res = Vec::with_capacity(entity_info.sounds.len());
+                for (name, value) in entity_info.sounds.iter() {
+                    let sound = match get_value(value, &allocated_refs) {
+                        Value::Audio(x) => x.clone(),
+                        _ => unreachable!(),
+                    };
+                    res.push((name.clone(), sound));
+                }
+                Rc::new(res)
+            };
 
             let costume_list = {
                 let mut res = Vec::with_capacity(entity_info.costumes.len());
@@ -1277,7 +1291,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             let name = Rc::new(entity_info.name.clone());
             let state = kind.into();
 
-            entities.insert(entity_info.name.clone(), Gc::new(mc, RefLock::new(Entity { alive: true, root: None, name, fields, costume_list, costume, state })));
+            entities.insert(entity_info.name.clone(), Gc::new(mc, RefLock::new(Entity { alive: true, root: None, name, fields, sound_list, costume_list, costume, state })));
         }
 
         let proj_name = init_info.proj_name.clone();
@@ -1473,7 +1487,7 @@ pub enum Command<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
 
     /// Sets the costume on the entity. This should essentially assigns the costume to [`Entity::costume`],
     /// but is treated as a system command so that custom code can be executed when an entity switches costumes.
-    SetCostume { costume: Option<Rc<Vec<u8>>> },
+    SetCostume { costume: Option<Rc<Image>> },
 
     /// Moves the entity to a specific location.
     GotoXY { x: Number, y: Number },
