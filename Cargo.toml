@@ -1,6 +1,6 @@
 [package]
 name = "netsblox-vm"
-version = "0.2.14"
+version = "0.2.15"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Devin Jean <emailcruzjean@yahoo.com>"]
@@ -73,7 +73,7 @@ gc-arena = { version = "=0.3.0", default-features = false }
 netsblox-ast = { version = "=0.4.2", default-features = false }
 # netsblox-ast = { path = "../netsblox-ast", default-features = false }
 num-traits = { version = "0.2.17", default-features = false }
-num-derive = { version = "0.3.3", default-features = false }
+num-derive = { version = "0.4.1", default-features = false }
 bin-pool = { version = "0.1.1", default-features = false }
 rand = { version = "0.8.5", default-features = false }
 checked-float = { version = "0.1.4", default-features = false, features = ["serde"] }
@@ -85,13 +85,13 @@ superslice = { version = "1.0", default-features = false }
 unicase = { version = "2.7.0", default-features = false }
 time = { version = "0.3.30", default-features = false }
 typed-arena = { version = "2.0.2", default-features = false }
-xmlparser = { version = "0.13.5", default-features = false }
-base64 = { version = "0.21.4", default-features = false, features = ["alloc"] }
+xmlparser = { version = "0.13.6", default-features = false }
+base64 = { version = "0.21.5", default-features = false, features = ["alloc"] }
 
 # std deps
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"], optional = true }
-futures = { version = "0.3.28", default-features = false, optional = true }
-async-channel = { version = "1.9.0", default-features = false, optional = true }
+futures = { version = "0.3.29", default-features = false, optional = true }
+async-channel = { version = "2.0.0", default-features = false, optional = true }
 reqwest = { version = "0.11", default-features = false, features = ["json"], optional = true }
 tokio-tungstenite = { version = "0.20.1", default-features = false, features = ["connect"], optional = true }
 names = { version = "0.14.0", default-features = false, optional = true }
@@ -100,8 +100,8 @@ rand_chacha = { version = "0.3.1", default-features = false, optional = true }
 getrandom = { version = "0.2.10", default-features = false, optional = true }
 
 # cli deps
-clap = { version = "4.4.6", features = ["derive"], optional = true }
-crossterm = { version = "0.26.1", default-features = false, optional = true }
+clap = { version = "4.4.7", features = ["derive"], optional = true }
+crossterm = { version = "0.27.0", default-features = false, optional = true, features = ["events"] }
 actix-web = { version = "4.4.0", default-features = false, features = ["macros"], optional = true }
 actix-cors = { version = "0.6.4", default-features = false, optional = true }
 
