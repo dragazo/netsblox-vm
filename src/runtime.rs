@@ -109,8 +109,12 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     ToSimpleError { error: ToSimpleError<C, S> },
     /// A failed attempt to convert a [`SimpleValue`] to [`Json`] for use outside the vm.
     IntoJsonError { error: IntoJsonError<C, S> },
+    /// A failed attempt to convert a [`SimpleValue`] to [`Json`] for use in NetsBlox.
+    IntoNetsBloxJsonError { error: IntoNetsBloxJsonError },
     /// A failed attempt to convert a [`Json`] value into a [`SimpleValue`] for use in the vm.
     FromJsonError { error: FromJsonError },
+    /// A failed attempt to convert a [`Json`] value from NetsBlox into a [`SimpleValue`] for use in the vm.
+    FromNetsBloxJsonError { error: FromNetsBloxJsonError },
     /// A numeric value took on an invalid value such as NaN.
     NumberError { error: NumberError },
     /// Attempt to use an unsupported feature.
@@ -121,9 +125,11 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     Custom { msg: String },
 }
 impl<C: CustomTypes<S>, S: System<C>> From<ConversionError<C, S>> for ErrorCause<C, S> { fn from(e: ConversionError<C, S>) -> Self { Self::ConversionError { got: e.got, expected: e.expected } } }
-impl<C: CustomTypes<S>, S: System<C>> From<IntoJsonError<C, S>> for ErrorCause<C, S> { fn from(error: IntoJsonError<C, S>) -> Self { Self::IntoJsonError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<ToSimpleError<C, S>> for ErrorCause<C, S> { fn from(error: ToSimpleError<C, S>) -> Self { Self::ToSimpleError { error } } }
+impl<C: CustomTypes<S>, S: System<C>> From<IntoJsonError<C, S>> for ErrorCause<C, S> { fn from(error: IntoJsonError<C, S>) -> Self { Self::IntoJsonError { error } } }
+impl<C: CustomTypes<S>, S: System<C>> From<IntoNetsBloxJsonError> for ErrorCause<C, S> { fn from(error: IntoNetsBloxJsonError) -> Self { Self::IntoNetsBloxJsonError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<FromJsonError> for ErrorCause<C, S> { fn from(error: FromJsonError) -> Self { Self::FromJsonError { error } } }
+impl<C: CustomTypes<S>, S: System<C>> From<FromNetsBloxJsonError> for ErrorCause<C, S> { fn from(error: FromNetsBloxJsonError) -> Self { Self::FromNetsBloxJsonError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<NumberError> for ErrorCause<C, S> { fn from(error: NumberError) -> Self { Self::NumberError { error } } }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -622,7 +628,7 @@ pub trait Key<T> {
 }
 
 /// An image type that can be used in the VM.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Image {
     /// The raw binary content of the image
     pub content: Vec<u8>,
@@ -632,12 +638,13 @@ pub struct Image {
 }
 
 /// An audio clip type that can be used in the VM.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Audio {
     /// The raw binary content of the audio clip
     pub content: Vec<u8>,
 }
 
+/// An error produced by [`Value::to_simple`]
 #[derive(Educe)]
 #[educe(Debug)]
 pub enum ToSimpleError<C: CustomTypes<S>, S: System<C>> {
@@ -645,19 +652,36 @@ pub enum ToSimpleError<C: CustomTypes<S>, S: System<C>> {
     ComplexType(Type<C, S>),
 }
 
+/// An error produced by [`SimpleValue::into_json`]
 #[derive(Educe)]
 #[educe(Debug)]
 pub enum IntoJsonError<C: CustomTypes<S>, S: System<C>> {
     BadNumber(Number),
     ComplexType(Type<C, S>),
 }
+/// An error produced by [`SimpleValue::from_json`]
 #[derive(Debug)]
 pub enum FromJsonError {
     Null,
     BadNumber(JsonNumber),
 }
 
-#[derive(Debug, Clone)]
+/// An error produced by [`SimpleValue::into_netsblox_json`]
+#[derive(Debug)]
+pub enum IntoNetsBloxJsonError {
+    BadNumber(Number),
+}
+/// An error produced by [`SimpleValue::from_netsblox_json`]
+#[derive(Debug)]
+pub enum FromNetsBloxJsonError {
+    Null,
+    BadNumber(JsonNumber),
+    BadImage,
+    BadAudio,
+}
+
+/// An acyclic and [`Send`] version of [`Value`]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimpleValue {
     Bool(bool),
     Number(Number),
@@ -675,6 +699,9 @@ impl From<Audio> for SimpleValue { fn from(x: Audio) -> Self { Self::Audio(x) } 
 impl From<Vec<SimpleValue>> for SimpleValue { fn from(x: Vec<SimpleValue>) -> Self { Self::List(x) } }
 
 impl SimpleValue {
+    /// Converts this [`SimpleValue`] into its equivalent JSON form.
+    /// Note that [`SimpleValue::Image`] and [`SimpleValue::Audio`] cannot be encoded as standard JSON;
+    /// for this, you may instead use [`SimpleValue::into_netsblox_json`].
     pub fn into_json<C: CustomTypes<S>, S: System<C>>(self) -> Result<Json, IntoJsonError<C, S>> {
         Ok(match self {
             SimpleValue::Bool(x) => Json::Bool(x),
@@ -685,6 +712,9 @@ impl SimpleValue {
             SimpleValue::Audio(_) => return Err(IntoJsonError::ComplexType(Type::Audio)),
         })
     }
+    /// Converts a JSON object into its equivalent [`SimpleValue`].
+    /// Note that [`SimpleValue::Image`] and [`SimpleValue::Audio`] cannot be decoded from standard JSON;
+    /// for this, you may instead use [`SimpleValue::from_netsblox_json`].
     pub fn from_json(value: Json) -> Result<Self, FromJsonError> {
         Ok(match value {
             Json::Null => return Err(FromJsonError::Null),
@@ -697,6 +727,112 @@ impl SimpleValue {
             }).collect::<Result<_,_>>()?),
         })
     }
+
+    /// Converts this [`SimpleValue`] into an encoded JSON equivalent suitable for communication with NetsBlox.
+    pub fn into_netsblox_json(self) -> Result<Json, IntoNetsBloxJsonError> {
+        Ok(match self {
+            SimpleValue::Bool(x) => Json::Bool(x),
+            SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).ok_or(IntoNetsBloxJsonError::BadNumber(x))?),
+            SimpleValue::String(x) => Json::String(x),
+            SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_netsblox_json).collect::<Result<_,_>>()?),
+            SimpleValue::Image(img) => {
+                let center_attrs = img.center.map(|(x, y)| format!(" center-x=\"{x}\" center-y=\"{y}\"")).unwrap_or_default();
+                Json::String(format!("<costume{center_attrs} image=\"data:image/png;base64,{}\" />", crate::util::base64_encode(&img.content)))
+            },
+            SimpleValue::Audio(audio) => Json::String(format!("<sound sound=\"data:audio/mpeg;base64,{}\" />", crate::util::base64_encode(&audio.content))),
+        })
+    }
+    /// Converts a JSON object returned from NetsBlox into its equivalent [`SimpleValue`] form.
+    pub fn from_netsblox_json(value: Json) -> Result<Self, FromNetsBloxJsonError> {
+        Ok(match value {
+            Json::Null => return Err(FromNetsBloxJsonError::Null),
+            Json::Bool(x) => SimpleValue::Bool(x),
+            Json::Number(x) => SimpleValue::Number(x.as_f64().and_then(|x| Number::new(x).ok()).ok_or(FromNetsBloxJsonError::BadNumber(x))?),
+            Json::Array(x) => SimpleValue::List(x.into_iter().map(SimpleValue::from_netsblox_json).collect::<Result<_,_>>()?),
+            Json::Object(x) => SimpleValue::List(x.into_iter().map(|(k, v)| {
+                Ok(SimpleValue::List(vec![SimpleValue::String(k), SimpleValue::from_netsblox_json(v)?]))
+            }).collect::<Result<_,_>>()?),
+            Json::String(x) => {
+                let mut tokenizer = xmlparser::Tokenizer::from(x.as_str());
+                match tokenizer.next() {
+                    Some(Ok(xmlparser::Token::ElementStart { local, .. })) => match local.as_str() {
+                        "costume" => {
+                            let mut center_x = None;
+                            let mut center_y = None;
+                            let mut content = None;
+                            loop {
+                                match tokenizer.next() {
+                                    Some(Ok(xmlparser::Token::Attribute { local, value, .. })) => match local.as_str() {
+                                        "center-x" => center_x = Some(value.as_str().parse().ok().and_then(|x| Number::new(x).ok()).ok_or(FromNetsBloxJsonError::BadImage)?),
+                                        "center-y" => center_y = Some(value.as_str().parse().ok().and_then(|y| Number::new(y).ok()).ok_or(FromNetsBloxJsonError::BadImage)?),
+                                        "image" => match value.as_str().split(";base64,").nth(1) {
+                                            Some(raw) if value.as_str().starts_with("data:image/") => content = Some(crate::util::base64_decode(raw).map_err(|_| FromNetsBloxJsonError::BadImage)?),
+                                            _ => return Err(FromNetsBloxJsonError::BadImage),
+                                        }
+                                        _ => (),
+                                    }
+                                    Some(Ok(xmlparser::Token::ElementEnd { .. })) => match content {
+                                        Some(content) => return Ok(SimpleValue::Image(Image { content, center: center_x.zip(center_y) })),
+                                        None => return Ok(SimpleValue::String(x)),
+                                    }
+                                    Some(Ok(_)) => (),
+                                    None | Some(Err(_)) => return Ok(SimpleValue::String(x)),
+                                }
+                            }
+                        }
+                        "sound" => {
+                            let mut content = None;
+                            loop {
+                                match tokenizer.next() {
+                                    Some(Ok(xmlparser::Token::Attribute { local, value, .. })) => match local.as_str() {
+                                        "sound" => match value.as_str().split(";base64,").nth(1) {
+                                            Some(raw) if value.as_str().starts_with("data:audio/") => content = Some(crate::util::base64_decode(raw).map_err(|_| FromNetsBloxJsonError::BadAudio)?),
+                                            _ => return Err(FromNetsBloxJsonError::BadAudio),
+                                        }
+                                        _ => (),
+                                    }
+                                    Some(Ok(xmlparser::Token::ElementEnd { .. })) => match content {
+                                        Some(content) => return Ok(SimpleValue::Audio(Audio { content })),
+                                        None => return Ok(SimpleValue::String(x)),
+                                    }
+                                    Some(Ok(_)) => (),
+                                    None | Some(Err(_)) => return Ok(SimpleValue::String(x)),
+                                }
+                            }
+                        }
+                        _ => SimpleValue::String(x),
+                    }
+                    _ => SimpleValue::String(x),
+                }
+            }
+        })
+    }
+}
+
+#[test]
+fn test_netsblox_json() {
+    let val = SimpleValue::List(vec![
+        SimpleValue::Bool(false),
+        SimpleValue::Bool(true),
+        SimpleValue::Number(Number::new(0.0).unwrap()),
+        SimpleValue::Number(Number::new(12.5).unwrap()),
+        SimpleValue::Number(Number::new(-6.0).unwrap()),
+        SimpleValue::String("".into()),
+        SimpleValue::String("hello world".into()),
+        SimpleValue::String("<sound>".into()),
+        SimpleValue::String("<sound/>".into()),
+        SimpleValue::String("<sound />".into()),
+        SimpleValue::String("<costume>".into()),
+        SimpleValue::String("<costume/>".into()),
+        SimpleValue::String("<costume />".into()),
+        SimpleValue::Image(Image { content: vec![], center: None }),
+        SimpleValue::Image(Image { content: vec![], center: Some((Number::new(0.0).unwrap(), Number::new(4.5).unwrap())) }),
+        SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128], center: None }),
+        SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128, 6, 9], center: Some((Number::new(12.5).unwrap(), Number::new(-54.0).unwrap())) }),
+    ]);
+    let js = val.clone().into_netsblox_json().unwrap();
+    let back = SimpleValue::from_netsblox_json(js).unwrap();
+    assert_eq!(val, back);
 }
 
 /// Any primitive value.
@@ -800,6 +936,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<VecDeque<Value<'
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<Closure<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<Closure<'gc, C, S>>>) -> Self { Value::Closure(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<Entity<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<Entity<'gc, C, S>>>) -> Self { Value::Entity(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
+    /// Converts this [`Value`] into a [`SimpleValue`] for use outside the VM.
     pub fn to_simple(&self) -> Result<SimpleValue, ToSimpleError<C, S>> {
         fn simplify<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>, cache: &mut BTreeSet<Identity<'gc, C, S>>) -> Result<SimpleValue, ToSimpleError<C, S>> {
             Ok(match value {
@@ -824,6 +961,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         if res.is_ok() { debug_assert_eq!(cache.len(), 0); }
         res
     }
+    /// Converts a [`SimpleValue`] into a [`Value`] for use inside the VM.
     pub fn from_simple(mc: &Mutation<'gc>, value: SimpleValue) -> Self {
         match value {
             SimpleValue::Bool(x) => Value::Bool(x),

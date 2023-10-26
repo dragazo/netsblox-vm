@@ -6,7 +6,6 @@ use alloc::rc::Rc;
 
 use crate::*;
 use crate::gc::*;
-use crate::json::*;
 use crate::slotmap::*;
 use crate::runtime::*;
 use crate::bytecode::*;
@@ -70,7 +69,7 @@ pub enum Input {
     /// Trigger the execution of a custom event (hat) block script with the given set of message-style input variables.
     /// The `interrupt` flag can be set to cause any running scripts to stop and wipe their current queues, placing this new execution front and center.
     /// The `max_queue` field controls the maximum size of the context/schedule execution queue; beyond this size, this (and only this) execution will be dropped.
-    CustomEvent { name: String, args: BTreeMap<String, Json>, interrupt: bool, max_queue: usize },
+    CustomEvent { name: String, args: BTreeMap<String, SimpleValue>, interrupt: bool, max_queue: usize },
 }
 
 /// Result of stepping through the execution of a [`Project`].
@@ -236,9 +235,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
 
                         let mut locals = SymbolTable::default();
                         for field in fields.iter() {
-                            locals.define_or_redefine(field,
-                                args.get(field).and_then(|x| SimpleValue::from_json(x.clone()).ok().map(|x| Value::from_simple(mc, x)))
-                                .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
+                            let value = args.get(field).map(|x| Value::from_simple(mc, x.clone())).unwrap_or_else(|| Number::new(0.0).unwrap().into());
+                            locals.define_or_redefine(field, value.into());
                         }
 
                         all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
@@ -279,9 +277,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
 
                     let mut locals = SymbolTable::default();
                     for field in fields.iter() {
-                        locals.define_or_redefine(field,
-                            values.get(field).and_then(|x| SimpleValue::from_json(x.clone()).ok().map(|x| Value::from_simple(mc, x)))
-                            .unwrap_or_else(|| Number::new(0.0).unwrap().into()).into());
+                        let value = values.get(field).and_then(|x| SimpleValue::from_netsblox_json(x.clone()).ok().map(|x| Value::from_simple(mc, x))).unwrap_or_else(|| Number::new(0.0).unwrap().into());
+                        locals.define_or_redefine(field, value.into());
                     }
 
                     all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future

@@ -1,4 +1,8 @@
 use alloc::string::String;
+use alloc::vec::Vec;
+
+use base64::engine::Engine as Base64Engine;
+use base64::DecodeError as Base64DecodeError;
 
 pub struct LosslessJoin {
     content: String,
@@ -44,4 +48,11 @@ fn test_lossless_split() {
     assert_round_trip(&["test", "", "merp"], "\0test\0\0merp");
     assert_round_trip(&["test", "", "merp", ""], "\0test\0\0merp\0");
     assert_round_trip(&["", "test", "", "merp", ""], "\0\0test\0\0merp\0");
+}
+
+pub fn base64_encode(content: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(content)
+}
+pub fn base64_decode(content: &str) -> Result<Vec<u8>, Base64DecodeError> {
+    base64::engine::general_purpose::STANDARD.decode(content)
 }

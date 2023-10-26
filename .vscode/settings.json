@@ -47,6 +47,7 @@
         "unicase",
         "upvar",
         "upvars",
-        "varargs"
+        "varargs",
+        "xmlparser"
     ]
 }

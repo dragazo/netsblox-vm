@@ -126,7 +126,7 @@ async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client:
         Ok(SimpleValue::Image(Image { content: res, center: None }))
     } else if content_type.contains("audio/") {
         Ok(SimpleValue::Audio(Audio { content: res }))
-    } else if let Some(x) = parse_json_slice::<Json>(&res).ok().and_then(|x| SimpleValue::from_json(x).ok()) {
+    } else if let Some(x) = parse_json_slice::<Json>(&res).ok().and_then(|x| SimpleValue::from_netsblox_json(x).ok()) {
         Ok(x)
     } else if let Ok(x) = String::from_utf8(res) {
         Ok(SimpleValue::String(x))
@@ -326,7 +326,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                             RequestStatus::Handled
                         }
                         _ => {
-                            match args.into_iter().map(|(k, v)| Ok((k, v.to_simple()?.into_json()?))).collect::<Result<_,ErrorCause<_,_>>>() {
+                            match args.into_iter().map(|(k, v)| Ok((k, v.to_simple()?.into_netsblox_json()?))).collect::<Result<_,ErrorCause<_,_>>>() {
                                 Ok(args) => system.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap(),
                                 Err(err) => key.complete(Err(format!("failed to convert RPC args to json: {err:?}"))),
                             }
