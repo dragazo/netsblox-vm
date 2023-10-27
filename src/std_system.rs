@@ -103,7 +103,7 @@ async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client:
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
     let url = format!("{services_url}/{service}/{rpc}?clientId={client_id}&t={time}",
         services_url = context.services_url, client_id = context.client_id);
-    let args: BTreeMap<&str, &Json> = args.iter().copied().collect();
+    let args = args.iter().copied().collect::<BTreeMap<_,_>>();
 
     let res = match client.post(url).json(&args).send().await {
         Ok(x) => x,
@@ -126,8 +126,8 @@ async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client:
         Ok(SimpleValue::Image(Image { content: res, center: None }))
     } else if content_type.contains("audio/") {
         Ok(SimpleValue::Audio(Audio { content: res }))
-    } else if let Some(x) = parse_json_slice::<Json>(&res).ok().and_then(|x| SimpleValue::from_netsblox_json(x).ok()) {
-        Ok(x)
+    } else if let Some(x) = parse_json_slice::<Json>(&res).ok() {
+        SimpleValue::from_netsblox_json(x).map_err(|e| format!("Received ill-formed success value: {e:?}"))
     } else if let Ok(x) = String::from_utf8(res) {
         Ok(SimpleValue::String(x))
     } else {
@@ -231,7 +231,8 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                                             }
                                             false => None,
                                         };
-                                        in_sender.send(IncomingMessage { msg_type, values: values.into_iter().collect(), reply_key }).unwrap();
+                                        let values = values.into_iter().filter_map(|(k, v)| SimpleValue::from_netsblox_json(v).ok().map(|v| (k, v))).collect();
+                                        in_sender.send(IncomingMessage { msg_type, values, reply_key }).unwrap();
                                     }
                                 }
                                 _ => (),
@@ -359,7 +360,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     }
 
     /// Injects a message into the receiving queue as if received over the network.
-    pub fn inject_message(&self, msg_type: String, values: Vec<(String, Json)>) {
+    pub fn inject_message(&self, msg_type: String, values: Vec<(String, SimpleValue)>) {
         self.message_injector.send(IncomingMessage { msg_type, values, reply_key: None }).unwrap();
     }
 }

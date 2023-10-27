@@ -277,7 +277,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
 
                     let mut locals = SymbolTable::default();
                     for field in fields.iter() {
-                        let value = values.get(field).and_then(|x| SimpleValue::from_netsblox_json(x.clone()).ok().map(|x| Value::from_simple(mc, x))).unwrap_or_else(|| Number::new(0.0).unwrap().into());
+                        let value = values.get(field).map(|x| Value::from_simple(mc, x.clone())).unwrap_or_else(|| Number::new(0.0).unwrap().into());
                         locals.define_or_redefine(field, value.into());
                     }
 

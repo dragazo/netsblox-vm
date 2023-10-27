@@ -1458,7 +1458,7 @@ pub enum OutgoingMessage<C: CustomTypes<S>, S: System<C>> {
 }
 pub struct IncomingMessage<C: CustomTypes<S>, S: System<C>> {
     pub msg_type: String,
-    pub values: Vec<(String, Json)>,
+    pub values: Vec<(String, SimpleValue)>,
     pub reply_key: Option<S::InternReplyKey>,
 }
 
