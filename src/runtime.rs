@@ -1487,15 +1487,6 @@ impl BarrierCondition {
     }
 }
 
-/// The result of an operation that might be synchronous or asynchronous.
-pub enum MaybeAsync<T, K> {
-    /// A synchronous result with a return value of type `T`.
-    Sync(T),
-    /// An asynchronous result with the given async key type `K`,
-    /// which is expected to be usable to later obtain an [`AsyncResult<T>`].
-    Async(K),
-}
-
 /// The result of a successful call to an async poller operation such as in [`System`].
 pub enum AsyncResult<T> {
     /// The async operation is still pending and has not completed.
@@ -1810,7 +1801,7 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Performs a general request which returns a value to the system.
     /// Ideally, this function should be non-blocking, and the requestor will await the result asynchronously.
     /// The [`Entity`] that made the request is provided for context.
-    fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<Value<'gc, C, Self>, String>, Self::RequestKey>, ErrorCause<C, Self>>;
+    fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<Self::RequestKey, ErrorCause<C, Self>>;
     /// Poll for the completion of an asynchronous request.
     /// The [`Entity`] that made the request is provided for context.
     fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, entity: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>>;
@@ -1818,7 +1809,7 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Performs a general command which does not return a value to the system.
     /// Ideally, this function should be non-blocking, and the commander will await the task's completion asynchronously.
     /// The [`Entity`] that issued the command is provided for context.
-    fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>>;
+    fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<Self::CommandKey, ErrorCause<C, Self>>;
     /// Poll for the completion of an asynchronous command.
     /// The [`Entity`] that issued the command is provided for context.
     fn poll_command<'gc>(&self, mc: &Mutation<'gc>, key: &Self::CommandKey, entity: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>>;

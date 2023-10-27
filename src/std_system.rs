@@ -379,12 +379,12 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         SysTime::Real { local: OffsetDateTime::now_utc().to_offset(self.utc_offset) }
     }
 
-    fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<Value<'gc, C, Self>, String>, Self::RequestKey>, ErrorCause<C, Self>> {
+    fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<Self::RequestKey, ErrorCause<C, Self>> {
         Ok(match self.config.request.as_ref() {
             Some(handler) => {
                 let key = RequestKey(Arc::new(Mutex::new(AsyncResult::new())));
                 match handler(self, mc, RequestKey(key.0.clone()), request, entity) {
-                    RequestStatus::Handled => MaybeAsync::Async(key),
+                    RequestStatus::Handled => key,
                     RequestStatus::UseDefault { key: _, request } => return Err(ErrorCause::NotSupported { feature: request.feature() }),
                 }
             }
@@ -400,12 +400,12 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         })
     }
 
-    fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<MaybeAsync<Result<(), String>, Self::CommandKey>, ErrorCause<C, Self>> {
+    fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<Self::CommandKey, ErrorCause<C, Self>> {
         Ok(match self.config.command.as_ref() {
             Some(handler) => {
                 let key = CommandKey(Arc::new(Mutex::new(AsyncResult::new())));
                 match handler(self, mc, CommandKey(key.0.clone()), command, entity) {
-                    CommandStatus::Handled => MaybeAsync::Async(key),
+                    CommandStatus::Handled => key,
                     CommandStatus::UseDefault { key: _, command } => return Err(ErrorCause::NotSupported { feature: command.feature() }),
                 }
             }

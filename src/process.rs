@@ -351,31 +351,19 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Ok(())
         }
 
-        macro_rules! process_command {
-            ($res:ident, $aft_pos:expr) => {{
-                process_result($res, ErrorScheme::Hard, None, None, None, |_: ()| None)?;
-                self.pos = $aft_pos;
-            }}
-        }
-        macro_rules! process_request {
-            ($res:ident, $action:expr, $aft_pos:expr) => {{
-                match $action {
-                    RequestAction::Syscall => process_result($res, global_context.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_syscall_error), Some)?,
-                    RequestAction::Rpc => process_result($res, global_context.settings.rpc_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?,
-                    RequestAction::Input => process_result($res, ErrorScheme::Hard, None, Some(&mut self.last_answer), None, Some)?,
-                    RequestAction::Push => process_result($res, ErrorScheme::Hard, Some(&mut self.value_stack), None, None, Some)?,
-                }
-                self.pos = $aft_pos;
-            }}
-        }
-
         let context_entity = self.call_stack.last().unwrap().entity;
 
         match &self.defer {
             None => (),
             Some(Defer::Request { key, aft_pos, action }) => match global_context.system.poll_request(mc, key, &mut *context_entity.borrow_mut(mc))? {
                 AsyncResult::Completed(x) => {
-                    process_request!(x, action, *aft_pos);
+                    match action {
+                        RequestAction::Syscall => process_result(x, global_context.settings.syscall_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_syscall_error), Some)?,
+                        RequestAction::Rpc => process_result(x, global_context.settings.rpc_error_scheme, Some(&mut self.value_stack), None, Some(&mut self.last_rpc_error), Some)?,
+                        RequestAction::Input => process_result(x, ErrorScheme::Hard, None, Some(&mut self.last_answer), None, Some)?,
+                        RequestAction::Push => process_result(x, ErrorScheme::Hard, Some(&mut self.value_stack), None, None, Some)?,
+                    }
+                    self.pos = *aft_pos;
                     self.defer = None;
                 }
                 AsyncResult::Pending => return Ok(ProcessStep::Yield),
@@ -383,7 +371,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Some(Defer::Command { key, aft_pos }) => match global_context.system.poll_command(mc, key, &mut *context_entity.borrow_mut(mc))? {
                 AsyncResult::Completed(x) => {
-                    process_command!(x, *aft_pos);
+                    process_result(x, ErrorScheme::Hard, None, None, None, |_| None)?;
+                    self.pos = *aft_pos;
                     self.defer = None;
                 }
                 AsyncResult::Pending => return Ok(ProcessStep::Yield),
@@ -437,23 +426,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }};
             ($var:expr) => {lookup_var!($var => lookup)};
             (mut $var:expr) => {lookup_var!($var => lookup_mut)};
-        }
-
-        macro_rules! perform_command {
-            ($command:expr, $aft_pos:expr) => {{
-                match global_context.system.perform_command(mc, $command, &mut *entity)? {
-                    MaybeAsync::Async(key) => self.defer = Some(Defer::Command { key, aft_pos: $aft_pos }),
-                    MaybeAsync::Sync(res) => process_command!(res, $aft_pos),
-                }
-            }}
-        }
-        macro_rules! perform_request {
-            ($request:expr, $action:expr, $aft_pos:expr) => {{
-                match global_context.system.perform_request(mc, $request, &mut *entity)? {
-                    MaybeAsync::Async(key) => self.defer = Some(Defer::Request { key, aft_pos: $aft_pos, action: $action }),
-                    MaybeAsync::Sync(res) => process_request!(res, $action, $aft_pos),
-                }
-            }}
         }
 
         fn prep_call_closure<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, value_stack: &mut Vec<Value<'gc, C, S>>, args: usize) -> Result<(usize, SymbolTable<'gc, C, S>), ErrorCause<C, S>> {
@@ -1044,7 +1016,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let arg_count = arg_names.len();
                 let args = iter::zip(arg_names, self.value_stack.drain(self.value_stack.len() - arg_count..)).collect();
 
-                perform_request!(Request::Rpc { service, rpc, args }, RequestAction::Rpc, aft_pos);
+                self.defer = Some(Defer::Request {
+                    key: global_context.system.perform_request(mc, Request::Rpc { service, rpc, args }, &mut *entity)?,
+                    action: RequestAction::Rpc,
+                    aft_pos
+                });
             }
             Instruction::PushRpcError => {
                 self.value_stack.push(self.last_rpc_error.clone().unwrap_or_else(|| empty_string().into()));
@@ -1059,7 +1035,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.borrow().iter().cloned().collect(),
                 };
                 let name = self.value_stack.pop().unwrap().as_string()?.into_owned();
-                perform_request!(Request::Syscall { name, args }, RequestAction::Syscall, aft_pos);
+
+                self.defer = Some(Defer::Request {
+                    key: global_context.system.perform_request(mc, Request::Syscall { name, args }, &mut *entity)?,
+                    action: RequestAction::Syscall,
+                    aft_pos
+                });
             }
             Instruction::PushSyscallError => {
                 self.value_stack.push(self.last_syscall_error.clone().unwrap_or_else(|| empty_string().into()));
@@ -1094,12 +1075,20 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::Print { style } => {
                 let value = self.value_stack.pop().unwrap();
                 let is_empty = match &value { Value::String(x) => x.is_empty(), _ => false };
-                perform_command!(Command::Print { style, value: if is_empty { None } else { Some(value) } }, aft_pos);
+                self.defer = Some(Defer::Command {
+                    key: global_context.system.perform_command(mc, Command::Print { style, value: if is_empty { None } else { Some(value) } }, &mut *entity)?,
+                    aft_pos,
+                });
             }
             Instruction::Ask => {
                 let prompt = self.value_stack.pop().unwrap();
                 let is_empty = match &prompt { Value::String(x) => x.is_empty(), _ => false };
-                perform_request!(Request::Input { prompt: if is_empty { None } else { Some(prompt) } }, RequestAction::Input, aft_pos);
+
+                self.defer = Some(Defer::Request {
+                    key: global_context.system.perform_request(mc, Request::Input { prompt: if is_empty { None } else { Some(prompt) } }, &mut *entity)?,
+                    action: RequestAction::Input,
+                    aft_pos
+                });
             }
             Instruction::PushAnswer => {
                 self.value_stack.push(self.last_answer.clone().unwrap_or_else(|| empty_string().into()));
@@ -1175,15 +1164,25 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::PushProperty { prop } => {
-                perform_request!(Request::Property { prop }, RequestAction::Push, aft_pos);
+                self.defer = Some(Defer::Request {
+                    key: global_context.system.perform_request(mc, Request::Property { prop }, &mut *entity)?,
+                    action: RequestAction::Push,
+                    aft_pos
+                });
             }
             Instruction::SetProperty { prop } => {
                 let value = self.value_stack.pop().unwrap();
-                perform_command!(Command::SetProperty { prop, value }, aft_pos);
+                self.defer = Some(Defer::Command {
+                    key: global_context.system.perform_command(mc, Command::SetProperty { prop, value }, &mut *entity)?,
+                    aft_pos,
+                });
             }
             Instruction::ChangeProperty { prop } => {
                 let delta = self.value_stack.pop().unwrap();
-                perform_command!(Command::ChangeProperty { prop, delta }, aft_pos);
+                self.defer = Some(Defer::Command {
+                    key: global_context.system.perform_command(mc, Command::ChangeProperty { prop, delta }, &mut *entity)?,
+                    aft_pos,
+                });
             }
             Instruction::PushCostume => {
                 self.value_stack.push(entity.costume.clone().map(|x| Value::Image(x)).unwrap_or_else(|| Value::String(empty_string())));
@@ -1212,7 +1211,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 };
 
                 if new_costume.as_ref().map(Rc::as_ptr) != entity.costume.as_ref().map(Rc::as_ptr) {
-                    perform_command!(Command::SetCostume { costume: new_costume }, aft_pos);
+                    self.defer = Some(Defer::Command {
+                        key: global_context.system.perform_command(mc, Command::SetCostume { costume: new_costume }, &mut *entity)?,
+                        aft_pos,
+                    });
                 } else {
                     self.pos = aft_pos;
                 }
@@ -1223,7 +1225,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                         let new_costume = Some(entity.costume_list[(idx + 1) % entity.costume_list.len()].1.clone());
 
                         if new_costume.as_ref().map(Rc::as_ptr) != entity.costume.as_ref().map(Rc::as_ptr) {
-                            perform_command!(Command::SetCostume { costume: new_costume }, aft_pos);
+                            self.defer = Some(Defer::Command {
+                                key: global_context.system.perform_command(mc, Command::SetCostume { costume: new_costume }, &mut *entity)?,
+                                aft_pos,
+                            });
                         } else {
                             self.pos = aft_pos;
                         }
@@ -1250,54 +1255,85 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 return Ok(ProcessStep::CreatedClone { new_entity });
             }
             Instruction::ClearEffects => {
-                perform_command!(Command::ClearEffects, aft_pos);
+                self.defer = Some(Defer::Command {
+                    key: global_context.system.perform_command(mc, Command::ClearEffects, &mut *entity)?,
+                    aft_pos,
+                });
             }
             Instruction::ClearDrawings => {
-                perform_command!(Command::ClearDrawings, aft_pos);
+                self.defer = Some(Defer::Command {
+                    key: global_context.system.perform_command(mc, Command::ClearDrawings, &mut *entity)?,
+                    aft_pos,
+                });
             }
             Instruction::GotoXY => {
                 let y = self.value_stack.pop().unwrap().as_number()?;
                 let x = self.value_stack.pop().unwrap().as_number()?;
-                perform_command!(Command::GotoXY { x, y }, aft_pos);
+                self.defer = Some(Defer::Command {
+                    key: global_context.system.perform_command(mc, Command::GotoXY { x, y }, &mut *entity)?,
+                    aft_pos,
+                });
             }
             Instruction::Goto => match self.value_stack.pop().unwrap() {
                 Value::List(target) => {
                     let target = target.borrow();
                     if target.len() != 2 { return Err(ErrorCause::InvalidListLength { expected: 2, got: target.len() }); }
                     let (x, y) = (target[0].as_number()?, target[1].as_number()?);
-                    perform_command!(Command::GotoXY { x, y }, aft_pos);
+                    self.defer = Some(Defer::Command {
+                        key: global_context.system.perform_command(mc, Command::GotoXY { x, y }, &mut *entity)?,
+                        aft_pos,
+                    });
                 }
                 Value::Entity(target) => {
                     let target = target.borrow();
-                    perform_command!(Command::GotoEntity { target: &*target }, aft_pos);
+                    self.defer = Some(Defer::Command {
+                        key: global_context.system.perform_command(mc, Command::GotoEntity { target: &*target }, &mut *entity)?,
+                        aft_pos,
+                    });
                 }
                 target => return Err(ErrorCause::ConversionError { got: target.get_type(), expected: Type::Entity }),
             }
             Instruction::PointTowardsXY => {
                 let x = self.value_stack.pop().unwrap().as_number()?;
                 let y = self.value_stack.pop().unwrap().as_number()?;
-                perform_command!(Command::PointTowardsXY { x, y }, aft_pos);
+                self.defer = Some(Defer::Command {
+                    key: global_context.system.perform_command(mc, Command::PointTowardsXY { x, y }, &mut *entity)?,
+                    aft_pos,
+                });
             }
             Instruction::PointTowards => match self.value_stack.pop().unwrap() {
                 Value::List(target) => {
                     let target = target.borrow();
                     if target.len() != 2 { return Err(ErrorCause::InvalidListLength { expected: 2, got: target.len() }); }
                     let (x, y) = (target[0].as_number()?, target[1].as_number()?);
-                    perform_command!(Command::PointTowardsXY { x, y }, aft_pos);
+                    self.defer = Some(Defer::Command {
+                        key: global_context.system.perform_command(mc, Command::PointTowardsXY { x, y }, &mut *entity)?,
+                        aft_pos,
+                    });
                 }
                 Value::Entity(target) => {
                     let target = target.borrow();
-                    perform_command!(Command::PointTowardsEntity { target: &*target }, aft_pos);
+                    self.defer = Some(Defer::Command {
+                        key: global_context.system.perform_command(mc, Command::PointTowardsEntity { target: &*target }, &mut *entity)?,
+                        aft_pos,
+                    });
                 }
                 target => return Err(ErrorCause::ConversionError { got: target.get_type(), expected: Type::Entity }),
             }
             Instruction::Forward => {
                 let distance = self.value_stack.pop().unwrap().as_number()?;
-                perform_command!(Command::Forward { distance }, aft_pos);
+                self.defer = Some(Defer::Command {
+                    key: global_context.system.perform_command(mc, Command::Forward { distance }, &mut *entity)?,
+                    aft_pos,
+                });
             }
             Instruction::UnknownBlock { name, args } => {
                 let args = self.value_stack.drain(self.value_stack.len() - args..).collect();
-                perform_request!(Request::UnknownBlock { name: name.into(), args }, RequestAction::Push, aft_pos);
+                self.defer = Some(Defer::Request {
+                    key: global_context.system.perform_request(mc, Request::UnknownBlock { name: name.into(), args }, &mut *entity)?,
+                    action: RequestAction::Push,
+                    aft_pos
+                });
             }
         }
 
