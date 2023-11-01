@@ -1002,6 +1002,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         match self {
             Value::Number(x) => Ok(*x),
             Value::String(x) => {
+                let x = x.trim();
                 let parsed = match x.get(..2) {
                     Some("0x" | "0X") => i64::from_str_radix(&x[2..], 16).ok().map(|x| x as f64),
                     Some("0o" | "0O") => i64::from_str_radix(&x[2..], 8).ok().map(|x| x as f64),

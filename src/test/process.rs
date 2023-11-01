@@ -1433,6 +1433,27 @@ fn test_proc_list_lines() {
 }
 
 #[test]
+fn test_proc_whitespace_in_numbers() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/whitespace-in-numbers.xml"),
+        methods = "",
+    ), Settings::default(), system);
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
+            [12, 32, 14],
+            [18, 50, 20],
+            [10, 26, 12],
+            [9, 11, 27],
+        ])).unwrap());
+        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "ws in nums");
+    });
+}
+
+#[test]
 fn test_proc_binary_make_range() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), UtcOffset::UTC));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
