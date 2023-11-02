@@ -1448,6 +1448,10 @@ fn test_proc_whitespace_in_numbers() {
             [18, 50, 20],
             [10, 26, 12],
             [9, 11, 27],
+            [false, true, true, false, true, false, false],
+            [true, true, false, true, false, false, false],
+            [true, true, false, true, false, false, false],
+            [true, true, false, true, false, false, false],
         ])).unwrap());
         assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "ws in nums");
     });

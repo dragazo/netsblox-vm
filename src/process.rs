@@ -1776,24 +1776,20 @@ mod ops {
             None => { cache.insert(key, None); }
         }
 
-        fn parse_num(x: &str) -> Option<Number> {
-            x.parse::<f64>().ok().and_then(|x| Number::new(x).ok())
-        }
-
         let res = match (a, b) {
             (Value::Bool(a), Value::Bool(b)) => a.cmp(b).into(),
             (Value::Bool(_), _) | (_, Value::Bool(_)) => None,
 
             (Value::Number(a), Value::Number(b)) => a.cmp(b).into(),
-            (Value::String(a), Value::String(b)) => match parse_num(a).and_then(|a| parse_num(b).map(|b| (a, b))) {
+            (Value::String(a), Value::String(b)) => match Value::<C, S>::parse_number(a).and_then(|a| Value::<C, S>::parse_number(b).map(|b| (a, b))) {
                 Some((a, b)) => a.cmp(&b).into(),
                 None => UniCase::new(a.as_str()).cmp(&UniCase::new(b.as_str())).into(),
             }
-            (Value::Number(a), Value::String(b)) => match parse_num(b) {
+            (Value::Number(a), Value::String(b)) => match Value::<C, S>::parse_number(b) {
                 Some(b) => a.cmp(&b).into(),
                 None => UniCase::new(&a.to_string()).cmp(&UniCase::new(b.as_ref())).into(),
             }
-            (Value::String(a), Value::Number(b)) => match parse_num(a) {
+            (Value::String(a), Value::Number(b)) => match Value::<C, S>::parse_number(a) {
                 Some(a) => a.cmp(b).into(),
                 None => UniCase::new(a.as_ref()).cmp(&UniCase::new(&b.to_string())).into(),
             }

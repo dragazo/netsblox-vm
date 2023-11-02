@@ -997,20 +997,21 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
             x => return Err(ConversionError { got: x.get_type(), expected: Type::Bool }),
         })
     }
+    pub(crate) fn parse_number(s: &str) -> Option<Number> {
+        let s = s.trim();
+        let parsed = match s.get(..2) {
+            Some("0x" | "0X") => i64::from_str_radix(&s[2..], 16).ok().map(|x| x as f64),
+            Some("0o" | "0O") => i64::from_str_radix(&s[2..], 8).ok().map(|x| x as f64),
+            Some("0b" | "0B") => i64::from_str_radix(&s[2..], 2).ok().map(|x| x as f64),
+            _ => s.parse::<f64>().ok(),
+        };
+        parsed.and_then(|x| Number::new(x).ok())
+    }
     /// Attempts to interpret this value as a number.
     pub fn as_number(&self) -> Result<Number, ConversionError<C, S>> {
         match self {
             Value::Number(x) => Ok(*x),
-            Value::String(x) => {
-                let x = x.trim();
-                let parsed = match x.get(..2) {
-                    Some("0x" | "0X") => i64::from_str_radix(&x[2..], 16).ok().map(|x| x as f64),
-                    Some("0o" | "0O") => i64::from_str_radix(&x[2..], 8).ok().map(|x| x as f64),
-                    Some("0b" | "0B") => i64::from_str_radix(&x[2..], 2).ok().map(|x| x as f64),
-                    _ => x.parse::<f64>().ok(),
-                };
-                parsed.and_then(|x| Number::new(x).ok()).ok_or(ConversionError { got: Type::String, expected: Type::Number })
-            }
+            Value::String(x) => Self::parse_number(x).ok_or(ConversionError { got: Type::String, expected: Type::Number }),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Number }),
         }
     }
