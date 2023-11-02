@@ -215,7 +215,8 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
         },
     });
 
-    let system = Rc::new(StdSystem::new_sync(server, Some(project_name), config, utc_offset));
+    let clock = Arc::new(FineClock::new(utc_offset));
+    let system = Rc::new(StdSystem::new_sync(server, Some(project_name), config, clock));
     let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     print!("public id: {}\r\n", system.get_public_id());
 
@@ -307,7 +308,8 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
         })),
     });
 
-    let system = Rc::new(StdSystem::new_sync(server, Some(project_name), config, utc_offset));
+    let clock = Arc::new(FineClock::new(utc_offset));
+    let system = Rc::new(StdSystem::new_sync(server, Some(project_name), config, clock));
     let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     println!(">>> public id: {}\n", system.get_public_id());
 
@@ -391,7 +393,8 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
             _ => CommandStatus::UseDefault { key, command },
         })),
     });
-    let system = Rc::new(StdSystem::new_sync(nb_server, Some("native-server"), config, utc_offset));
+    let clock = Arc::new(FineClock::new(utc_offset));
+    let system = Rc::new(StdSystem::new_sync(nb_server, Some("native-server"), config, clock));
     let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     println!("public id: {}", system.get_public_id());
 

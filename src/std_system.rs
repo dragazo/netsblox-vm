@@ -97,6 +97,82 @@ impl Key<Result<(), String>> for CommandKey {
     }
 }
 
+/// An abstract wall-time clock with optional coarse granularity.
+pub trait Clock {
+    /// Read the real current time.
+    fn now(&self) -> OffsetDateTime;
+    /// Read a recent cached time.
+    fn recent(&self) -> OffsetDateTime;
+}
+
+/// A [`Clock`] that has fine granularity.
+/// 
+/// This type implements [`Clock::recent`] by calling [`Clock::now`] (no caching).
+/// This can be inefficient if called many times in rapid succession, in which case [`CoarseClock`] could be used.
+pub struct FineClock(UtcOffset);
+impl FineClock {
+    pub fn new(utc_offset: UtcOffset) -> Self {
+        Self(utc_offset)
+    }
+}
+impl Clock for FineClock {
+    fn now(&self) -> OffsetDateTime {
+        OffsetDateTime::now_utc().to_offset(self.0)
+    }
+    fn recent(&self) -> OffsetDateTime {
+        self.now()
+    }
+}
+
+/// A [`Clock`] that has coarse granularity.
+/// 
+/// This type implements [`Clock::recent`] by quickly fetching the most recent cached result of [`Clock::now`].
+/// [`StdSystem`] will automatically call [`Clock::now`] for some operations that require precise timing;
+/// however, it is your responsibility to (externally) periodically call [`Clock::now`] for use with fuzzy timing logic like sleep operations.
+pub struct CoarseClock(Mutex<OffsetDateTime>, FineClock);
+impl CoarseClock {
+    pub fn new(utc_offset: UtcOffset) -> Self {
+        let c = FineClock::new(utc_offset);
+        Self(Mutex::new(c.now()), c)
+    }
+}
+impl Clock for CoarseClock {
+    fn now(&self) -> OffsetDateTime {
+        let t = self.1.now();
+        *self.0.lock().unwrap() = t;
+        t
+    }
+    fn recent(&self) -> OffsetDateTime {
+        *self.0.lock().unwrap()
+    }
+}
+
+#[test]
+fn test_clocks() {
+    fn test_at(utc_offset: UtcOffset) {
+        let a = FineClock::new(utc_offset);
+        let b = CoarseClock::new(utc_offset);
+
+        fn check_eq(a: OffsetDateTime, b: OffsetDateTime) {
+            assert_eq!(a.offset(), b.offset());
+            assert!((a - b).abs().whole_microseconds() <= 1000);
+            assert_eq!(a.hour(), b.hour());
+            assert_eq!(a.minute(), b.minute());
+        }
+        check_eq(a.recent(), b.recent());
+        b.now();
+        check_eq(a.recent(), b.recent());
+    }
+    test_at(UtcOffset::UTC);
+    test_at(UtcOffset::from_hms(0, 0, 0).unwrap());
+    test_at(UtcOffset::from_hms(0, 0, 50).unwrap());
+    test_at(UtcOffset::from_hms(-19, 0, 50).unwrap());
+    test_at(UtcOffset::from_hms(-19, 30, 50).unwrap());
+    test_at(UtcOffset::from_hms(2, 30, 50).unwrap());
+    test_at(UtcOffset::from_hms(2, -10, 50).unwrap());
+    test_at(UtcOffset::from_hms(2, -10, -12).unwrap());
+}
+
 type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
 
 async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<SimpleValue, String> {
@@ -141,7 +217,7 @@ pub struct StdSystem<C: CustomTypes<StdSystem<C>>> {
     context: Arc<Context>,
     client: Arc<reqwest::Client>,
     rng: Mutex<ChaChaRng>,
-    utc_offset: UtcOffset,
+    clock: Arc<dyn Clock>,
 
     rpc_request_pipe: Sender<RpcRequest<C>>,
 
@@ -154,11 +230,11 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     /// Equivalent to [`StdSystem::new_async`] except that it can be executed outside of async context.
     /// Note that using this from within async context will result in a panic from `tokio` trying to create a runtime within a runtime.
     #[tokio::main(flavor = "current_thread")]
-    pub async fn new_sync(base_url: String, project_name: Option<&str>, config: Config<C, Self>, utc_offset: UtcOffset) -> Self {
-        Self::new_async(base_url, project_name, config, utc_offset).await
+    pub async fn new_sync(base_url: String, project_name: Option<&str>, config: Config<C, Self>, clock: Arc<dyn Clock>) -> Self {
+        Self::new_async(base_url, project_name, config, clock).await
     }
     /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://cloud.netsblox.org`).
-    pub async fn new_async(base_url: String, project_name: Option<&str>, config: Config<C, Self>, utc_offset: UtcOffset) -> Self {
+    pub async fn new_async(base_url: String, project_name: Option<&str>, config: Config<C, Self>, clock: Arc<dyn Clock>) -> Self {
         let configuration = reqwest::get(format!("{base_url}/configuration")).await.unwrap().json::<BTreeMap<String, Json>>().await.unwrap();
         let services_hosts = configuration["servicesHosts"].as_array().unwrap();
 
@@ -341,7 +417,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
         });
 
         Self {
-            config, context, client, utc_offset,
+            config, context, client, clock,
             rng: Mutex::new(ChaChaRng::from_seed(seed)),
             rpc_request_pipe,
             message_replies, message_sender, message_receiver, message_injector,
@@ -375,8 +451,12 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         self.rng.lock().unwrap().gen_range(range)
     }
 
-    fn time(&self) -> SysTime {
-        SysTime::Real { local: OffsetDateTime::now_utc().to_offset(self.utc_offset) }
+    fn time(&self, precision: TimePrecision) -> SysTime {
+        let local = match precision {
+            TimePrecision::Now => self.clock.now(),
+            TimePrecision::Recent => self.clock.recent(),
+        };
+        SysTime::Real { local }
     }
 
     fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<Self::RequestKey, ErrorCause<C, Self>> {

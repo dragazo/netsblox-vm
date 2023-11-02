@@ -1435,7 +1435,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
         }
 
         let proj_name = init_info.proj_name.clone();
-        let timer_start = system.time().to_arbitrary_ms::<C, S>().unwrap_or(0);
+        let timer_start = system.time(TimePrecision::Now).to_arbitrary_ms::<C, S>().unwrap_or(0);
 
         Self { proj_name, globals, entities, timer_start, system, settings, bytecode }
     }
@@ -1774,6 +1774,14 @@ impl SysTime {
     }
 }
 
+/// The required precision of a current time measurement.
+pub enum TimePrecision {
+    /// The real current time.
+    Now,
+    /// The real current time or a (recent) cached timestamp.
+    Recent,
+}
+
 /// Represents all the features of an implementing system.
 /// 
 /// This type encodes any features that cannot be performed without platform-specific resources.
@@ -1798,7 +1806,7 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     fn rand<T: SampleUniform, R: SampleRange<T>>(&self, range: R) -> T;
 
     /// Gets the current system time.
-    fn time(&self) -> SysTime;
+    fn time(&self, precision: TimePrecision) -> SysTime;
 
     /// Performs a general request which returns a value to the system.
     /// Ideally, this function should be non-blocking, and the requestor will await the result asynchronously.
