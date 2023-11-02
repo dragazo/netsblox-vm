@@ -398,7 +398,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 }
                 false => return Ok(ProcessStep::Yield),
             }
-            Some(Defer::Sleep { until, aft_pos }) => match global_context.system.time(TimePrecision::Recent).to_arbitrary_ms()? >= *until {
+            Some(Defer::Sleep { until, aft_pos }) => match global_context.system.time(Precision::Low).to_arbitrary_ms()? >= *until {
                 true => {
                     self.pos = *aft_pos;
                     self.defer = None;
@@ -1095,11 +1095,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::ResetTimer => {
-                global_context.timer_start = global_context.system.time(TimePrecision::Now).to_arbitrary_ms()?;
+                global_context.timer_start = global_context.system.time(Precision::Medium).to_arbitrary_ms()?;
                 self.pos = aft_pos;
             }
             Instruction::PushTimer => {
-                self.value_stack.push(Number::new(global_context.system.time(TimePrecision::Now).to_arbitrary_ms()?.saturating_sub(global_context.timer_start) as f64 / 1000.0)?.into());
+                self.value_stack.push(Number::new(global_context.system.time(Precision::Low).to_arbitrary_ms()?.saturating_sub(global_context.timer_start) as f64 / 1000.0)?.into());
                 self.pos = aft_pos;
             }
             Instruction::Sleep => {
@@ -1108,10 +1108,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     self.pos = aft_pos;
                     return Ok(ProcessStep::Yield);
                 }
-                self.defer = Some(Defer::Sleep { until: global_context.system.time(TimePrecision::Now).to_arbitrary_ms()? + ms as u64, aft_pos });
+                self.defer = Some(Defer::Sleep { until: global_context.system.time(Precision::Medium).to_arbitrary_ms()? + ms as u64, aft_pos });
             }
             Instruction::PushRealTime { query } => {
-                let t = global_context.system.time(TimePrecision::Now).to_real_local()?;
+                let t = global_context.system.time(Precision::High).to_real_local()?;
                 let v = match query {
                     TimeQuery::UnixTimestampMs => (t.unix_timestamp_nanos() / 1000000) as f64,
                     TimeQuery::Year => t.year() as f64,
