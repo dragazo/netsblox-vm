@@ -17,7 +17,6 @@ use std::io::{self, Write};
 #[cfg(feature = "serde")]
 use serde::{Serialize, Deserialize};
 
-use superslice::Ext;
 use monostate::MustBeU128;
 use num_traits::FromPrimitive;
 use bin_pool::BinPool;
@@ -1213,7 +1212,7 @@ impl Locations {
     /// hence returning the most local location that was provided in the ast.
     pub fn lookup(&self, bytecode_pos: usize) -> Option<String> {
         let mut start = {
-            let p = self.locs.lower_bound_by_key(&(bytecode_pos + 1), |x| x.0);
+            let p = self.locs.partition_point(|x| x.0 <= bytecode_pos);
             debug_assert!(p <= self.locs.len());
             self.locs.get(p)?.1
         };

@@ -81,7 +81,6 @@ educe = { version = "0.4.23", default-features = false, features = ["Debug", "Cl
 libm = { version = "0.2.8", default-features = false }
 monostate = { version = "0.1.9", default-features = false }
 replace_with = { version = "0.1.7", default-features = false }
-superslice = { version = "1.0", default-features = false }
 unicase = { version = "2.7.0", default-features = false }
 time = { version = "0.3.30", default-features = false }
 typed-arena = { version = "2.0.2", default-features = false }
