@@ -136,14 +136,14 @@ impl<C: CustomTypes<S>, S: System<C>> From<NumberError> for ErrorCause<C, S> { f
 pub struct Color { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
 impl Color {
     pub fn from_hsva(mut h: f32, mut s: f32, mut v: f32, mut a: f32) -> Self {
-        h = h.rem_euclid(360.0);
+        h = util::modulus(h, 360.0);
         s = s.clamp(0.0, 1.0);
         v = v.clamp(0.0, 1.0);
         a = a.clamp(0.0, 1.0);
 
         let c = v * s;
         let hp = h / 60.0;
-        let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+        let x = c * (1.0 - libm::fabsf(hp % 2.0 - 1.0));
         let m = v - c;
 
         let (r, g, b) = match hp as usize {
@@ -156,7 +156,7 @@ impl Color {
             _ => unreachable!(),
         };
 
-        fn f(x: f32) -> u8 { (x * 255.0).round() as u8 }
+        fn f(x: f32) -> u8 { libm::roundf(x * 255.0) as u8 }
 
         Self { r: f(r + m), g: f(g + m), b: f(b + m), a: f(a) }
     }
@@ -170,7 +170,7 @@ impl Color {
 
         let h = if delta == 0.0 { 0.0 } else {
             match c_max_i {
-                0 => 60.0 * ((f(self.g) - f(self.b)) / delta).rem_euclid(6.0),
+                0 => 60.0 * util::modulus((f(self.g) - f(self.b)) / delta, 6.0),
                 1 => 60.0 * ((f(self.b) - f(self.r)) / delta + 2.0),
                 2 => 60.0 * ((f(self.r) - f(self.g)) / delta + 4.0),
                 _ => unreachable!(),
@@ -466,7 +466,7 @@ impl Properties {
         match prop {
             Property::XPos => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.pos.0 = value),
             Property::YPos => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.pos.1 = value),
-            Property::Heading => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.heading = value),
+            Property::Heading => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(util::modulus(x.get(), 360.0)).map_err(Into::into)), |props, value| props.heading = value),
 
             Property::Visible => self.with_value(key, value.as_bool().map_err(Into::into), |props, value| props.visible = value),
             Property::Size => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().max(0.0)).map_err(Into::into)), |props, value| props.size = value),
@@ -483,7 +483,7 @@ impl Properties {
                 props.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
             }),
 
-            Property::PenColorH => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.pen_color_h = value),
+            Property::PenColorH => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(util::modulus(x.get(), 360.0)).map_err(Into::into)), |props, value| props.pen_color_h = value),
             Property::PenColorS => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_s = value),
             Property::PenColorV => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_v = value),
             Property::PenColorT => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_t = value),
@@ -492,7 +492,7 @@ impl Properties {
             Property::Volume => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.volume = value),
             Property::Balance => self.with_value(key, value.as_number().map_err(Into::into), |props, value| props.balance = value),
 
-            Property::ColorH => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().rem_euclid(360.0)).map_err(Into::into)), |props, value| props.effects.color_h = value),
+            Property::ColorH => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(util::modulus(x.get(), 360.0)).map_err(Into::into)), |props, value| props.effects.color_h = value),
             Property::ColorS => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_s = value),
             Property::ColorV => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_v = value),
             Property::ColorT => self.with_value(key, value.as_number().map_err(Into::into).and_then(|x| Number::new(x.get().clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_t = value),
@@ -509,7 +509,7 @@ impl Properties {
         match prop {
             Property::XPos => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.pos.0.add(x).map_err(Into::into)), |props, value| props.pos.0 = value),
             Property::YPos => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.pos.1.add(x).map_err(Into::into)), |props, value| props.pos.1 = value),
-            Property::Heading => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.heading.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.heading = value),
+            Property::Heading => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new(util::modulus(self.heading.get() + x.get(), 360.0)).map_err(Into::into)), |props, value| props.heading = value),
 
             Property::Visible => self.with_value(key, delta.as_bool().map_err(Into::into), |props, value| props.visible ^= value),
             Property::Size => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.size.get() + x.get()).max(0.0)).map_err(Into::into)), |props, value| props.size = value),
@@ -519,7 +519,7 @@ impl Properties {
 
             Property::PenColor => key.complete(Err("attempt to apply relative change to a color".into())),
 
-            Property::PenColorH => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_h.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.pen_color_h = value),
+            Property::PenColorH => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new(util::modulus(self.pen_color_h.get() + x.get(), 360.0)).map_err(Into::into)), |props, value| props.pen_color_h = value),
             Property::PenColorS => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_s.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_s = value),
             Property::PenColorV => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_v.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_v = value),
             Property::PenColorT => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.pen_color_t.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.pen_color_t = value),
@@ -528,7 +528,7 @@ impl Properties {
             Property::Volume => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.volume.add(x).map_err(Into::into)), |props, value| props.volume = value),
             Property::Balance => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| self.balance.add(x).map_err(Into::into)), |props, value| props.balance = value),
 
-            Property::ColorH => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_h.get() + x.get()).rem_euclid(360.0)).map_err(Into::into)), |props, value| props.effects.color_h = value),
+            Property::ColorH => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new(util::modulus(self.effects.color_h.get() + x.get(), 360.0)).map_err(Into::into)), |props, value| props.effects.color_h = value),
             Property::ColorS => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_s.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_s = value),
             Property::ColorV => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_v.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_v = value),
             Property::ColorT => self.with_value(key, delta.as_number().map_err(Into::into).and_then(|x| Number::new((self.effects.color_t.get() + x.get()).clamp(0.0, 100.0)).map_err(Into::into)), |props, value| props.effects.color_t = value),
@@ -556,13 +556,13 @@ impl Properties {
 
     pub fn perform_point_towards_xy<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, x: Number, y: Number) -> CommandStatus<'gc, 'a, C, S> {
         let (dx, dy) = (x.get() - self.pos.0.get(), y.get() - self.pos.1.get());
-        let heading = dx.atan2(dy).to_degrees().rem_euclid(360.0);
+        let heading = util::modulus(libm::atan2(dx, dy).to_degrees(), 360.0);
         self.with_value::<C, S, _>(key, Number::new(heading).map_err(Into::into), |props, value| props.heading = value);
         CommandStatus::Handled
     }
 
     pub fn perform_forward<'gc, 'a, C: CustomTypes<S>, S: System<C>>(&mut self, key: S::CommandKey, dist: Number) -> CommandStatus<'gc, 'a, C, S> {
-        let (sin, cos) = self.heading.get().to_radians().sin_cos();
+        let (sin, cos) = libm::sincos(self.heading.get().to_radians());
         let (x, y) = (self.pos.0.get() + sin * dist.get(), self.pos.1.get() + cos * dist.get());
         self.with_value::<C, S, _>(key, Number::new(x).map_err(Into::into).and_then(|x| Number::new(y).map(|y| (x, y)).map_err(Into::into)), |props, pos| props.pos = pos);
         CommandStatus::Handled

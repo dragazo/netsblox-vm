@@ -1626,7 +1626,7 @@ mod ops {
 
             BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
                 let (a, b) = (a.as_number()?.get(), b.as_number()?.get());
-                Ok(Number::new(if a.is_sign_positive() == b.is_sign_positive() { a % b } else { b + (a % -b) })?.into())
+                Ok(Number::new(util::modulus(a, b))?.into())
             }),
             BinaryOp::SplitBy => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
                 let (text, pattern) = (a.as_string()?, b.as_string()?);

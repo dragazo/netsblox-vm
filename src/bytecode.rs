@@ -2371,7 +2371,7 @@ impl ByteCode {
             let color = entity.color;
             let size = Number::new(entity.scale * 100.0)?;
             let pos = (Number::new(entity.pos.0)?, Number::new(entity.pos.1)?);
-            let heading = Number::new(entity.heading.rem_euclid(360.0))?;
+            let heading = Number::new(util::modulus(entity.heading, 360.0))?;
 
             for field in entity.fields.iter() {
                 fields.push((field.def.name.clone(), get_value(&field.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?));

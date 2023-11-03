@@ -56,3 +56,7 @@ pub fn base64_encode(content: &[u8]) -> String {
 pub fn base64_decode(content: &str) -> Result<Vec<u8>, Base64DecodeError> {
     base64::engine::general_purpose::STANDARD.decode(content)
 }
+
+pub fn modulus<T: num_traits::Float>(a: T, b: T) -> T {
+    if a.is_sign_positive() == b.is_sign_positive() { a % b } else { b + (a % -b) }
+}
