@@ -21,7 +21,7 @@ struct Env<'gc> {
 type EnvArena = Arena<Rootable![Env<'_>]>;
 
 fn get_running_project(xml: &str, system: Rc<StdSystem<C>>) -> EnvArena {
-    EnvArena::new(Default::default(), |mc| {
+    EnvArena::new(|mc| {
         let parser = ast::Parser::default();
         let ast = parser.parse(xml).unwrap();
         assert_eq!(ast.roles.len(), 1);

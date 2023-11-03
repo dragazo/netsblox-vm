@@ -34,7 +34,7 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
     let (code, init_info, ins_locs, locs) = ByteCode::compile(&ast.roles[0]).unwrap();
     let main = locs.funcs.iter().chain(locs.entities[0].1.funcs.iter()).find(|x| x.0.trans_name.trim() == "main").expect("no main function/method");
 
-    (EnvArena::new(Default::default(), |mc| {
+    (EnvArena::new(|mc| {
         let glob = GlobalContext::from_init(mc, &init_info, Rc::new(code), settings, system);
         let entity = *glob.entities.iter().next().unwrap().1;
         let glob = Gc::new(mc, RefLock::new(glob));
