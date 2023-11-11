@@ -78,7 +78,7 @@ impl ErrorSummary {
             }
             res
         }
-        let globals = summarize_symbols(&process.get_global_context().borrow().globals);
+        let globals = summarize_symbols(&process.global_context.borrow().globals);
         let fields = summarize_symbols(&raw_entity.borrow().fields);
 
         let mut trace = Vec::with_capacity(process.call_stack.len());
@@ -195,21 +195,21 @@ pub struct ProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
-                               global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>,
-    #[collect(require_static)] pos: usize,
-    #[collect(require_static)] running: bool,
-    #[collect(require_static)] barrier: Option<Barrier>,
-    #[collect(require_static)] reply_key: Option<S::InternReplyKey>,
-    #[collect(require_static)] warp_counter: usize,
-    #[collect(require_static)] state: C::ProcessState,
-                               call_stack: Vec<CallStackEntry<'gc, C, S>>,
-                               value_stack: Vec<Value<'gc, C, S>>,
-    #[collect(require_static)] handler_stack: Vec<Handler>,
-    #[collect(require_static)] defer: Option<Defer<C, S>>,
-                               last_syscall_error: Option<Value<'gc, C, S>>,
-                               last_rpc_error: Option<Value<'gc, C, S>>,
-                               last_answer: Option<Value<'gc, C, S>>,
-                               last_message: Option<Value<'gc, C, S>>,
+                               pub global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>,
+    #[collect(require_static)] pub state: C::ProcessState,
+    #[collect(require_static)]     pos: usize,
+    #[collect(require_static)]     running: bool,
+    #[collect(require_static)]     barrier: Option<Barrier>,
+    #[collect(require_static)]     reply_key: Option<S::InternReplyKey>,
+    #[collect(require_static)]     warp_counter: usize,
+                                   call_stack: Vec<CallStackEntry<'gc, C, S>>,
+                                   value_stack: Vec<Value<'gc, C, S>>,
+    #[collect(require_static)]     handler_stack: Vec<Handler>,
+    #[collect(require_static)]     defer: Option<Defer<C, S>>,
+                                   last_syscall_error: Option<Value<'gc, C, S>>,
+                                   last_rpc_error: Option<Value<'gc, C, S>>,
+                                   last_answer: Option<Value<'gc, C, S>>,
+                                   last_message: Option<Value<'gc, C, S>>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// Creates a new [`Process`] with the given starting context.
@@ -244,10 +244,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// Note that the process will not run on its own (see [`Process::step`]).
     pub fn is_running(&self) -> bool {
         self.running
-    }
-    /// Gets the global context that this process is tied to (see [`Process::new`]).
-    pub fn get_global_context(&self) -> Gc<'gc, RefLock<GlobalContext<'gc, C, S>>> {
-        self.global_context
     }
     /// Executes a single bytecode instruction.
     /// The return value can be used to determine what additional effects the script has requested,

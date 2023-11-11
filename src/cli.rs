@@ -265,7 +265,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
             for input in input_sequence.drain(..) { proj.input(mc, input); }
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
-                if let ProjectStep::Error { error, proc } = &res {
+                if let ProjectStep::Error { error, proc: _ } = &res {
                     print!("\r\n>>> runtime error: {:?}\r\n\r\n", error.cause);
                 }
                 idle_sleeper.consume(&res);
@@ -325,7 +325,7 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
             let mut proj = env.proj.borrow_mut(mc);
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
-                if let ProjectStep::Error { error, proc } = &res {
+                if let ProjectStep::Error { error, proc: _ } = &res {
                     println!("\n>>> runtime error: {:?}\n", error.cause);
                 }
                 idle_sleeper.consume(&res);

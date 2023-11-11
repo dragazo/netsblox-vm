@@ -309,7 +309,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     ProjectStep::Pause
                 }
                 ProcessStep::Fork { pos, locals, entity } => {
-                    let mut proc = Process::new(ProcContext { global_context: self.state.global_context, entity, start_pos: pos, locals, barrier: None, reply_key: None, local_message: None });
+                    let proc = Process::new(ProcContext { global_context: self.state.global_context, entity, start_pos: pos, locals, barrier: None, reply_key: None, local_message: None });
                     let fork_proc_key = self.state.processes.insert(proc);
 
                     all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
