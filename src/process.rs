@@ -144,7 +144,7 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
 /// This contains information about the call origin and local variables defined in the called context.
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
-pub struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
+struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] called_from: usize,
     #[collect(require_static)] return_to: usize,
                                entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
@@ -212,8 +212,7 @@ pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
                                last_message: Option<Value<'gc, C, S>>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
-    /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity` and `system`.
-    /// The created process is initialized to an idle (non-running) state; use [`Process::initialize`] to begin execution.
+    /// Creates a new [`Process`] with the given starting context.
     pub fn new(context: ProcContext<'gc, C, S>) -> Self {
         Self {
             global_context: context.global_context,
@@ -460,9 +459,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(lookup_var!(var).get().clone());
                 self.pos = aft_pos;
             }
-            Instruction::PushEntity { name } => match global_context.entities.iter().find(|&x| x.borrow().name.as_str() == name) {
+            Instruction::PushEntity { name } => match global_context.entities.iter().find(|&x| x.0 == name) {
                 Some(x) => {
-                    self.value_stack.push(Value::Entity(*x));
+                    self.value_stack.push(Value::Entity(x.1));
                     self.pos = aft_pos;
                 }
                 None => return Err(ErrorCause::UndefinedEntity { name: name.into() }),

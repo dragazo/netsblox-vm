@@ -150,7 +150,7 @@ impl BasicType {
     }
 }
 
-pub(crate) enum InternalInstruction<'a> {
+enum InternalInstruction<'a> {
     /// Triggers an error when encountered.
     /// This is an internal value that is only used to denote incomplete linking results for better testing.
     /// Properly-linked byte code should not contain this value.

@@ -95,39 +95,41 @@ pub enum ProjectStep<'gc, C: CustomTypes<S>, S: System<C>> {
     Pause,
 }
 
+#[derive(Collect, Educe)]
+#[collect(no_drop, bound = "")]
+#[educe(Clone, Default)]
+pub struct PartialProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
+                               pub locals: SymbolTable<'gc, C, S>,
+    #[collect(require_static)] pub barrier: Option<Barrier>,
+    #[collect(require_static)] pub reply_key: Option<S::InternReplyKey>,
+    #[collect(require_static)] pub local_message: Option<String>,
+}
+
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 struct Script<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] event: Rc<(Event, usize)>, // event and bytecode start pos
                                entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
     #[collect(require_static)] process: Option<ProcessKey>,
-                               context_queue: VecDeque<ProcContext<'gc, C, S>>,
+                               context_queue: VecDeque<PartialProcContext<'gc, C, S>>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Script<'gc, C, S> {
     fn consume_context(&mut self, state: &mut State<'gc, C, S>) {
         let process = self.process.and_then(|key| Some((key, state.processes.get_mut(key)?)));
-        if process.as_ref().map(|x| x.1.is_running()).unwrap_or(false) { return }
-
-        let context = match self.context_queue.pop_front() {
-            Some(x) => x,
-            None => return,
-        };
-
         match process {
-            Some((key, process)) => {
-                debug_assert!(!state.process_queue.contains(&key));
-                debug_assert_eq!(self.process, Some(key));
-
-                process.initialize(context);
-                state.process_queue.push_back(key);
+            Some(proc) => match proc.1.is_running() {
+                true => return,
+                false => unreachable!(), // should have already been cleaned up by the scheduler
             }
-            None => {
-                let mut process = Process::new(state.global_context, self.entity, self.event.1);
-                process.initialize(context);
-                let key = state.processes.insert(process);
-                state.process_queue.push_back(key);
-                self.process = Some(key);
-            }
+            None => match self.context_queue.pop_front() {
+                None => return,
+                Some(context) => {
+                    let process = Process::new(ProcContext { global_context: state.global_context, entity: self.entity, start_pos: self.event.1, locals: context.locals, barrier: context.barrier, reply_key: context.reply_key, local_message: context.local_message });
+                    let key = state.processes.insert(process);
+                    state.process_queue.push_back(key);
+                    self.process = Some(key);
+                }
+            },
         }
     }
     fn stop_all(&mut self, state: &mut State<'gc, C, S>) {
@@ -136,7 +138,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Script<'gc, C, S> {
         }
         self.context_queue.clear();
     }
-    fn schedule(&mut self, state: &mut State<'gc, C, S>, context: ProcContext<'gc, C, S>, max_queue: usize) {
+    fn schedule(&mut self, state: &mut State<'gc, C, S>, context: PartialProcContext<'gc, C, S>, max_queue: usize) {
         self.context_queue.push_back(context);
         self.consume_context(state);
         if self.context_queue.len() > max_queue {
@@ -180,9 +182,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
         let mut project = Self::new(Gc::new(mc, RefLock::new(global_context)));
 
         for entity_info in init_info.entities.iter() {
-            let entity = *project.state.global_context.borrow().entities.get(&entity_info.name).unwrap();
+            let entity = project.state.global_context.borrow().entities.iter().find(|&x| x.0 == entity_info.name).unwrap().1;
             for (event, pos) in entity_info.scripts.iter() {
-                project.add_script(*pos, entity, Some(event.clone()));
+                project.add_script(*pos, entity, event.clone());
             }
         }
 
@@ -198,23 +200,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
             scripts: Default::default(),
         }
     }
-    pub fn add_script(&mut self, start_pos: usize, entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>, event: Option<Event>) {
-        let mut all_contexts_consumer = AllContextsConsumer::new();
-        match event {
-            Some(event) => self.scripts.push(Script {
-                event: Rc::new((event, start_pos)),
-                entity,
-                process: None,
-                context_queue: Default::default(),
-            }),
-            None => {
-                let process = Process::new(self.state.global_context, entity, start_pos);
-                let key = self.state.processes.insert(process);
-
-                all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
-                self.state.process_queue.push_back(key);
-            }
-        }
+    pub fn add_script(&mut self, start_pos: usize, entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>, event: Event) {
+        self.scripts.push(Script {
+            event: Rc::new((event, start_pos)),
+            entity,
+            process: None,
+            context_queue: Default::default(),
+        });
     }
     pub fn input(&mut self, mc: &Mutation<'gc>, input: Input) {
         let mut all_contexts_consumer = AllContextsConsumer::new();
@@ -241,7 +233,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
 
                         all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
                         if interrupt { self.scripts[i].stop_all(&mut self.state); }
-                        self.scripts[i].schedule(&mut self.state, ProcContext { locals, ..Default::default() }, max_queue);
+                        self.scripts[i].schedule(&mut self.state, PartialProcContext { locals, ..Default::default() }, max_queue);
                     }
                 }
             }
@@ -282,7 +274,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     }
 
                     all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
-                    self.scripts[i].schedule(&mut self.state, ProcContext { locals, barrier: None, reply_key: reply_key.clone(), local_message: None }, usize::MAX);
+                    self.scripts[i].schedule(&mut self.state, PartialProcContext { locals, barrier: None, reply_key: reply_key.clone(), local_message: None }, usize::MAX);
                 }
             }
         }
@@ -341,7 +333,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     for script in new_scripts.iter_mut() {
                         if let Event::OnClone = &script.event.0 {
                             all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
-                            script.schedule(&mut self.state, ProcContext::default(), 0);
+                            script.schedule(&mut self.state, Default::default(), 0);
                         }
                     }
                     self.scripts.extend(new_scripts);
@@ -360,7 +352,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
 
                                 all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
                                 self.scripts[i].stop_all(&mut self.state);
-                                self.scripts[i].schedule(&mut self.state, ProcContext { locals: Default::default(), barrier: barrier.clone(), reply_key: None, local_message: Some(msg_type.clone()) }, 0);
+                                self.scripts[i].schedule(&mut self.state, PartialProcContext { locals: Default::default(), barrier: barrier.clone(), reply_key: None, local_message: Some(msg_type.clone()) }, 0);
                             }
                         }
                     }

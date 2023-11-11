@@ -69,7 +69,7 @@ struct ReplyEntry {
 /// A [`StdSystem`] key type for an asynchronous request.
 pub struct RequestKey<C: CustomTypes<StdSystem<C>>>(Arc<Mutex<AsyncResult<Result<C::Intermediate, String>>>>);
 impl<C: CustomTypes<StdSystem<C>>> RequestKey<C> {
-    pub(crate) fn poll(&self) -> AsyncResult<Result<C::Intermediate, String>> { self.0.lock().unwrap().poll() }
+    fn poll(&self) -> AsyncResult<Result<C::Intermediate, String>> { self.0.lock().unwrap().poll() }
 }
 impl<C: CustomTypes<StdSystem<C>>> Key<Result<C::Intermediate, String>> for RequestKey<C> {
     /// Completes the request with the given result.
@@ -85,7 +85,7 @@ impl<C: CustomTypes<StdSystem<C>>> Key<Result<C::Intermediate, String>> for Requ
 /// A [`StdSystem`] key type for an asynchronous command.
 pub struct CommandKey(Arc<Mutex<AsyncResult<Result<(), String>>>>);
 impl CommandKey {
-    pub(crate) fn poll(&self) -> AsyncResult<Result<(), String>> { self.0.lock().unwrap().poll() }
+    fn poll(&self) -> AsyncResult<Result<(), String>> { self.0.lock().unwrap().poll() }
 }
 impl Key<Result<(), String>> for CommandKey {
     /// Completes the command.

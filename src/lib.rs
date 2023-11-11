@@ -10,7 +10,7 @@ extern crate std;
 #[macro_use] extern crate alloc;
 #[macro_use] extern crate num_derive;
 
-pub(crate) use educe::Educe;
+use educe::Educe;
 
 /// Re-exports of relevant items from `gc_arena`.
 pub mod gc {

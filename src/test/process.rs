@@ -26,7 +26,7 @@ struct Env<'gc> {
 }
 type EnvArena = Arena<Rootable![Env<'_>]>;
 
-fn get_running_proc<'a, F>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>, locals: F) -> (EnvArena, Locations) where F: for<'gc> Fn(&Mutation<'gc>) -> SymbolTable<'gc, C, StdSystem<C>>{
+fn get_running_proc<'a, F>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>, locals: F) -> (EnvArena, Locations) where F: for<'gc> FnOnce(&Mutation<'gc>) -> SymbolTable<'gc, C, StdSystem<C>>{
     let parser = ast::Parser::default();
     let ast = parser.parse(xml).unwrap();
     assert_eq!(ast.roles.len(), 1);
@@ -36,10 +36,10 @@ fn get_running_proc<'a, F>(xml: &'a str, settings: Settings, system: Rc<StdSyste
 
     (EnvArena::new(|mc| {
         let glob = GlobalContext::from_init(mc, &init_info, Rc::new(code), settings, system);
-        let entity = *glob.entities.iter().next().unwrap();
+        let entity = glob.entities.iter().next().unwrap().1;
         let glob = Gc::new(mc, RefLock::new(glob));
 
-        let mut proc = Process::new(ProcContext { global_context: glob, entity, start_pos: main.1, locals: locals(mc), barrier: None, reply_key: None, local_message: None });
+        let proc = Process::new(ProcContext { global_context: glob, entity, start_pos: main.1, locals: locals(mc), barrier: None, reply_key: None, local_message: None });
         assert!(proc.is_running());
 
         Env { glob, proc: Gc::new(mc, RefLock::new(proc)) }
@@ -97,15 +97,16 @@ fn test_proc_sum_123n() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
 
     for (n, expect) in [(0, json!("0")), (1, json!(1)), (2, json!(3)), (3, json!(6)), (4, json!(10)), (5, json!(15)), (6, json!(21))] {
-        let mut locals = SymbolTable::default();
-        locals.define_or_redefine("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
-
         let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
             globals = "",
             fields = "",
             funcs = include_str!("blocks/sum-123n.xml"),
             methods = "",
-        ), Settings::default(), system, |_| locals);
+        ), Settings::default(), system.clone(), |_| {
+            let mut locals = SymbolTable::default();
+            locals.define_or_redefine("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
+            locals
+        });
         run_till_term(&mut env, |mc, _, res| {
             let expect = Value::from_simple(mc, SimpleValue::from_json(expect).unwrap());
             assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "sum 123n");
@@ -118,15 +119,16 @@ fn test_proc_recursive_factorial() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
 
     for (n, expect) in [(0, json!("1")), (1, json!("1")), (2, json!(2)), (3, json!(6)), (4, json!(24)), (5, json!(120)), (6, json!(720)), (7, json!(5040))] {
-        let mut locals = SymbolTable::default();
-        locals.define_or_redefine("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
-
         let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
             globals = "",
             fields = "",
             funcs = include_str!("blocks/recursive-factorial.xml"),
             methods = "",
-        ), Settings::default(), system, |_| locals);
+        ), Settings::default(), system.clone(), |_| {
+            let mut locals = SymbolTable::default();
+            locals.define_or_redefine("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
+            locals
+        });
         run_till_term(&mut env, |mc, _, res| {
             let expect = Value::from_simple(mc, SimpleValue::from_json(expect).unwrap());
             assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "recursive factorial");
@@ -223,15 +225,16 @@ fn test_proc_recursively_self_containing_lists() {
 fn test_proc_sieve_of_eratosthenes() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
 
-    let mut locals = SymbolTable::default();
-    locals.define_or_redefine("n", Shared::Unique(Number::new(100.0).unwrap().into()));
-
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/sieve-of-eratosthenes.xml"),
         methods = "",
-    ), Settings::default(), system, |_| locals);
+    ), Settings::default(), system, |_| {
+        let mut locals = SymbolTable::default();
+        locals.define_or_redefine("n", Shared::Unique(Number::new(100.0).unwrap().into()));
+        locals
+    });
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97])).unwrap());
@@ -442,15 +445,16 @@ fn test_proc_warp_yields() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
 
     for (mode, (expected_counter, expected_yields)) in [(12, 12), (13, 13), (17, 0), (18, 0), (16, 0), (17, 2), (14, 0), (27, 3), (30, 7), (131, 109), (68, 23), (51, 0), (63, 14)].into_iter().enumerate() {
-        let mut locals = SymbolTable::default();
-        locals.define_or_redefine("mode", Shared::Unique(Number::new(mode as f64).unwrap().into()));
-
         let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
             globals = r#"<variable name="counter"><l>0</l></variable>"#,
             fields = "",
             funcs = include_str!("blocks/warp-yields.xml"),
             methods = "",
-        ), Settings::default(), system, |_| locals);
+        ), Settings::default(), system.clone(), |_| {
+            let mut locals = SymbolTable::default();
+            locals.define_or_redefine("mode", Shared::Unique(Number::new(mode as f64).unwrap().into()));
+            locals
+        });
 
         run_till_term(&mut env, |mc, env, res| {
             let (res, yields) = res.unwrap();
@@ -550,16 +554,17 @@ fn test_proc_rpc_call_basic() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
 
     for (lat, long, city) in [(36.1627, -86.7816, "Nashville"), (40.8136, -96.7026, "Lincoln"), (40.7608, -111.8910, "Salt Lake City")] {
-        let mut locals = SymbolTable::default();
-        locals.define_or_redefine("lat", Shared::Unique(Number::new(lat).unwrap().into()));
-        locals.define_or_redefine("long", Shared::Unique(Number::new(long).unwrap().into()));
-
         let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
             globals = "",
             fields = "",
             funcs = include_str!("blocks/rpc-call-basic.xml"),
             methods = "",
-        ), Settings::default(), system, |_| locals);
+        ), Settings::default(), system.clone(), |_| {
+            let mut locals = SymbolTable::default();
+            locals.define_or_redefine("lat", Shared::Unique(Number::new(lat).unwrap().into()));
+            locals.define_or_redefine("long", Shared::Unique(Number::new(long).unwrap().into()));
+            locals
+        });
         run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
             Value::String(ret) => assert_eq!(&*ret, city),
             x => panic!("{:?}", x),

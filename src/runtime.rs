@@ -1085,14 +1085,14 @@ pub enum EntityKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
-    #[collect(require_static)] pub(crate) name: Rc<String>,
-    #[collect(require_static)] pub(crate) sound_list: Rc<Vec<(String, Rc<Audio>)>>,
-    #[collect(require_static)] pub(crate) costume_list: Rc<Vec<(String, Rc<Image>)>>,
-    #[collect(require_static)] pub(crate) costume: Option<Rc<Image>>,
-    #[collect(require_static)] pub(crate) state: C::EntityState,
-    #[collect(require_static)] pub(crate) alive: bool,
-                               pub(crate) original: Option<Gc<'gc, RefLock<Entity<'gc, C, S>>>>,
-                               pub(crate) fields: SymbolTable<'gc, C, S>,
+    #[collect(require_static)] pub name: Rc<String>,
+    #[collect(require_static)] pub sound_list: Rc<Vec<(String, Rc<Audio>)>>,
+    #[collect(require_static)] pub costume_list: Rc<Vec<(String, Rc<Image>)>>,
+    #[collect(require_static)] pub costume: Option<Rc<Image>>,
+    #[collect(require_static)] pub state: C::EntityState,
+    #[collect(require_static)] pub alive: bool,
+                               pub original: Option<Gc<'gc, RefLock<Entity<'gc, C, S>>>>,
+                               pub fields: SymbolTable<'gc, C, S>,
 }
 impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Entity<'_, C, S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -1341,7 +1341,7 @@ pub struct GlobalContext<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub timer_start: u64,
     #[collect(require_static)] pub proj_name: String,
                                pub globals: SymbolTable<'gc, C, S>,
-                               pub entities: Vec<Gc<'gc, RefLock<Entity<'gc, C, S>>>>,
+                               pub entities: Vec<(String, Gc<'gc, RefLock<Entity<'gc, C, S>>>)>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
     pub fn from_init(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
@@ -1431,7 +1431,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             let name = Rc::new(entity_info.name.clone());
             let state = kind.into();
 
-            entities.push(Gc::new(mc, RefLock::new(Entity { alive: true, original: None, name, fields, sound_list, costume_list, costume, state })));
+            entities.push(((*name).clone(), Gc::new(mc, RefLock::new(Entity { alive: true, original: None, name, fields, sound_list, costume_list, costume, state }))));
         }
 
         let proj_name = init_info.proj_name.clone();
