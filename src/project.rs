@@ -317,8 +317,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     ProjectStep::Pause
                 }
                 ProcessStep::Fork { pos, locals, entity } => {
-                    let mut proc = Process::new(self.state.global_context, entity, pos);
-                    proc.initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
+                    let mut proc = Process::new(ProcContext { global_context: self.state.global_context, entity, start_pos: pos, locals, barrier: None, reply_key: None, local_message: None });
                     let fork_proc_key = self.state.processes.insert(proc);
 
                     all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
@@ -327,10 +326,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     ProjectStep::Normal
                 }
                 ProcessStep::CreatedClone { new_entity } => {
-                    let root = new_entity.borrow().root.unwrap();
+                    let original = new_entity.borrow().original.unwrap();
                     let mut new_scripts = vec![];
                     for script in self.scripts.iter() {
-                        if Gc::ptr_eq(script.entity, root) {
+                        if Gc::ptr_eq(script.entity, original) {
                             new_scripts.push(Script {
                                 event: script.event.clone(),
                                 entity: new_entity,

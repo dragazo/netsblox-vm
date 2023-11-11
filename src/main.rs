@@ -7,7 +7,7 @@ use std::io::{BufRead, Write, BufReader, BufWriter};
 
 use netsblox_vm::cli::{run, Mode};
 use netsblox_vm::template::SyscallMenu;
-use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, Request, RequestStatus, Config, CustomTypes, Key, SimpleValue};
+use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, Request, RequestStatus, Config, CustomTypes, Key, SimpleValue, Entity};
 use netsblox_vm::std_system::StdSystem;
 use netsblox_vm::gc::Mutation;
 use clap::Parser;
@@ -47,6 +47,13 @@ impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
     }
 }
 
+struct ProcessState;
+impl From<&Entity<'_, C, StdSystem<C>>> for ProcessState {
+    fn from(_: &Entity<'_, C, StdSystem<C>>) -> Self {
+        ProcessState
+    }
+}
+
 enum Intermediate {
     Simple(SimpleValue),
     Native(NativeValue),
@@ -63,6 +70,7 @@ impl CustomTypes<StdSystem<C>> for C {
     type Intermediate = Intermediate;
 
     type EntityState = EntityState;
+    type ProcessState = ProcessState;
 
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Result<Value<'gc, C, StdSystem<C>>, ErrorCause<C, StdSystem<C>>> {
         Ok(match value {

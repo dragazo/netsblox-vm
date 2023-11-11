@@ -266,7 +266,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
                 if let ProjectStep::Error { error, proc } = &res {
-                    print!("\r\n>>> runtime error in entity {:?}: {:?}\r\n\r\n", proc.get_call_stack().last().unwrap().entity.borrow().name, error.cause);
+                    print!("\r\n>>> runtime error: {:?}\r\n\r\n", error.cause);
                 }
                 idle_sleeper.consume(&res);
             }
@@ -326,7 +326,7 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
             for _ in 0..STEPS_PER_IO_ITER {
                 let res = proj.step(mc);
                 if let ProjectStep::Error { error, proc } = &res {
-                    println!("\n>>> runtime error in entity {:?}: {:?}\n", proc.get_call_stack().last().unwrap().entity.borrow().name, error.cause);
+                    println!("\n>>> runtime error: {:?}\n", error.cause);
                 }
                 idle_sleeper.consume(&res);
             }

@@ -26,7 +26,7 @@ struct Env<'gc> {
 }
 type EnvArena = Arena<Rootable![Env<'_>]>;
 
-fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>) -> (EnvArena, Locations) {
+fn get_running_proc<'a, F>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>, locals: F) -> (EnvArena, Locations) where F: for<'gc> Fn(&Mutation<'gc>) -> SymbolTable<'gc, C, StdSystem<C>>{
     let parser = ast::Parser::default();
     let ast = parser.parse(xml).unwrap();
     assert_eq!(ast.roles.len(), 1);
@@ -36,12 +36,10 @@ fn get_running_proc<'a>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C
 
     (EnvArena::new(|mc| {
         let glob = GlobalContext::from_init(mc, &init_info, Rc::new(code), settings, system);
-        let entity = *glob.entities.iter().next().unwrap().1;
+        let entity = *glob.entities.iter().next().unwrap();
         let glob = Gc::new(mc, RefLock::new(glob));
 
-        let mut proc = Process::new(glob, entity, main.1);
-        assert!(!proc.is_running());
-        proc.initialize(ProcContext { locals: Default::default(), barrier: None, reply_key: None, local_message: None });
+        let mut proc = Process::new(ProcContext { global_context: glob, entity, start_pos: main.1, locals: locals(mc), barrier: None, reply_key: None, local_message: None });
         assert!(proc.is_running());
 
         Env { glob, proc: Gc::new(mc, RefLock::new(proc)) }
@@ -86,7 +84,7 @@ fn test_proc_ret() {
         fields = "",
         funcs = include_str!("blocks/ret.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
         Value::String(x) => assert_eq!(&*x, ""),
@@ -97,19 +95,17 @@ fn test_proc_ret() {
 #[test]
 fn test_proc_sum_123n() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
-        globals = "",
-        fields = "",
-        funcs = include_str!("blocks/sum-123n.xml"),
-        methods = "",
-    ), Settings::default(), system);
 
     for (n, expect) in [(0, json!("0")), (1, json!(1)), (2, json!(3)), (3, json!(6)), (4, json!(10)), (5, json!(15)), (6, json!(21))] {
-        env.mutate(|mc, env| {
-            let mut locals = SymbolTable::default();
-            locals.define_or_redefine("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
-            env.proc.borrow_mut(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
-        });
+        let mut locals = SymbolTable::default();
+        locals.define_or_redefine("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
+
+        let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+            globals = "",
+            fields = "",
+            funcs = include_str!("blocks/sum-123n.xml"),
+            methods = "",
+        ), Settings::default(), system, |_| locals);
         run_till_term(&mut env, |mc, _, res| {
             let expect = Value::from_simple(mc, SimpleValue::from_json(expect).unwrap());
             assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "sum 123n");
@@ -120,19 +116,17 @@ fn test_proc_sum_123n() {
 #[test]
 fn test_proc_recursive_factorial() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
-        globals = "",
-        fields = "",
-        funcs = include_str!("blocks/recursive-factorial.xml"),
-        methods = "",
-    ), Settings::default(), system);
 
     for (n, expect) in [(0, json!("1")), (1, json!("1")), (2, json!(2)), (3, json!(6)), (4, json!(24)), (5, json!(120)), (6, json!(720)), (7, json!(5040))] {
-        env.mutate(|mc, env| {
-            let mut locals = SymbolTable::default();
-            locals.define_or_redefine("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
-            env.proc.borrow_mut(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
-        });
+        let mut locals = SymbolTable::default();
+        locals.define_or_redefine("n", Shared::Unique(Number::new(n as f64).unwrap().into()));
+
+        let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+            globals = "",
+            fields = "",
+            funcs = include_str!("blocks/recursive-factorial.xml"),
+            methods = "",
+        ), Settings::default(), system, |_| locals);
         run_till_term(&mut env, |mc, _, res| {
             let expect = Value::from_simple(mc, SimpleValue::from_json(expect).unwrap());
             assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "recursive factorial");
@@ -148,7 +142,7 @@ fn test_proc_loops_lists_basic() {
         fields = "",
         funcs = include_str!("blocks/loops-lists-basic.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -188,7 +182,7 @@ fn test_proc_recursively_self_containing_lists() {
         fields = "",
         funcs = include_str!("blocks/recursively-self-containing-lists.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| match res.unwrap().0.unwrap() {
         Value::List(res) => {
@@ -228,22 +222,16 @@ fn test_proc_recursively_self_containing_lists() {
 #[test]
 fn test_proc_sieve_of_eratosthenes() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+
+    let mut locals = SymbolTable::default();
+    locals.define_or_redefine("n", Shared::Unique(Number::new(100.0).unwrap().into()));
+
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/sieve-of-eratosthenes.xml"),
         methods = "",
-    ), Settings::default(), system);
-
-    env.mutate(|mc, env| {
-        let mut locals = SymbolTable::default();
-        locals.define_or_redefine("n", Shared::Unique(Number::new(100.0).unwrap().into()));
-
-        let mut proc = env.proc.borrow_mut(mc);
-        assert!(proc.is_running());
-        proc.initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
-        assert!(proc.is_running());
-    });
+    ), Settings::default(), system, |_| locals);
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97])).unwrap());
@@ -259,7 +247,7 @@ fn test_proc_early_return() {
         fields = "",
         funcs = include_str!("blocks/early-return.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([1,3])).unwrap());
@@ -275,7 +263,7 @@ fn test_proc_short_circuit() {
         fields = "",
         funcs = include_str!("blocks/short-circuit.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -303,7 +291,7 @@ fn test_proc_all_arithmetic() {
         fields = "",
         funcs = include_str!("blocks/all-arithmetic.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let inf = core::f64::INFINITY;
@@ -347,7 +335,7 @@ fn test_proc_lambda_local_shadow_capture() {
         fields = "",
         funcs = include_str!("blocks/lambda-local-shadow-capture.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!(["1", "1", "1"])).unwrap());
@@ -363,7 +351,7 @@ fn test_proc_upvars() {
         fields = "",
         funcs = include_str!("blocks/upvars.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -422,7 +410,7 @@ fn test_proc_generators_nested() {
         fields = "",
         funcs = include_str!("blocks/generators-nested.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761])).unwrap());
@@ -438,7 +426,7 @@ fn test_proc_call_in_closure() {
         fields = "",
         funcs = include_str!("blocks/call-in-closure.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -452,19 +440,17 @@ fn test_proc_call_in_closure() {
 #[test]
 fn test_proc_warp_yields() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
-        globals = r#"<variable name="counter"><l>0</l></variable>"#,
-        fields = "",
-        funcs = include_str!("blocks/warp-yields.xml"),
-        methods = "",
-    ), Settings::default(), system);
 
     for (mode, (expected_counter, expected_yields)) in [(12, 12), (13, 13), (17, 0), (18, 0), (16, 0), (17, 2), (14, 0), (27, 3), (30, 7), (131, 109), (68, 23), (51, 0), (63, 14)].into_iter().enumerate() {
-        env.mutate(|mc, env| {
-            let mut locals = SymbolTable::default();
-            locals.define_or_redefine("mode", Shared::Unique(Number::new(mode as f64).unwrap().into()));
-            env.proc.borrow_mut(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
-        });
+        let mut locals = SymbolTable::default();
+        locals.define_or_redefine("mode", Shared::Unique(Number::new(mode as f64).unwrap().into()));
+
+        let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+            globals = r#"<variable name="counter"><l>0</l></variable>"#,
+            fields = "",
+            funcs = include_str!("blocks/warp-yields.xml"),
+            methods = "",
+        ), Settings::default(), system, |_| locals);
 
         run_till_term(&mut env, |mc, env, res| {
             let (res, yields) = res.unwrap();
@@ -484,7 +470,7 @@ fn test_proc_string_ops() {
         fields = "",
         funcs = include_str!("blocks/string-ops.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -545,7 +531,7 @@ fn test_proc_str_cmp_case_insensitive() {
         fields = "",
         funcs = include_str!("blocks/str-cmp-case-insensitive.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -562,20 +548,18 @@ fn test_proc_str_cmp_case_insensitive() {
 #[test]
 fn test_proc_rpc_call_basic() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
-        globals = "",
-        fields = "",
-        funcs = include_str!("blocks/rpc-call-basic.xml"),
-        methods = "",
-    ), Settings::default(), system);
 
     for (lat, long, city) in [(36.1627, -86.7816, "Nashville"), (40.8136, -96.7026, "Lincoln"), (40.7608, -111.8910, "Salt Lake City")] {
-        env.mutate(|mc, env| {
-            let mut locals = SymbolTable::default();
-            locals.define_or_redefine("lat", Shared::Unique(Number::new(lat).unwrap().into()));
-            locals.define_or_redefine("long", Shared::Unique(Number::new(long).unwrap().into()));
-            env.proc.borrow_mut(mc).initialize(ProcContext { locals, barrier: None, reply_key: None, local_message: None });
-        });
+        let mut locals = SymbolTable::default();
+        locals.define_or_redefine("lat", Shared::Unique(Number::new(lat).unwrap().into()));
+        locals.define_or_redefine("long", Shared::Unique(Number::new(long).unwrap().into()));
+
+        let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+            globals = "",
+            fields = "",
+            funcs = include_str!("blocks/rpc-call-basic.xml"),
+            methods = "",
+        ), Settings::default(), system, |_| locals);
         run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
             Value::String(ret) => assert_eq!(&*ret, city),
             x => panic!("{:?}", x),
@@ -591,7 +575,7 @@ fn test_proc_list_index_blocks() {
         fields = "",
         funcs = include_str!("blocks/list-index-blocks.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -624,7 +608,7 @@ fn test_proc_literal_types() {
         fields = "",
         funcs = include_str!("blocks/literal-types.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "50e4", "50e4s" ])).unwrap());
@@ -653,7 +637,7 @@ fn test_proc_say() {
         fields = "",
         funcs = include_str!("blocks/say.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, _| ());
     assert_eq!(output.borrow().as_str(), "\"Greetings, human.\"\n\"I will destroy him.\"\n");
@@ -697,7 +681,7 @@ fn test_proc_syscall() {
         fields = "",
         funcs = include_str!("blocks/syscall.xml"),
         methods = "",
-    ), Settings { syscall_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+    ), Settings { syscall_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -719,7 +703,7 @@ fn test_proc_timer_wait() {
         fields = "",
         funcs = include_str!("blocks/timer-wait.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     let start = std::time::Instant::now();
     run_till_term(&mut env, |mc, _, res| {
@@ -738,7 +722,7 @@ fn test_proc_cons_cdr() {
         fields = "",
         funcs = include_str!("blocks/cons-cdr.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -765,7 +749,7 @@ fn test_proc_list_find_contains() {
         fields = "",
         funcs = include_str!("blocks/list-find-contains.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -793,7 +777,7 @@ fn test_proc_append() {
         fields = "",
         funcs = include_str!("blocks/append.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -816,7 +800,7 @@ fn test_proc_foreach_mutate() {
         fields = "",
         funcs = include_str!("blocks/foreach-mutate.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -836,7 +820,7 @@ fn test_proc_map() {
         fields = "",
         funcs = include_str!("blocks/map.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -856,7 +840,7 @@ fn test_proc_keep_find() {
         fields = "",
         funcs = include_str!("blocks/keep-find.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -878,7 +862,7 @@ fn test_proc_numeric_bases() {
         fields = "",
         funcs = include_str!("blocks/numeric-bases.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -900,7 +884,7 @@ fn test_proc_combine() {
         fields = "",
         funcs = include_str!("blocks/combine.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -927,7 +911,7 @@ fn test_proc_autofill_closure_params() {
         fields = "",
         funcs = include_str!("blocks/autofill-closure-params.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -949,7 +933,7 @@ fn test_proc_pick_random() {
         fields = "",
         funcs = include_str!("blocks/pick-random.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, res| {
         let results = {
@@ -1010,7 +994,7 @@ fn test_proc_rand_list_ops() {
         fields = "",
         funcs = include_str!("blocks/rand-list-ops.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, res| {
         let (results, last) = {
@@ -1064,7 +1048,7 @@ fn test_proc_variadic_sum_product() {
         fields = "",
         funcs = include_str!("blocks/variadic-sum-product.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1091,7 +1075,7 @@ fn test_proc_variadic_min_max() {
         fields = "",
         funcs = include_str!("blocks/variadic-min-max.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "1", "2", "9", "17" ])).unwrap());
@@ -1107,7 +1091,7 @@ fn test_proc_atan2_new_cmp() {
         fields = "",
         funcs = include_str!("blocks/atan2-new-cmp.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1132,7 +1116,7 @@ fn test_proc_list_columns() {
         fields = "",
         funcs = include_str!("blocks/list-columns.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1176,7 +1160,7 @@ fn test_proc_transpose_consistency() {
         fields = "",
         funcs = include_str!("blocks/transpose-consistency.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1202,7 +1186,7 @@ fn test_proc_compare_str() {
         fields = "",
         funcs = include_str!("blocks/compare-str.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1271,7 +1255,7 @@ fn test_proc_new_min_max() {
         fields = "",
         funcs = include_str!("blocks/new-min-max.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1300,7 +1284,7 @@ fn test_proc_flatten() {
         fields = "",
         funcs = include_str!("blocks/flatten.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1321,7 +1305,7 @@ fn test_proc_list_len_rank_dims() {
         fields = "",
         funcs = include_str!("blocks/list-len-rank-dims.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1347,7 +1331,7 @@ fn test_proc_string_index() {
         fields = "",
         funcs = include_str!("blocks/string-index.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1370,7 +1354,7 @@ fn test_proc_type_query() {
         fields = "",
         funcs = include_str!("blocks/type-query.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1399,7 +1383,7 @@ fn test_proc_variadic_strcat() {
         fields = "",
         funcs = include_str!("blocks/variadic-strcat.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1420,7 +1404,7 @@ fn test_proc_list_lines() {
         fields = "",
         funcs = include_str!("blocks/list-lines.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1441,7 +1425,7 @@ fn test_proc_whitespace_in_numbers() {
         fields = "",
         funcs = include_str!("blocks/whitespace-in-numbers.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1466,7 +1450,7 @@ fn test_proc_binary_make_range() {
         fields = "",
         funcs = include_str!("blocks/binary-make-range.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1501,7 +1485,7 @@ fn test_proc_identical_to() {
         fields = "",
         funcs = include_str!("blocks/identical-to.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1522,7 +1506,7 @@ fn test_proc_variadic_list_ctors() {
         fields = "",
         funcs = include_str!("blocks/variadic-list-ctors.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1550,7 +1534,7 @@ fn test_proc_list_rev() {
         fields = "",
         funcs = include_str!("blocks/list-rev.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1570,7 +1554,7 @@ fn test_proc_list_reshape() {
         fields = "",
         funcs = include_str!("blocks/list-reshape.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1606,7 +1590,7 @@ fn test_proc_list_json() {
         fields = "",
         funcs = include_str!("blocks/list-json.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1629,7 +1613,7 @@ fn test_proc_explicit_to_string_cvt() {
         fields = "",
         funcs = include_str!("blocks/explicit-to-string-cvt.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1655,7 +1639,7 @@ fn test_proc_empty_variadic_no_auto_insert() {
         fields = "",
         funcs = include_str!("blocks/empty-variadic-no-auto-insert.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1677,7 +1661,7 @@ fn test_proc_c_ring_no_auto_insert() {
         fields = "",
         funcs = include_str!("blocks/c-ring-no-auto-insert.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1699,7 +1683,7 @@ fn test_proc_signed_zero() {
         fields = "",
         funcs = include_str!("blocks/signed-zero.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1724,7 +1708,7 @@ fn test_proc_singleton_sum_product() {
         fields = "",
         funcs = include_str!("blocks/singleton-sum-product.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1743,7 +1727,7 @@ fn test_proc_list_combinations() {
         fields = "",
         funcs = include_str!("blocks/list-combinations.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1787,7 +1771,7 @@ fn test_proc_unevaluated_inputs() {
         fields = "",
         funcs = include_str!("blocks/unevaluated-inputs.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1805,7 +1789,7 @@ fn test_proc_index_over_bounds() {
         fields = "",
         funcs = include_str!("blocks/index-over-bounds.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, res| {
         let res = res.unwrap_err();
@@ -1828,7 +1812,7 @@ fn test_proc_neg_collab_ids() {
         fields = "",
         funcs = include_str!("blocks/neg-collab-ids.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, res| {
         let res = res.unwrap_err();
@@ -1902,7 +1886,7 @@ fn test_proc_basic_motion() {
         fields = "",
         funcs = include_str!("blocks/basic-motion.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expected = Value::from_simple(mc, SimpleValue::from_json(json!([ 13, 54, 39 ])).unwrap());
@@ -1931,7 +1915,7 @@ fn test_proc_string_cmp() {
         fields = "",
         funcs = include_str!("blocks/string-cmp.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -1952,7 +1936,7 @@ fn test_proc_stack_overflow() {
         fields = r#"<variable name="f"><l>0</l></variable>"#,
         funcs = "",
         methods = include_str!("blocks/stack-overflow.xml"),
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, env, res| {
         let err = res.unwrap_err();
@@ -1991,7 +1975,7 @@ fn test_proc_variadic_params() {
         fields = "",
         funcs = include_str!("blocks/variadic-params.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -2022,7 +2006,7 @@ fn test_proc_rand_str_char_cache() {
         fields = "",
         funcs = include_str!("blocks/rand-str-char-cache.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, res| {
         let res = res.unwrap().0.unwrap().as_string().unwrap().into_owned();
@@ -2049,7 +2033,7 @@ fn test_proc_noop_upvars() {
         fields = "",
         funcs = include_str!("blocks/noop-upvars.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ 0, 0, 1, 0 ])).unwrap());
@@ -2065,7 +2049,7 @@ fn test_proc_try_catch_throw() {
         fields = "",
         funcs = include_str!("blocks/try-catch-throw.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "starting", "start code", "got error", "test error", "done" ])).unwrap());
@@ -2081,7 +2065,7 @@ fn test_proc_exception_unregister() {
         fields = "",
         funcs = include_str!("blocks/exception-unregister.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "top start", "before test", "before inner", "inner error", "IndexOutOfBounds { index: 332534, len: 3 }", "after test", "top error", "IndexOutOfBounds { index: 332534, len: 6 }", "top done"])).unwrap());
@@ -2097,7 +2081,7 @@ fn test_proc_exception_rethrow() {
         fields = "",
         funcs = include_str!("blocks/exception-rethrow.xml"),
         methods = "",
-    ), Settings::default(), system);
+    ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "IndexOutOfBounds { index: 543548, len: 0 }", "test error here" ])).unwrap());
@@ -2113,7 +2097,7 @@ fn test_proc_rpc_error() {
         fields = "",
         funcs = include_str!("blocks/rpc-error.xml"),
         methods = "",
-    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -2135,7 +2119,7 @@ fn test_proc_c_rings() {
         fields = "",
         funcs = include_str!("blocks/c-rings.xml"),
         methods = "",
-    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -2159,7 +2143,7 @@ fn test_proc_wall_time() {
         fields = "",
         funcs = include_str!("blocks/wall-time.xml"),
         methods = "",
-    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, res| {
         let t = OffsetDateTime::now_utc().to_offset(utc_offset);
@@ -2186,7 +2170,7 @@ fn test_proc_to_csv() {
         fields = "",
         funcs = include_str!("blocks/to-csv.xml"),
         methods = "",
-    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -2212,7 +2196,7 @@ fn test_proc_from_csv() {
         fields = "",
         funcs = include_str!("blocks/from-csv.xml"),
         methods = "",
-    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -2246,7 +2230,7 @@ fn test_proc_extra_cmp_tests() {
         fields = "",
         funcs = include_str!("blocks/extra-cmp-tests.xml"),
         methods = "",
-    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
@@ -2339,7 +2323,7 @@ fn test_proc_extra_blocks() {
         fields = "",
         funcs = include_str!("blocks/extra-blocks.xml"),
         methods = "",
-    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system);
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!("cool")).unwrap());

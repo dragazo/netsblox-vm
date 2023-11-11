@@ -37,6 +37,13 @@ impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
     }
 }
 
+struct ProcessState;
+impl From<&Entity<'_, C, StdSystem<C>>> for ProcessState {
+    fn from(_: &Entity<'_, C, StdSystem<C>>) -> Self {
+        ProcessState
+    }
+}
+
 fn default_properties_config() -> Config<C, StdSystem<C>> {
     Config {
         request: Some(Rc::new(|_, _, key, request, entity| match request {
@@ -61,6 +68,7 @@ impl CustomTypes<StdSystem<C>> for C {
     type Intermediate = SimpleValue;
 
     type EntityState = EntityState;
+    type ProcessState = ProcessState;
 
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Result<Value<'gc, C, StdSystem<C>>, ErrorCause<C, StdSystem<C>>> {
         Ok(Value::from_simple(mc, value))

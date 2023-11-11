@@ -81,14 +81,13 @@ impl ErrorSummary {
         let globals = summarize_symbols(&process.get_global_context().borrow().globals);
         let fields = summarize_symbols(&raw_entity.borrow().fields);
 
-        let call_stack = process.get_call_stack();
-        let mut trace = Vec::with_capacity(call_stack.len());
-        for (pos, locals) in iter::zip(call_stack[1..].iter().map(|x| x.called_from).chain(iter::once(error.pos)), call_stack.iter().map(|x| &x.locals)) {
+        let mut trace = Vec::with_capacity(process.call_stack.len());
+        for (pos, locals) in iter::zip(process.call_stack[1..].iter().map(|x| x.called_from).chain(iter::once(error.pos)), process.call_stack.iter().map(|x| &x.locals)) {
             if let Some(loc) = locations.lookup(pos) {
                 trace.push(TraceEntry { location: loc.clone(), locals: summarize_symbols(locals) });
             }
         }
-        debug_assert_eq!(trace.len(), call_stack.len());
+        debug_assert_eq!(trace.len(), process.call_stack.len());
 
         Self { entity, cause, globals, fields, trace }
     }
@@ -146,10 +145,10 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
-    #[collect(require_static)] pub called_from: usize,
-    #[collect(require_static)]     return_to: usize,
-                               pub entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
-                               pub locals: SymbolTable<'gc, C, S>,
+    #[collect(require_static)] called_from: usize,
+    #[collect(require_static)] return_to: usize,
+                               entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
+                               locals: SymbolTable<'gc, C, S>,
 
     #[collect(require_static)] warp_counter: usize,
     #[collect(require_static)] value_stack_size: usize,
@@ -178,9 +177,12 @@ enum RequestAction {
 /// A collection of context info for starting a new [`Process`].
 #[derive(Collect, Educe)]
 #[collect(no_drop, bound = "")]
-#[educe(Clone, Default)]
+#[educe(Clone)]
 pub struct ProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
+                               pub global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>,
+                               pub entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
                                pub locals: SymbolTable<'gc, C, S>,
+    #[collect(require_static)] pub start_pos: usize,
     #[collect(require_static)] pub barrier: Option<Barrier>,
     #[collect(require_static)] pub reply_key: Option<S::InternReplyKey>,
     #[collect(require_static)] pub local_message: Option<String>,
@@ -194,12 +196,12 @@ pub struct ProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
 #[collect(no_drop, bound = "")]
 pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
                                global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>,
-    #[collect(require_static)] start_pos: usize,
     #[collect(require_static)] pos: usize,
     #[collect(require_static)] running: bool,
     #[collect(require_static)] barrier: Option<Barrier>,
     #[collect(require_static)] reply_key: Option<S::InternReplyKey>,
     #[collect(require_static)] warp_counter: usize,
+    #[collect(require_static)] state: C::ProcessState,
                                call_stack: Vec<CallStackEntry<'gc, C, S>>,
                                value_stack: Vec<Value<'gc, C, S>>,
     #[collect(require_static)] handler_stack: Vec<Handler>,
@@ -212,23 +214,23 @@ pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
 impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// Creates a new [`Process`] that is tied to a given `start_pos` (entry point) in the [`ByteCode`] and associated with the specified `entity` and `system`.
     /// The created process is initialized to an idle (non-running) state; use [`Process::initialize`] to begin execution.
-    pub fn new(global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>, entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>, start_pos: usize) -> Self {
+    pub fn new(context: ProcContext<'gc, C, S>) -> Self {
         Self {
-            global_context,
-            start_pos,
-            running: false,
-            barrier: None,
-            reply_key: None,
-            pos: 0,
+            global_context: context.global_context,
+            running: true,
+            barrier: context.barrier,
+            reply_key: context.reply_key,
+            pos: context.start_pos,
             warp_counter: 0,
+            state: C::ProcessState::from(&*context.entity.borrow()),
             call_stack: vec![CallStackEntry {
                 called_from: usize::MAX,
                 return_to: usize::MAX,
                 warp_counter: 0,
                 value_stack_size: 0,
                 handler_stack_size: 0,
-                locals: Default::default(),
-                entity,
+                locals: context.locals,
+                entity: context.entity,
             }],
             value_stack: vec![],
             handler_stack: vec![],
@@ -236,7 +238,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             last_syscall_error: None,
             last_rpc_error: None,
             last_answer: None,
-            last_message: None,
+            last_message: context.local_message.map(|x| Rc::new(x).into()),
         }
     }
     /// Checks if the process is currently running.
@@ -247,35 +249,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// Gets the global context that this process is tied to (see [`Process::new`]).
     pub fn get_global_context(&self) -> Gc<'gc, RefLock<GlobalContext<'gc, C, S>>> {
         self.global_context
-    }
-    /// Gets a reference to the current call stack.
-    /// This gives access to stack trace information including all local scopes in the call chain.
-    /// Note that the call stack is never empty, and that the always-present first element (denoting the initial execution request) is a special
-    /// entry which has an invalid value for [`CallStackEntry::called_from`], namely [`usize::MAX`].
-    pub fn get_call_stack(&self) -> &[CallStackEntry<'gc, C, S>] {
-        &self.call_stack
-    }
-    /// Prepares the process to execute starting at the main entry point (see [`Process::new`]) with the provided input local variables.
-    /// A [`Barrier`] may also be set, which will be destroyed upon termination, either due to completion or an error.
-    /// 
-    /// Any previous process state is wiped when performing this action.
-    pub fn initialize(&mut self, context: ProcContext<'gc, C, S>) {
-        self.pos = self.start_pos;
-        self.running = true;
-        self.barrier = context.barrier;
-        self.reply_key = context.reply_key;
-        self.warp_counter = 0;
-        self.call_stack.drain(1..);
-        self.call_stack[0].locals = context.locals;
-        self.value_stack.clear();
-        self.handler_stack.clear();
-        self.defer = None;
-        self.last_syscall_error = None;
-        self.last_rpc_error = None;
-        self.last_answer = None;
-        self.last_message = context.local_message.map(|x| Rc::new(x).into());
-
-        debug_assert_eq!(self.call_stack.len(), 1);
     }
     /// Executes a single bytecode instruction.
     /// The return value can be used to determine what additional effects the script has requested,
@@ -487,7 +460,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(lookup_var!(var).get().clone());
                 self.pos = aft_pos;
             }
-            Instruction::PushEntity { name } => match global_context.entities.get(name) {
+            Instruction::PushEntity { name } => match global_context.entities.iter().find(|&x| x.borrow().name.as_str() == name) {
                 Some(x) => {
                     self.value_stack.push(Value::Entity(*x));
                     self.pos = aft_pos;
@@ -1247,7 +1220,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     costume: target.costume.clone(),
                     state: C::EntityState::from(EntityKind::Clone { parent: &*target }),
                     alive: true,
-                    root: Some(target.root.unwrap_or(target_cell)),
+                    original: Some(target.original.unwrap_or(target_cell)),
                     fields: target.fields.clone(),
                 }));
                 self.value_stack.push(new_entity.into());
