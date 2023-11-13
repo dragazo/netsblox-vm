@@ -108,7 +108,7 @@ pub struct Clock {
     cache: Option<ClockCache>,
 }
 impl Clock {
-    /// Creates a new [`Clock] with the specified [`UtcOffset`] and (optional) cache [`Precision`] (see [`Clock::read`]).
+    /// Creates a new [`Clock`] with the specified [`UtcOffset`] and (optional) cache [`Precision`] (see [`Clock::read`]).
     pub fn new(utc_offset: UtcOffset, cache_precision: Option<Precision>) -> Self {
         let mut res = Self { utc_offset, cache: None };
         if let Some(precision) = cache_precision {

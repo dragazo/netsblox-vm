@@ -1,3 +1,5 @@
+//! Miscellaneous types representing runtime state.
+
 use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 use alloc::rc::{Rc, Weak};
 use alloc::borrow::{Cow, ToOwned};
@@ -132,6 +134,7 @@ impl<C: CustomTypes<S>, S: System<C>> From<FromJsonError> for ErrorCause<C, S> {
 impl<C: CustomTypes<S>, S: System<C>> From<FromNetsBloxJsonError> for ErrorCause<C, S> { fn from(error: FromNetsBloxJsonError) -> Self { Self::FromNetsBloxJsonError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<NumberError> for ErrorCause<C, S> { fn from(error: NumberError) -> Self { Self::NumberError { error } } }
 
+/// A 32-bit RGBA color with color space conversion utils.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Color { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
 impl Color {
