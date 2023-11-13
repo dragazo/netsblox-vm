@@ -402,6 +402,21 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     pub fn inject_message(&self, msg_type: String, values: Vec<(String, SimpleValue)>) {
         self.message_injector.send(IncomingMessage { msg_type, values, reply_key: None }).unwrap();
     }
+
+    #[cfg(debug_assertions)]
+    fn check_entity_borrowing<'gc>(mc: &Mutation<'gc>, entity: &mut Entity<'gc, C, Self>) {
+        if let Some(original) = entity.original {
+            Self::check_entity_borrowing(mc, &mut *original.borrow_mut(mc));
+        }
+    }
+    #[cfg(debug_assertions)]
+    fn check_proc_borrowing<'gc>(mc: &Mutation<'gc>, proc: &mut Process<'gc, C, Self>) {
+        Self::check_entity_borrowing(mc, &mut *proc.current_entity().borrow_mut(mc));
+        let global_context = proc.global_context.borrow_mut(mc);
+        for entity in global_context.entities.iter() {
+            Self::check_entity_borrowing(mc, &mut *entity.1.borrow_mut(mc));
+        }
+    }
 }
 impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
     type RequestKey = RequestKey<C>;
@@ -419,6 +434,9 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
     }
 
     fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, proc: &mut Process<'gc, C, Self>) -> Result<Self::RequestKey, ErrorCause<C, Self>> {
+        #[cfg(debug_assertions)]
+        Self::check_proc_borrowing(mc, proc);
+
         Ok(match self.config.request.as_ref() {
             Some(handler) => {
                 let key = RequestKey(Arc::new(Mutex::new(AsyncResult::new())));
@@ -430,7 +448,10 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
             None => return Err(ErrorCause::NotSupported { feature: request.feature() }),
         })
     }
-    fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, _: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>> {
+    fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>> {
+        #[cfg(debug_assertions)]
+        Self::check_proc_borrowing(mc, proc);
+
         Ok(match key.poll() {
             AsyncResult::Completed(Ok(x)) => AsyncResult::Completed(Ok(C::from_intermediate(mc, x)?)),
             AsyncResult::Completed(Err(x)) => AsyncResult::Completed(Err(x)),
@@ -440,6 +461,9 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
     }
 
     fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, proc: &mut Process<'gc, C, Self>) -> Result<Self::CommandKey, ErrorCause<C, Self>> {
+        #[cfg(debug_assertions)]
+        Self::check_proc_borrowing(mc, proc);
+
         Ok(match self.config.command.as_ref() {
             Some(handler) => {
                 let key = CommandKey(Arc::new(Mutex::new(AsyncResult::new())));
@@ -451,7 +475,10 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
             None => return Err(ErrorCause::NotSupported { feature: command.feature() }),
         })
     }
-    fn poll_command<'gc>(&self, _: &Mutation<'gc>, key: &Self::CommandKey, _: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>> {
+    fn poll_command<'gc>(&self, mc: &Mutation<'gc>, key: &Self::CommandKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>> {
+        #[cfg(debug_assertions)]
+        Self::check_proc_borrowing(mc, proc);
+
         Ok(key.poll())
     }
 
