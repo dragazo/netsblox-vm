@@ -22,6 +22,7 @@ use crate::gc::*;
 use crate::json::*;
 use crate::real_time::*;
 use crate::bytecode::*;
+use crate::process::*;
 
 /// Error type used by [`NumberChecker`].
 #[derive(Debug)]
@@ -1297,10 +1298,6 @@ impl<'gc, 'a, 'b, C: CustomTypes<S>, S: System<C>> LookupGroup<'gc, 'a, 'b, C, S
         }
         None
     }
-    /// Gets a mutable reference to the last (most-local) context.
-    pub fn locals_mut(&mut self) -> &mut SymbolTable<'gc, C, S> {
-        self.0.last_mut().unwrap()
-    }
 }
 
 /// The error promotion paradigm to use for certain types of runtime errors.
@@ -1619,9 +1616,10 @@ pub enum Command<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     /// Clear all drawings made by all sprites.
     ClearDrawings,
 
-    /// Sets the costume on the entity. This should essentially assigns the costume to [`Entity::costume`],
-    /// but is treated as a system command so that custom code can be executed when an entity switches costumes.
-    SetCostume { costume: Option<Rc<Image>> },
+    /// Sets the costume on the entity.
+    /// At this point the costume has already been assigned to [`Entity::costume`],
+    /// so this is just a hook for any custom update code that is needed for external purposes.
+    SetCostume,
 
     /// Moves the entity to a specific location.
     GotoXY { x: Number, y: Number },
@@ -1677,22 +1675,15 @@ pub enum CommandStatus<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
 #[educe(Clone)]
 pub struct Config<C: CustomTypes<S>, S: System<C>> {
     /// A function used to perform asynchronous requests that yield a value back to the runtime.
-    pub request: Option<Rc<dyn for<'gc> Fn(&S, &Mutation<'gc>, S::RequestKey, Request<'gc, C, S>, &mut Entity<'gc, C, S>) -> RequestStatus<'gc, C, S>>>,
+    pub request: Option<Rc<dyn for<'gc> Fn(&S, &Mutation<'gc>, S::RequestKey, Request<'gc, C, S>, &mut Process<'gc, C, S>) -> RequestStatus<'gc, C, S>>>,
     /// A function used to perform asynchronous tasks whose completion is awaited by the runtime.
-    pub command: Option<Rc<dyn for<'gc, 'a> Fn(&S, &Mutation<'gc>, S::CommandKey, Command<'gc, 'a, C, S>, &mut Entity<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S>>>,
+    pub command: Option<Rc<dyn for<'gc, 'a> Fn(&S, &Mutation<'gc>, S::CommandKey, Command<'gc, 'a, C, S>, &mut Process<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S>>>,
 }
 impl<C: CustomTypes<S>, S: System<C>> Default for Config<C, S> {
     fn default() -> Self {
         Self {
             request: None,
-            command: Some(Rc::new(|_, _, key, command, entity| match command {
-                Command::SetCostume { costume } => {
-                    entity.costume = costume;
-                    key.complete(Ok(()));
-                    CommandStatus::Handled
-                }
-                _ => CommandStatus::UseDefault { key, command },
-            })),
+            command: None,
         }
     }
 }
@@ -1701,20 +1692,20 @@ impl<C: CustomTypes<S>, S: System<C>> Config<C, S> {
     pub fn fallback(&self, other: &Self) -> Self {
         Self {
             request: match (self.request.clone(), other.request.clone()) {
-                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, request, entity| {
-                    match a(system, mc, key, request, entity) {
+                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, request, proc| {
+                    match a(system, mc, key, request, proc) {
                         RequestStatus::Handled => RequestStatus::Handled,
-                        RequestStatus::UseDefault { key, request } => b(system, mc, key, request, entity),
+                        RequestStatus::UseDefault { key, request } => b(system, mc, key, request, proc),
                     }
                 })),
                 (Some(a), None) | (None, Some(a)) => Some(a),
                 (None, None) => None,
             },
             command: match (self.command.clone(), other.command.clone()) {
-                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, command, entity| {
-                    match a(system, mc, key, command, entity) {
+                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, command, proc| {
+                    match a(system, mc, key, command, proc) {
                         CommandStatus::Handled => CommandStatus::Handled,
-                        CommandStatus::UseDefault { key, command } => b(system, mc, key, command, entity),
+                        CommandStatus::UseDefault { key, command } => b(system, mc, key, command, proc),
                     }
                 })),
                 (Some(a), None) | (None, Some(a)) => Some(a),
@@ -1819,18 +1810,18 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Performs a general request which returns a value to the system.
     /// Ideally, this function should be non-blocking, and the requestor will await the result asynchronously.
     /// The [`Entity`] that made the request is provided for context.
-    fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<Self::RequestKey, ErrorCause<C, Self>>;
+    fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, proc: &mut Process<'gc, C, Self>) -> Result<Self::RequestKey, ErrorCause<C, Self>>;
     /// Poll for the completion of an asynchronous request.
     /// The [`Entity`] that made the request is provided for context.
-    fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, entity: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>>;
+    fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>>;
 
     /// Performs a general command which does not return a value to the system.
     /// Ideally, this function should be non-blocking, and the commander will await the task's completion asynchronously.
     /// The [`Entity`] that issued the command is provided for context.
-    fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, entity: &mut Entity<'gc, C, Self>) -> Result<Self::CommandKey, ErrorCause<C, Self>>;
+    fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, proc: &mut Process<'gc, C, Self>) -> Result<Self::CommandKey, ErrorCause<C, Self>>;
     /// Poll for the completion of an asynchronous command.
     /// The [`Entity`] that issued the command is provided for context.
-    fn poll_command<'gc>(&self, mc: &Mutation<'gc>, key: &Self::CommandKey, entity: &mut Entity<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>>;
+    fn poll_command<'gc>(&self, mc: &Mutation<'gc>, key: &Self::CommandKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>>;
 
     /// Sends a message containing a set of named `values` to each of the specified `targets`.
     /// The `expect_reply` value controls whether or not to use a reply mechanism to asynchronously receive a response from the target(s).

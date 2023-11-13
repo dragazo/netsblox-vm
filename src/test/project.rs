@@ -249,7 +249,17 @@ fn test_proj_watchers() {
 
 #[test]
 fn test_proj_costumes() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let config = Config::<C, StdSystem<C>> {
+        request: None,
+        command: Some(Rc::new(move |_, _, key, command, _| match command {
+            Command::SetCostume => {
+                key.complete(Ok(()));
+                CommandStatus::Handled
+            }
+            _ => CommandStatus::UseDefault { key, command },
+        })),
+    };
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/costumes.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();

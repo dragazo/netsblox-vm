@@ -46,18 +46,24 @@ impl From<&Entity<'_, C, StdSystem<C>>> for ProcessState {
 
 fn default_properties_config() -> Config<C, StdSystem<C>> {
     Config {
-        request: Some(Rc::new(|_, _, key, request, entity| match request {
-            Request::Property { prop } => entity.state.props.perform_get_property(key, prop),
-            _ => RequestStatus::UseDefault { key, request },
+        request: Some(Rc::new(|_, _, key, request, proc| {
+            let entity = proc.current_entity().borrow();
+            match request {
+                Request::Property { prop } => entity.state.props.perform_get_property(key, prop),
+                _ => RequestStatus::UseDefault { key, request },
+            }
         })),
-        command: Some(Rc::new(|_, _, key, command, entity| match command {
-            Command::SetProperty { prop, value } => entity.state.props.perform_set_property(key, prop, value),
-            Command::ChangeProperty { prop, delta } => entity.state.props.perform_change_property(key, prop, delta),
-            Command::ClearEffects => entity.state.props.perform_clear_effects(key),
-            Command::GotoXY { x, y } => entity.state.props.perform_goto_xy(key, x, y),
-            Command::PointTowardsXY { x, y } => entity.state.props.perform_point_towards_xy(key, x, y),
-            Command::Forward { distance } => entity.state.props.perform_forward(key, distance),
-            _ => CommandStatus::UseDefault { key, command },
+        command: Some(Rc::new(|_, mc, key, command, proc| {
+            let mut entity = proc.current_entity().borrow_mut(mc);
+            match command {
+                Command::SetProperty { prop, value } => entity.state.props.perform_set_property(key, prop, value),
+                Command::ChangeProperty { prop, delta } => entity.state.props.perform_change_property(key, prop, delta),
+                Command::ClearEffects => entity.state.props.perform_clear_effects(key),
+                Command::GotoXY { x, y } => entity.state.props.perform_goto_xy(key, x, y),
+                Command::PointTowardsXY { x, y } => entity.state.props.perform_point_towards_xy(key, x, y),
+                Command::Forward { distance } => entity.state.props.perform_forward(key, distance),
+                _ => CommandStatus::UseDefault { key, command },
+            }
         })),
     }
 }
