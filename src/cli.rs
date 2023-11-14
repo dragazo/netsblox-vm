@@ -191,7 +191,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
             let update_flag = update_flag.clone();
             Some(Rc::new(move |_, _, key, command, proc| match command {
                 Command::Print { style: _, value } => {
-                    let entity = &*proc.current_entity().borrow();
+                    let entity = &*proc.get_call_stack().last().unwrap().entity.borrow();
                     if let Some(value) = value {
                         print!("{entity:?} > {value:?}\r\n");
                         update_flag.set(true);
@@ -207,7 +207,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
             let input_queries = input_queries.clone();
             Some(Rc::new(move |_, _, key, request, proc| match request {
                 Request::Input { prompt } => {
-                    let entity = &*proc.current_entity().borrow();
+                    let entity = &*proc.get_call_stack().last().unwrap().entity.borrow();
                     input_queries.borrow_mut().push_back((format!("{entity:?} {prompt:?} > "), key));
                     update_flag.set(true);
                     RequestStatus::Handled
@@ -301,7 +301,7 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
         request: None,
         command: Some(Rc::new(move |_, _, key, command, proc| match command {
             Command::Print { style: _, value } => {
-                let entity = &*proc.current_entity().borrow();
+                let entity = &*proc.get_call_stack().last().unwrap().entity.borrow();
                 if let Some(value) = value { println!("{entity:?} > {value:?}") }
                 key.complete(Ok(()));
                 CommandStatus::Handled
@@ -387,7 +387,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
         request: None,
         command: Some(Rc::new(move |_, _, key, command, proc| match command {
             Command::Print { style: _, value } => {
-                let entity = &*proc.current_entity().borrow();
+                let entity = &*proc.get_call_stack().last().unwrap().entity.borrow();
                 if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") }
                 key.complete(Ok(()));
                 CommandStatus::Handled

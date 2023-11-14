@@ -13,7 +13,6 @@ use crate::json::*;
 use crate::real_time::*;
 use crate::bytecode::*;
 use crate::runtime::*;
-use crate::process::*;
 use crate::std_system::*;
 
 use super::*;
@@ -51,6 +50,19 @@ fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(&M
         let mut proc = env.proc.borrow_mut(mc);
         assert!(proc.is_running());
 
+        fn assert_done<'gc>(mc: &Mutation<'gc>, proc: &mut Process<'gc, C, StdSystem<C>>) {
+            assert!(!proc.is_running());
+            assert_ne!(proc.get_call_stack().len(), 0);
+            for _ in 0..16 {
+                match proc.step(mc) {
+                    Ok(ProcessStep::Idle) => (),
+                    x => panic!("{x:?}"),
+                }
+                assert!(!proc.is_running());
+                assert_ne!(proc.get_call_stack().len(), 0);
+            }
+        }
+
         let mut yields = 0;
         let ret = loop {
             match proc.step(mc) {
@@ -64,13 +76,14 @@ fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(&M
                 Ok(ProcessStep::Fork { .. }) => panic!("proc tests should not fork"),
                 Ok(ProcessStep::Pause) => panic!("proc tests should not pause"),
                 Err(e) => {
+                    assert_done(mc, &mut *proc);
                     drop(proc); // so handler can borrow the proc if needed
                     return and_then(mc, env, Err(e));
                 }
             }
         };
 
-        assert!(!proc.is_running());
+        assert_done(mc, &mut *proc);
         drop(proc); // so handler can borrow the proc if needed
         and_then(mc, env, Ok((ret, yields)));
     });

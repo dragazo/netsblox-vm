@@ -1128,7 +1128,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> fmt::Debug for Watcher<'gc, C, S> {
 /// 
 /// This is effectively equivalent to [`Gc<T>`] except that it performs no dynamic allocation
 /// for the [`Shared::Unique`] case, which is assumed to be significantly more likely than [`Shared::Aliased`].
-#[derive(Collect)]
+#[derive(Collect, Debug)]
 #[collect(no_drop)]
 pub enum Shared<'gc, T: 'gc + Collect> {
     /// A shared resource which has only (this) single unique handle.
@@ -1192,7 +1192,7 @@ impl<'a, T> Deref for SharedRef<'a, T> {
 /// Simple methods are provided to perform value lookups in the table.
 #[derive(Collect, Educe)]
 #[collect(no_drop, bound = "")]
-#[educe(Default)]
+#[educe(Default, Debug)]
 pub struct SymbolTable<'gc, C: CustomTypes<S>, S: System<C>>(BTreeMap<String, Shared<'gc, Value<'gc, C, S>>>);
 impl<'gc, C: CustomTypes<S>, S: System<C>> Clone for SymbolTable<'gc, C, S> {
     /// Creates a shallow (non-aliasing) copy of all variables currently stored in this symbol table.
@@ -1307,11 +1307,11 @@ pub enum ErrorScheme {
     /// as well as being stored in a corresponding last-error process-local variable.
     Soft,
     /// Emit errors as hard errors. This treats certain classes of typically soft errors as hard errors that
-    /// must be caught or else terminate the [`Process`](crate::process::Process) (not the entire VM).
+    /// must be caught or else terminate the [`Process`] (not the entire VM).
     Hard,
 }
 
-/// Settings to use for a [`Process`](crate::process::Process).
+/// Settings to use for a [`Process`].
 #[derive(Clone, Copy)]
 pub struct Settings {
     /// The maximum depth of the call stack (default `1024`).

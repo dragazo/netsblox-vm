@@ -47,14 +47,14 @@ impl From<&Entity<'_, C, StdSystem<C>>> for ProcessState {
 fn default_properties_config() -> Config<C, StdSystem<C>> {
     Config {
         request: Some(Rc::new(|_, _, key, request, proc| {
-            let entity = proc.current_entity().borrow();
+            let entity = proc.get_call_stack().last().unwrap().entity.borrow();
             match request {
                 Request::Property { prop } => entity.state.props.perform_get_property(key, prop),
                 _ => RequestStatus::UseDefault { key, request },
             }
         })),
         command: Some(Rc::new(|_, mc, key, command, proc| {
-            let mut entity = proc.current_entity().borrow_mut(mc);
+            let mut entity = proc.get_call_stack().last().unwrap().entity.borrow_mut(mc);
             match command {
                 Command::SetProperty { prop, value } => entity.state.props.perform_set_property(key, prop, value),
                 Command::ChangeProperty { prop, delta } => entity.state.props.perform_change_property(key, prop, delta),

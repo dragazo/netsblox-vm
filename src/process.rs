@@ -83,11 +83,10 @@ impl ErrorSummary {
 
         let mut trace = Vec::with_capacity(process.call_stack.len());
         for (pos, locals) in iter::zip(process.call_stack[1..].iter().map(|x| x.called_from).chain(iter::once(error.pos)), process.call_stack.iter().map(|x| &x.locals)) {
-            if let Some(loc) = locations.lookup(pos) {
-                trace.push(TraceEntry { location: loc.clone(), locals: summarize_symbols(locals) });
+            if let Some(location) = locations.lookup(pos) {
+                trace.push(TraceEntry { location, locals: summarize_symbols(locals) });
             }
         }
-        debug_assert_eq!(trace.len(), process.call_stack.len());
 
         Self { entity, cause, globals, fields, trace }
     }
@@ -106,6 +105,8 @@ pub struct ExecError<C: CustomTypes<S>, S: System<C>> {
 }
 
 /// Result of stepping through a [`Process`].
+#[derive(Educe)]
+#[educe(Debug)]
 pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// The process was not running.
     Idle,
@@ -144,15 +145,15 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
 /// This contains information about the call origin and local variables defined in the called context.
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
-struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
-    #[collect(require_static)] called_from: usize,
-    #[collect(require_static)] return_to: usize,
-                               entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
-                               locals: SymbolTable<'gc, C, S>,
+pub struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
+    #[collect(require_static)] pub called_from: usize,
+    #[collect(require_static)]     return_to: usize,
+                               pub entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
+                               pub locals: SymbolTable<'gc, C, S>,
 
-    #[collect(require_static)] warp_counter: usize,
-    #[collect(require_static)] value_stack_size: usize,
-    #[collect(require_static)] handler_stack_size: usize,
+    #[collect(require_static)]     warp_counter: usize,
+    #[collect(require_static)]     value_stack_size: usize,
+    #[collect(require_static)]     handler_stack_size: usize,
 }
 
 struct Handler {
@@ -199,7 +200,6 @@ pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
                                pub global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>,
     #[collect(require_static)] pub state: C::ProcessState,
     #[collect(require_static)]     pos: usize,
-    #[collect(require_static)]     running: bool,
     #[collect(require_static)]     barrier: Option<Barrier>,
     #[collect(require_static)]     reply_key: Option<S::InternReplyKey>,
     #[collect(require_static)]     warp_counter: usize,
@@ -217,7 +217,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     pub fn new(context: ProcContext<'gc, C, S>) -> Self {
         Self {
             global_context: context.global_context,
-            running: true,
             barrier: context.barrier,
             reply_key: context.reply_key,
             pos: context.start_pos,
@@ -244,21 +243,27 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// Checks if the process is currently running.
     /// Note that the process will not run on its own (see [`Process::step`]).
     pub fn is_running(&self) -> bool {
-        self.running
+        self.pos != usize::MAX
     }
-    /// Gets the current active entity of this process.
-    /// Note that this is not necessarily the same entity that was used to construct the process,
-    /// as blocks such as "tell _ to _" and "ask _ for _" can change the context entity.
-    pub fn current_entity(&self) -> Gc<'gc, RefLock<Entity<'gc, C, S>>> {
-        self.call_stack.last().unwrap().entity
+    /// Gets a reference to the current call stack.
+    /// This is a sequence of every call frame, including the current context entity, local variables in scope, and other hidden state information.
+    /// Due to the delicate state involved, a mutable option is not supported.
+    pub fn get_call_stack(&self) -> &[CallStackEntry<'gc, C, S>] {
+        &self.call_stack
     }
     /// Executes a single bytecode instruction.
     /// The return value can be used to determine what additional effects the script has requested,
     /// as well as to retrieve the return value or execution error in the event that the process terminates.
     /// 
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`ProcessStep::Terminate`].
+    /// 
+    /// This function is not re-entrant, so calling it from the mutable handle of, e.g., [`Config`] will likely lead to panics.
     pub fn step(&mut self, mc: &Mutation<'gc>) -> Result<ProcessStep<'gc, C, S>, ExecError<C, S>> {
-        let mut res = self.step_impl(mc);
+        if !self.is_running() {
+            return Ok(ProcessStep::Idle);
+        }
+
+        let mut res = self.step_impl(mc).map_err(|cause| ExecError { cause, pos: self.pos });
         if let Err(err) = &res {
             if let Some(Handler { pos, var, warp_counter, call_stack_size, value_stack_size }) = self.handler_stack.last() {
                 self.warp_counter = *warp_counter;
@@ -267,9 +272,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 debug_assert_eq!(self.call_stack.len(), *call_stack_size);
                 debug_assert_eq!(self.value_stack.len(), *value_stack_size);
 
-                let msg = match err {
+                let msg = match &err.cause {
                     ErrorCause::Custom { msg } => msg.clone(),
-                    _ => format!("{err:?}"),
+                    x => format!("{x:?}"),
                 };
                 self.call_stack.last_mut().unwrap().locals.define_or_redefine(var, Shared::Unique(Value::String(Rc::new(msg))));
                 self.pos = *pos;
@@ -278,11 +283,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         }
 
         if let Ok(ProcessStep::Terminate { .. }) | Err(_) = &res {
-            self.running = false;
+            self.pos = usize::MAX;
             self.barrier = None;
             self.reply_key = None;
+            self.defer = None;
         }
-        res.map_err(|cause| ExecError { cause, pos: self.pos })
+
+        res
     }
     fn step_impl(&mut self, mc: &Mutation<'gc>) -> Result<ProcessStep<'gc, C, S>, ErrorCause<C, S>> {
         fn process_result<'gc, C: CustomTypes<S>, S: System<C>, T>(result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, C, S>>>, last_ok: Option<&mut Option<Value<'gc, C, S>>>, last_err: Option<&mut Option<Value<'gc, C, S>>>, to_value: fn(T) -> Option<Value<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
@@ -471,7 +478,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 None => return Err(ErrorCause::UndefinedEntity { name: name.into() }),
             }
             Instruction::PushSelf => {
-                self.value_stack.push(self.current_entity().into());
+                self.value_stack.push(self.call_stack.last().unwrap().entity.into());
                 self.pos = aft_pos;
             }
             Instruction::PopValue => {
@@ -867,7 +874,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
             Instruction::Watcher { create, var } => {
                 let watcher = Watcher {
-                    entity: Gc::downgrade(self.current_entity()),
+                    entity: Gc::downgrade(self.call_stack.last().unwrap().entity),
                     name: var.to_owned(),
                     value: Gc::downgrade(lookup_var!(mut var).alias_inner(mc)),
                 };
@@ -905,7 +912,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     warp_counter: self.warp_counter,
                     value_stack_size: self.value_stack.len(),
                     handler_stack_size: self.handler_stack.len(),
-                    entity: self.current_entity(),
+                    entity: self.call_stack.last().unwrap().entity,
                     locals,
                 });
                 self.pos = pos;
@@ -925,7 +932,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::CallClosure { new_entity, args } => {
                 let (closure_pos, locals) = prep_call_closure(mc, &mut self.value_stack, args)?;
                 let entity = match new_entity {
-                    false => self.current_entity(),
+                    false => self.call_stack.last().unwrap().entity,
                     true => self.value_stack.pop().unwrap().as_entity()?,
                 };
 
@@ -943,7 +950,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::ForkClosure { args } => {
                 let (closure_pos, locals) = prep_call_closure(mc, &mut self.value_stack, args)?;
                 self.pos = aft_pos;
-                return Ok(ProcessStep::Fork { pos: closure_pos, locals, entity: self.current_entity() });
+                return Ok(ProcessStep::Fork { pos: closure_pos, locals, entity: self.call_stack.last().unwrap().entity });
             }
             Instruction::Return => {
                 let CallStackEntry { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, .. } = self.call_stack.last().unwrap();
@@ -1178,23 +1185,23 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 });
             }
             Instruction::PushCostume => {
-                let entity = self.current_entity().borrow();
+                let entity = self.call_stack.last().unwrap().entity.borrow();
                 self.value_stack.push(entity.costume.clone().map(|x| Value::Image(x)).unwrap_or_else(|| Value::String(empty_string())));
                 self.pos = aft_pos;
             }
             Instruction::PushCostumeNumber => {
-                let entity = self.current_entity().borrow();
+                let entity = self.call_stack.last().unwrap().entity.borrow();
                 let res = entity.costume.as_ref().and_then(|x| entity.costume_list.iter().enumerate().find(|c| Rc::ptr_eq(x, &c.1.1))).map(|x| x.0 + 1).unwrap_or(0);
                 self.value_stack.push(Value::Number(Number::new(res as f64)?));
                 self.pos = aft_pos;
             }
             Instruction::PushCostumeList => {
-                let entity = self.current_entity().borrow();
+                let entity = self.call_stack.last().unwrap().entity.borrow();
                 self.value_stack.push(Value::List(Gc::new(mc, RefLock::new(entity.costume_list.iter().map(|x| Value::Image(x.1.clone())).collect()))));
                 self.pos = aft_pos;
             }
             Instruction::SetCostume => {
-                let mut entity_raw = self.current_entity().borrow_mut(mc);
+                let mut entity_raw = self.call_stack.last().unwrap().entity.borrow_mut(mc);
                 let entity = &mut *entity_raw;
 
                 let new_costume = match self.value_stack.pop().unwrap() {
@@ -1223,7 +1230,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 }
             }
             Instruction::NextCostume => {
-                let mut entity_raw = self.current_entity().borrow_mut(mc);
+                let mut entity_raw = self.call_stack.last().unwrap().entity.borrow_mut(mc);
                 let entity = &mut *entity_raw;
 
                 match entity.costume.as_ref().and_then(|x| entity.costume_list.iter().enumerate().find(|c| Rc::ptr_eq(x, &c.1.1))).map(|x| x.0) {

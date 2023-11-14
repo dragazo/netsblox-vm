@@ -13,7 +13,7 @@ use alloc::borrow::ToOwned;
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::thread;
@@ -32,7 +32,7 @@ use crate::json::*;
 use crate::gc::*;
 use crate::*;
 
-const MESSAGE_REPLY_TIMEOUT_MS: u32 = 1500;
+const MESSAGE_REPLY_TIMEOUT: Duration = Duration::from_millis(1500);
 
 /// A [`StdSystem`] key type used to await a reply message from an external source.
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
@@ -63,7 +63,7 @@ struct RpcRequest<C: CustomTypes<StdSystem<C>>> {
     key: RequestKey<C>,
 }
 struct ReplyEntry {
-    timestamp: Instant,
+    expiry: OffsetDateTime,
     value: Option<Json>,
 }
 
@@ -404,17 +404,31 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     }
 
     #[cfg(debug_assertions)]
-    fn check_entity_borrowing<'gc>(mc: &Mutation<'gc>, entity: &mut Entity<'gc, C, Self>) {
-        if let Some(original) = entity.original {
-            Self::check_entity_borrowing(mc, &mut *original.borrow_mut(mc));
+    fn check_runtime_borrows<'gc>(mc: &Mutation<'gc>, proc: &mut Process<'gc, C, Self>) {
+        fn check_symbols<'gc, C: CustomTypes<StdSystem<C>>>(mc: &Mutation<'gc>, symbols: &mut SymbolTable<'gc, C, StdSystem<C>>) {
+            for symbol in symbols {
+                match &*symbol.1.get() {
+                    Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Audio(_) | Value::Image(_) | Value::Native(_) => (),
+                    Value::List(x) => { x.borrow_mut(mc); }
+                    Value::Closure(x) => { x.borrow_mut(mc); }
+                    Value::Entity(x) => { x.borrow_mut(mc); }
+                }
+            }
         }
-    }
-    #[cfg(debug_assertions)]
-    fn check_proc_borrowing<'gc>(mc: &Mutation<'gc>, proc: &mut Process<'gc, C, Self>) {
-        Self::check_entity_borrowing(mc, &mut *proc.current_entity().borrow_mut(mc));
-        let global_context = proc.global_context.borrow_mut(mc);
+        fn check_entity<'gc, C: CustomTypes<StdSystem<C>>>(mc: &Mutation<'gc>, entity: &mut Entity<'gc, C, StdSystem<C>>) {
+            check_symbols(mc, &mut entity.fields);
+            if let Some(original) = entity.original {
+                check_entity(mc, &mut *original.borrow_mut(mc));
+            }
+        }
+
+        let mut global_context = proc.global_context.borrow_mut(mc);
+        check_symbols(mc, &mut global_context.globals);
+        for entry in proc.get_call_stack() {
+            check_entity(mc, &mut entry.entity.borrow_mut(mc));
+        }
         for entity in global_context.entities.iter() {
-            Self::check_entity_borrowing(mc, &mut *entity.1.borrow_mut(mc));
+            check_entity(mc, &mut *entity.1.borrow_mut(mc));
         }
     }
 }
@@ -435,7 +449,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
 
     fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, proc: &mut Process<'gc, C, Self>) -> Result<Self::RequestKey, ErrorCause<C, Self>> {
         #[cfg(debug_assertions)]
-        Self::check_proc_borrowing(mc, proc);
+        Self::check_runtime_borrows(mc, proc);
 
         Ok(match self.config.request.as_ref() {
             Some(handler) => {
@@ -450,7 +464,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
     }
     fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>> {
         #[cfg(debug_assertions)]
-        Self::check_proc_borrowing(mc, proc);
+        Self::check_runtime_borrows(mc, proc);
 
         Ok(match key.poll() {
             AsyncResult::Completed(Ok(x)) => AsyncResult::Completed(Ok(C::from_intermediate(mc, x)?)),
@@ -462,7 +476,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
 
     fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, proc: &mut Process<'gc, C, Self>) -> Result<Self::CommandKey, ErrorCause<C, Self>> {
         #[cfg(debug_assertions)]
-        Self::check_proc_borrowing(mc, proc);
+        Self::check_runtime_borrows(mc, proc);
 
         Ok(match self.config.command.as_ref() {
             Some(handler) => {
@@ -477,7 +491,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
     }
     fn poll_command<'gc>(&self, mc: &Mutation<'gc>, key: &Self::CommandKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>> {
         #[cfg(debug_assertions)]
-        Self::check_proc_borrowing(mc, proc);
+        Self::check_runtime_borrows(mc, proc);
 
         Ok(key.poll())
     }
@@ -487,7 +501,8 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
             false => (OutgoingMessage::Normal { msg_type, values, targets }, None),
             true => {
                 let reply_key = ExternReplyKey { request_id: Uuid::new_v4().to_string() };
-                self.message_replies.lock().unwrap().insert(reply_key.clone(), ReplyEntry { timestamp: Instant::now(), value: None });
+                let expiry = self.clock.read(Precision::Medium) + MESSAGE_REPLY_TIMEOUT;
+                self.message_replies.lock().unwrap().insert(reply_key.clone(), ReplyEntry { expiry, value: None });
                 (OutgoingMessage::Blocking { msg_type, values, targets, reply_key: reply_key.clone() }, Some(reply_key))
             }
         };
@@ -500,7 +515,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         if entry.value.is_some() {
             return AsyncResult::Completed(message_replies.remove(key).unwrap().value);
         }
-        if entry.timestamp.elapsed().as_millis() as u32 >= MESSAGE_REPLY_TIMEOUT_MS {
+        if self.clock.read(Precision::Low) > entry.expiry {
             message_replies.remove(key).unwrap();
             return AsyncResult::Completed(None);
         }
