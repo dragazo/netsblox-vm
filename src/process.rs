@@ -257,7 +257,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// 
     /// The process transitions to the idle state (see [`Process::is_running`]) upon failing with [`Err`] or succeeding with [`ProcessStep::Terminate`].
     /// 
-    /// This function is not re-entrant, so calling it from the mutable handle of, e.g., [`Config`] will likely lead to panics.
+    /// This function is not re-entrant, so recursively calling it from the mutable handle of, e.g., [`Config`] will likely lead to panics.
     pub fn step(&mut self, mc: &Mutation<'gc>) -> Result<ProcessStep<'gc, C, S>, ExecError<C, S>> {
         if !self.is_running() {
             return Ok(ProcessStep::Idle);

@@ -405,7 +405,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
 
     #[cfg(debug_assertions)]
     fn check_runtime_borrows<'gc>(mc: &Mutation<'gc>, proc: &mut Process<'gc, C, Self>) {
-        fn check_symbols<'gc, C: CustomTypes<StdSystem<C>>>(mc: &Mutation<'gc>, symbols: &mut SymbolTable<'gc, C, StdSystem<C>>) {
+        fn check_symbols<'gc, C: CustomTypes<StdSystem<C>>>(mc: &Mutation<'gc>, symbols: &SymbolTable<'gc, C, StdSystem<C>>) {
             for symbol in symbols {
                 match &*symbol.1.get() {
                     Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Audio(_) | Value::Image(_) | Value::Native(_) => (),
@@ -416,15 +416,16 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
             }
         }
         fn check_entity<'gc, C: CustomTypes<StdSystem<C>>>(mc: &Mutation<'gc>, entity: &mut Entity<'gc, C, StdSystem<C>>) {
-            check_symbols(mc, &mut entity.fields);
+            check_symbols(mc, &entity.fields);
             if let Some(original) = entity.original {
                 check_entity(mc, &mut *original.borrow_mut(mc));
             }
         }
 
-        let mut global_context = proc.global_context.borrow_mut(mc);
-        check_symbols(mc, &mut global_context.globals);
+        let global_context = proc.global_context.borrow_mut(mc);
+        check_symbols(mc, &global_context.globals);
         for entry in proc.get_call_stack() {
+            check_symbols(mc, &entry.locals);
             check_entity(mc, &mut entry.entity.borrow_mut(mc));
         }
         for entity in global_context.entities.iter() {
