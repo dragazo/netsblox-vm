@@ -2276,6 +2276,41 @@ fn test_proc_extra_cmp_tests() {
 }
 
 #[test]
+fn test_proc_stop_fn() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/stop-fn.xml"),
+        methods = "",
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
+            ["1", 1],
+            ["1", 2],
+            ["1", 3],
+            ["1", 4],
+            "",
+            ["2", 1],
+            ["2", 2],
+            "",
+            ["3", 1],
+            ["3", 2],
+            ["3", 3],
+            ["3", 4],
+            ["3", 5],
+            "",
+            ["4", 1],
+            ["4", 2],
+            ["4", 3],
+            "",
+        ])).unwrap());
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "stop fn");
+    });
+}
+
+#[test]
 fn test_proc_extra_blocks() {
     let actions = Rc::new(RefCell::new(vec![]));
     let actions_clone = actions.clone();
