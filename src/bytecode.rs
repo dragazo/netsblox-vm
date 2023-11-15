@@ -1249,13 +1249,14 @@ impl Locations {
                         }
                     }
                     None => {
-                        if i & 1 == 0 && !suffix.is_empty() {
+                        if i < 2 || (i & 1 == 0 && !suffix.is_empty()) {
                             return Err(CompileError::InvalidLocation { loc });
                         }
                         break;
                     }
                 }
             }
+            debug_assert!(values.len() >= 1);
             value_map.push((pos, values));
         }
 
@@ -1356,11 +1357,17 @@ fn test_locations_formats() {
     test_vals(&map! { 43 => "31_-24", 2 => "-2_-342", 6 => "23&" }).unwrap_err();
     test_vals(&map! { 43 => "31_-24&", 2 => "-2_-342&", 6 => "23&" }).unwrap();
     test_vals(&map! { 43 => "31::-24&", 2 => "-2::-342&", 6 => "23&" }).unwrap();
+    test_vals(&map! { 43 => "31::-24&", 2 => "-2::-342&", 6 => "23&", 7 => "&" }).unwrap_err();
+    test_vals(&map! { 43 => "31::-24&", 2 => "-2::-342&", 6 => "23&", 0 => "&" }).unwrap_err();
     test_vals(&map! { 43 => "31::-24&", 2 => "-2::-342&", 6 => "23&" }).unwrap();
     test_vals(&map! { 43 => "31::-24&", 2 => "-2::-342&", 6 => "23&&" }).unwrap_err();
     test_vals(&map! { 43 => "<>31::-24&", 2 => "<>-2::-342:.:5::-22&", 6 => "<>23&" }).unwrap_err();
     test_vals(&map! { 43 => "<>31::-24&", 2 => "<>-2::-342::5::-22&", 6 => "<>23&" }).unwrap();
+    test_vals(&map! { 43 => "<>31::-24&", 2 => "<>-2::-342::5::-22&", 6 => "<>&" }).unwrap_err();
+    test_vals(&map! { 43 => "<>31::-24&", 2 => "<>-2::-342::5::-22&", 0 => "<>&" }).unwrap_err();
     test_vals(&map! { 43 => "<>31::-24&", 2 => "<>-2::-342::5::-22&", 6 => "<>23" }).unwrap_err();
+    test_vals(&map! { 43 => "31,-24", 2 => "-2,-342,5,-22", 6 => "23", 7 => "" }).unwrap_err();
+    test_vals(&map! { 43 => "31,-24", 2 => "-2,-342,5,-22", 6 => "23", 0 => "" }).unwrap_err();
 }
 
 struct ByteCodeBuilder<'a: 'b, 'b> {
