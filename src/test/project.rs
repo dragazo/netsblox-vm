@@ -248,9 +248,9 @@ fn test_proj_watchers() {
 }
 
 #[test]
-fn test_proj_stop_script() {
+fn test_proj_stop_current() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let proj = get_running_project(include_str!("projects/stop-script.xml"), system);
+    let proj = get_running_project(include_str!("projects/stop-current.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
         let global_context = proj.proj.borrow().get_global_context();
@@ -275,6 +275,158 @@ fn test_proj_stop_script() {
             ["1", 6],
             ["3", 6],
             ["1", 7],
+        ])).unwrap());
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-10, "res");
+    });
+}
+
+#[test]
+fn test_proj_stop_all() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let proj = get_running_project(include_str!("projects/stop-all.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
+
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
+            ["1", 1],
+            ["2", 1],
+            ["3", 1],
+            ["4", 1],
+            ["5", 1],
+            ["6", 1],
+            ["7", 1],
+            ["8", 1],
+            ["1", 2],
+            ["2", 2],
+            ["3", 2],
+            ["4", 2],
+        ])).unwrap());
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-10, "res");
+    });
+}
+
+#[test]
+fn test_proj_stop_others() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let proj = get_running_project(include_str!("projects/stop-others.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
+
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
+            ["1", 1],
+            ["2", 1],
+            ["3", 1],
+            ["4", 1],
+            ["5", 1],
+            ["6", 1],
+            ["7", 1],
+            ["8", 1],
+            ["1", 2],
+            ["2", 2],
+            ["3", 2],
+            ["4", 2],
+            ["4", 3],
+            ["4", 4],
+            ["4", 5],
+            ["4", 6],
+            ["4", 7],
+            ["4", 8],
+            ["4", 9],
+            ["4", 10],
+        ])).unwrap());
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-10, "res");
+    });
+}
+
+#[test]
+fn test_proj_stop_my_others() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let proj = get_running_project(include_str!("projects/stop-my-others.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
+
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
+            ["1", 1],
+            ["2", 1],
+            ["3", 1],
+            ["4", 1],
+            ["5", 1],
+            ["6", 1],
+            ["7", 1],
+            ["8", 1],
+            ["1", 2],
+            ["2", 2],
+            ["3", 2],
+            ["4", 2],
+            ["5", 2],
+            ["6", 2],
+            ["7", 2],
+            ["8", 2],
+            ["4", 3],
+            ["5", 3],
+            ["6", 3],
+            ["7", 3],
+            ["8", 3],
+            ["4", 4],
+            ["5", 4],
+            ["6", 4],
+            ["4", 5],
+            ["6", 5],
+            ["4", 6],
+            ["6", 6],
+            ["4", 7],
+            ["6", 7],
+            ["4", 8],
+            ["6", 8],
+            ["4", 9],
+            ["6", 9],
+            ["4", 10],
+            ["6", 10],
+        ])).unwrap());
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-10, "res");
+    });
+}
+
+#[test]
+fn test_proj_stop_my_others_context() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let proj = get_running_project(include_str!("projects/stop-my-others-context.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
+
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
+            ["1", 1],
+            ["2", 1],
+            ["3", 1],
+            ["4", 1],
+            ["1", 2],
+            ["2", 2],
+            ["3", 2],
+            ["4", 2],
+            ["1", 3],
+            ["2", 3],
+            ["1", 4],
+            ["2", 4],
+            ["1", 5],
+            ["2", 5],
+            ["1", 6],
+            ["2", 6],
+            ["1", 7],
+            ["2", 7],
+            ["1", 8],
+            ["2", 8],
+            ["1", 9],
+            ["2", 9],
+            ["1", 10],
+            ["2", 10],
         ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-10, "res");
     });

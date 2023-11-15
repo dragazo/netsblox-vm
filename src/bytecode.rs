@@ -1844,6 +1844,9 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             ast::StmtKind::NextCostume => self.ins.push(Instruction::NextCostume.into()),
             ast::StmtKind::PenClear => self.ins.push(Instruction::ClearDrawings.into()),
             ast::StmtKind::Stop { mode: ast::StopMode::ThisScript } => self.ins.push(Instruction::Abort { mode: AbortMode::Current }.into()),
+            ast::StmtKind::Stop { mode: ast::StopMode::All } => self.ins.push(Instruction::Abort { mode: AbortMode::All }.into()),
+            ast::StmtKind::Stop { mode: ast::StopMode::AllButThisScript } => self.ins.push(Instruction::Abort { mode: AbortMode::Others }.into()),
+            ast::StmtKind::Stop { mode: ast::StopMode::OtherScriptsInSprite } => self.ins.push(Instruction::Abort { mode: AbortMode::MyOthers }.into()),
             ast::StmtKind::Stop { mode: ast::StopMode::ThisBlock } => {
                 self.ins.push(Instruction::PushString { value: "" }.into());
                 self.ins.push(Instruction::Return.into());

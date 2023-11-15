@@ -386,7 +386,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     }
                     AbortMode::MyOthers => {
                         debug_assert!(proc.is_running());
-                        let entity = proc.get_call_stack().first().unwrap().entity;
+                        let entity = proc.get_call_stack().last().unwrap().entity;
                         self.state.processes.retain_mut(|k, v| k == proc_key || !Gc::ptr_eq(entity, v.get_call_stack().first().unwrap().entity));
                         self.state.process_queue.push_front(proc_key); // keep executing the calling process
                         ProjectStep::Normal
