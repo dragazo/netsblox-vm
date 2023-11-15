@@ -1132,6 +1132,43 @@ pub struct ScriptInfo<'a> {
     pub entities: Vec<(&'a ast::Entity, EntityScriptInfo<'a>)>,
 }
 
+struct LocationTokenizer<'a> {
+    src: &'a str,
+    state: bool,
+}
+impl<'a> LocationTokenizer<'a> {
+    fn new(src: &'a str) -> Self {
+        Self { src, state: false }
+    }
+}
+impl<'a> Iterator for LocationTokenizer<'a> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.src.is_empty() {
+            return None;
+        }
+
+        let p = self.src.char_indices().find(|x| self.state ^ (x.1 == '-' || ('0'..='9').contains(&x.1))).map(|x| x.0).unwrap_or(self.src.len());
+        let res;
+        (res, self.src) = self.src.split_at(p);
+        self.state ^= true;
+        Some(res)
+    }
+}
+#[test]
+fn test_locations_tokenizer() {
+    assert_eq!(LocationTokenizer::new("").collect::<Vec<_>>(), &[] as &[&str]);
+    assert_eq!(LocationTokenizer::new("x").collect::<Vec<_>>(), &["x"]);
+    assert_eq!(LocationTokenizer::new("3").collect::<Vec<_>>(), &["", "3"]);
+    assert_eq!(LocationTokenizer::new("collab_").collect::<Vec<_>>(), &["collab_"]);
+    assert_eq!(LocationTokenizer::new("collab_-1").collect::<Vec<_>>(), &["collab_", "-1"]);
+    assert_eq!(LocationTokenizer::new("collab_23_43").collect::<Vec<_>>(), &["collab_", "23", "_", "43"]);
+    assert_eq!(LocationTokenizer::new("cab_=_2334fhd__43").collect::<Vec<_>>(), &["cab_=_", "2334", "fhd__", "43"]);
+    assert_eq!(LocationTokenizer::new("cab_=_2334fhd__43__").collect::<Vec<_>>(), &["cab_=_", "2334", "fhd__", "43", "__"]);
+    assert_eq!(LocationTokenizer::new("-4cab_=_2334fhd__43__").collect::<Vec<_>>(), &["", "-4", "cab_=_", "2334", "fhd__", "43", "__"]);
+    assert_eq!(LocationTokenizer::new("714cab_=_2334fhd__43__").collect::<Vec<_>>(), &["", "714", "cab_=_", "2334", "fhd__", "43", "__"]);
+}
+
 /// Location lookup table from bytecode address to original AST location.
 /// 
 /// When a project is compiled via [`ByteCode::compile`], a stream of instructions is produced.
@@ -1140,66 +1177,101 @@ pub struct ScriptInfo<'a> {
 /// 
 /// This type supports serde serialization if the `serde` feature flag is enabled.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug)]
 pub struct Locations {
     #[allow(dead_code)] tag: MustBeU128<FINGERPRINT>,
 
     prefix: String,
+    separator: String,
+    suffix: String,
+
     base_token: isize,
-    token_data: Vec<u8>,
+    value_data: Vec<u8>,
     locs: Vec<(usize, usize)>,
 }
 impl Locations {
-    fn condense(orig_locs: BTreeMap<usize, &str>) -> Result<Self, CompileError> {
+    fn condense<'a>(orig_locs: &BTreeMap<usize, &'a str>) -> Result<Self, CompileError<'a>> {
         if orig_locs.is_empty() {
             return Ok(Self {
                 tag: Default::default(),
+
                 prefix: String::new(),
+                separator: String::new(),
+                suffix: String::new(),
+
                 base_token: 0,
-                token_data: Default::default(),
+                value_data: Default::default(),
                 locs: Default::default(),
             });
         }
 
-        let prefix = {
-            let loc = *orig_locs.values().next().unwrap();
-            match loc.find('_') {
-                Some(x) => loc[..x].to_owned(),
-                None => return Err(CompileError::InvalidLocation { loc }),
-            }
+        let (prefix, suffix) = {
+            let mut tokens = LocationTokenizer::new(*orig_locs.values().next().unwrap()).enumerate();
+            let prefix = tokens.next().map(|x| x.1.to_owned()).unwrap_or_default();
+            let suffix = tokens.last().filter(|x| x.0 & 1 == 0).map(|x| x.1.to_owned()).unwrap_or_default();
+            (prefix, suffix)
         };
+        let mut separator = None;
 
-        let mut token_map = Vec::with_capacity(orig_locs.len());
+        let mut value_map = Vec::with_capacity(orig_locs.len());
         for (&pos, &loc) in orig_locs.iter() {
-            if !loc.starts_with(&prefix) { return Err(CompileError::InvalidLocation { loc }) }
-            debug_assert!(loc[prefix.len()..].starts_with('_'));
-
-            let mut tokens = vec![];
-            for token in loc[prefix.len() + 1..].split('_') {
-                let v: isize = match token.parse() {
-                    Ok(x) => x,
-                    Err(_) => return Err(CompileError::InvalidLocation { loc }),
-                };
-                if v.to_string() != token {
-                    return Err(CompileError::InvalidLocation { loc });
+            let mut tokens = LocationTokenizer::new(loc).peekable();
+            let mut values = vec![];
+            for i in 0.. {
+                match tokens.next() {
+                    Some(token) => {
+                        if i & 1 != 0 {
+                            let v: isize = match token.parse() {
+                                Ok(x) => x,
+                                Err(_) => return Err(CompileError::InvalidLocation { loc }),
+                            };
+                            if v.to_string() != token {
+                                return Err(CompileError::InvalidLocation { loc });
+                            }
+                            values.push(v);
+                        }
+                        else if i == 0 {
+                            if token != prefix {
+                                return Err(CompileError::InvalidLocation { loc });
+                            }
+                        }
+                        else if tokens.peek().is_none() {
+                            if token != suffix {
+                                return Err(CompileError::InvalidLocation { loc });
+                            }
+                        } else {
+                            match &separator {
+                                Some(separator) => if token != separator {
+                                    return Err(CompileError::InvalidLocation { loc });
+                                }
+                                None => separator = Some(token.to_owned()),
+                            }
+                        }
+                    }
+                    None => {
+                        if i & 1 == 0 && !suffix.is_empty() {
+                            return Err(CompileError::InvalidLocation { loc });
+                        }
+                        break;
+                    }
                 }
-                tokens.push(v);
             }
-            token_map.push((pos, tokens));
+            value_map.push((pos, values));
         }
 
-        let base_token = token_map.iter().flat_map(|x| &x.1).copied().min().unwrap_or(0);
+        let base_token = value_map.iter().flat_map(|x| &x.1).copied().min().unwrap_or(0);
 
-        let mut token_data = Vec::with_capacity(token_map.len());
-        let mut locs = Vec::with_capacity(token_map.len());
-        for (pos, toks) in token_map {
-            locs.push((pos, token_data.len()));
+        let mut value_data = Vec::with_capacity(value_map.len());
+        let mut locs = Vec::with_capacity(value_map.len());
+        for (pos, toks) in value_map {
+            locs.push((pos, value_data.len()));
             for tok in toks {
-                encode_u64((tok - base_token + 1) as u64, &mut token_data, None);
+                encode_u64((tok - base_token + 1) as u64, &mut value_data, None);
             }
-            encode_u64(0, &mut token_data, None); // null terminator
+            encode_u64(0, &mut value_data, None); // null terminator
         }
 
-        let res = Self { tag: Default::default(), prefix, base_token, token_data, locs };
+        let res = Self { tag: Default::default(), separator: separator.unwrap_or_default(), prefix, suffix, base_token, value_data, locs };
 
         #[cfg(test)]
         {
@@ -1227,15 +1299,68 @@ impl Locations {
         };
 
         let mut res = self.prefix.clone();
+        let mut first = true;
         loop {
-            let (v, aft) = decode_u64(&self.token_data, start);
-            if v == 0 { return Some(res) }
+            let (v, aft) = decode_u64(&self.value_data, start);
+            if v == 0 {
+                break;
+            }
 
             start = aft;
-            res.push('_');
+            if !first {
+                res.push_str(&self.separator);
+            }
+            first = false;
             res.push_str(&(v as isize - 1 + self.base_token).to_string());
         }
+        res.push_str(&self.suffix);
+        Some(res)
     }
+}
+#[test]
+fn test_locations_formats() {
+    fn test_vals<'a>(orig_locs: &BTreeMap<usize, &'a str>) -> Result<(), CompileError<'a>> {
+        let condensed = Locations::condense(orig_locs)?;
+
+        let mut back = BTreeMap::new();
+        for &k in orig_locs.keys() {
+            back.insert(k, condensed.lookup(k - 1).unwrap());
+        }
+
+        if orig_locs.len() != back.len() || orig_locs.iter().zip(back.iter()).any(|(a, b)| a.0 != b.0 || a.1 != b.1) {
+            panic!("expected {orig_locs:?}\ngot {back:?}");
+        }
+
+        Ok(())
+    }
+    macro_rules! map {
+        ($($k:expr => $v:expr),*$(,)?) => {{
+            #[allow(unused_mut)]
+            let mut res = BTreeMap::new();
+            $(res.insert($k, $v);)*
+            res
+        }}
+    }
+
+    test_vals(&map! { }).unwrap();
+    test_vals(&map! { 43 => "collab_3_4" }).unwrap();
+    test_vals(&map! { 43 => "collab_3_4", 2 => "collab_-2_-34" }).unwrap();
+    test_vals(&map! { 43 => "collab_3_4", 2 => "collab_-02_-34" }).unwrap_err();
+    test_vals(&map! { 43 => "collab_3_4", 2 => "coLlab_-2_-34" }).unwrap_err();
+    test_vals(&map! { 43 => "_31_-24", 2 => "_-2_-342", 6 => "_23" }).unwrap();
+    test_vals(&map! { 43 => "31_-24", 2 => "-2_-342", 6 => "23" }).unwrap();
+    test_vals(&map! { 43 => "31_-24", 2 => "-2_-342", 6 => "g23" }).unwrap_err();
+    test_vals(&map! { 43 => "31_-24", 2 => "g-2_-342", 6 => "23" }).unwrap_err();
+    test_vals(&map! { 43 => "g31_-24", 2 => "g-2_-342", 6 => "g23" }).unwrap();
+    test_vals(&map! { 43 => "31_-24", 2 => "-2_-342<", 6 => "23" }).unwrap_err();
+    test_vals(&map! { 43 => "31_-24", 2 => "-2_-342", 6 => "23&" }).unwrap_err();
+    test_vals(&map! { 43 => "31_-24&", 2 => "-2_-342&", 6 => "23&" }).unwrap();
+    test_vals(&map! { 43 => "31::-24&", 2 => "-2::-342&", 6 => "23&" }).unwrap();
+    test_vals(&map! { 43 => "31::-24&", 2 => "-2::-342&", 6 => "23&" }).unwrap();
+    test_vals(&map! { 43 => "31::-24&", 2 => "-2::-342&", 6 => "23&&" }).unwrap_err();
+    test_vals(&map! { 43 => "<>31::-24&", 2 => "<>-2::-342:.:5::-22&", 6 => "<>23&" }).unwrap_err();
+    test_vals(&map! { 43 => "<>31::-24&", 2 => "<>-2::-342::5::-22&", 6 => "<>23&" }).unwrap();
+    test_vals(&map! { 43 => "<>31::-24&", 2 => "<>-2::-342::5::-22&", 6 => "<>23" }).unwrap_err();
 }
 
 struct ByteCodeBuilder<'a: 'b, 'b> {
@@ -2205,7 +2330,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             for func in entity.1.funcs.iter_mut() { func.1 = final_ins_pos[func.1]; }
             for script in entity.1.scripts.iter_mut() { script.1 = final_ins_pos[script.1]; }
         }
-        let locations = Locations::condense(self.ins_locations.iter().map(|(p, v)| (final_ins_pos[*p], *v)).collect())?;
+        let locations = Locations::condense(&self.ins_locations.iter().map(|(p, v)| (final_ins_pos[*p], *v)).collect())?;
 
         Ok((ByteCode { tag: Default::default(), code: code.into_boxed_slice(), data: data.into_boxed_slice() }, ScriptInfo { funcs, entities }, locations))
     }
