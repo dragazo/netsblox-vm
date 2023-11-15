@@ -347,6 +347,30 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
             Ok((closure.pos, locals))
         }
+        fn do_return<'gc, C: CustomTypes<S>, S: System<C>>(return_value: Value<'gc, C, S>, proc: &mut Process<'gc, C, S>) -> Result<ProcessStep<'gc, C, S>, ErrorCause<C, S>> {
+            let CallStackEntry { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, .. } = proc.call_stack.last().unwrap();
+
+            proc.pos = *return_to;
+            proc.warp_counter = *warp_counter;
+            proc.value_stack.drain(value_stack_size..);
+            proc.handler_stack.drain(handler_stack_size..);
+            debug_assert_eq!(proc.value_stack.len(), *value_stack_size);
+            debug_assert_eq!(proc.handler_stack.len(), *handler_stack_size);
+
+            if proc.call_stack.len() > 1 {
+                proc.call_stack.pop();
+                proc.value_stack.push(return_value);
+                Ok(ProcessStep::Normal)
+            } else {
+                debug_assert_eq!(proc.value_stack.len(), 0);
+                debug_assert_eq!(*called_from, usize::MAX);
+                debug_assert_eq!(*return_to, usize::MAX);
+                debug_assert_eq!(*warp_counter, 0);
+                debug_assert_eq!(*value_stack_size, 0);
+                debug_assert_eq!(*handler_stack_size, 0);
+                Ok(ProcessStep::Terminate { result: Some(return_value) })
+            }
+        }
 
         let system = self.global_context.borrow().system.clone();
         match self.defer.take() {
@@ -952,29 +976,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
                 return Ok(ProcessStep::Fork { pos: closure_pos, locals, entity: self.call_stack.last().unwrap().entity });
             }
-            Instruction::Return => {
-                let CallStackEntry { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, .. } = self.call_stack.last().unwrap();
-                let return_value = self.value_stack.pop().unwrap();
-
-                self.pos = *return_to;
-                self.warp_counter = *warp_counter;
-                self.value_stack.drain(value_stack_size..);
-                self.handler_stack.drain(handler_stack_size..);
-                debug_assert_eq!(self.value_stack.len(), *value_stack_size);
-                debug_assert_eq!(self.handler_stack.len(), *handler_stack_size);
-
-                self.value_stack.push(return_value);
-
-                if self.call_stack.len() > 1 {
-                    self.call_stack.pop();
-                } else {
-                    debug_assert_eq!(self.value_stack.len(), 1);
-                    debug_assert_eq!(*called_from, usize::MAX);
-                    debug_assert_eq!(*return_to, usize::MAX);
-                    debug_assert_eq!(*warp_counter, 0);
-                    debug_assert_eq!(*value_stack_size, 0);
-                    debug_assert_eq!(*handler_stack_size, 0);
-                    return Ok(ProcessStep::Terminate { result: Some(self.value_stack.pop().unwrap()) });
+            Instruction::Return => return do_return(self.value_stack.pop().unwrap(), self),
+            Instruction::Stop { mode } => {
+                self.pos = aft_pos;
+                match mode {
+                    StopMode::Process => return Ok(ProcessStep::Terminate { result: None }),
+                    StopMode::Function => return do_return(empty_string().into(), self),
+                    x => unimplemented!("{x:?}"),
                 }
             }
             Instruction::PushHandler { pos, var } => {
