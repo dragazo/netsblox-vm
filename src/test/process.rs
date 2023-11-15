@@ -641,7 +641,7 @@ fn test_proc_say() {
     let output_cpy = output.clone();
     let config = Config::<C, StdSystem<C>> {
         request: None,
-        command: Some(Rc::new(move |_, _, key, command, _| match command {
+        command: Some(Rc::new(move |_, key, command, _| match command {
             Command::Print { style: _, value } => {
                 if let Some(value) = value { writeln!(*output_cpy.borrow_mut(), "{value:?}").unwrap() }
                 key.complete(Ok(()));
@@ -667,7 +667,7 @@ fn test_proc_syscall() {
     let buffer = Rc::new(RefCell::new(String::new()));
     let buffer_cpy = buffer.clone();
     let config = Config::<C, StdSystem<C>> {
-        request: Some(Rc::new(move |_, _, key, request, _| match &request {
+        request: Some(Rc::new(move |_, key, request, _| match &request {
             Request::Syscall { name, args } => match name.as_str() {
                 "bar" => match args.is_empty() {
                     false => {
@@ -1866,7 +1866,7 @@ fn test_proc_basic_motion() {
     let config = Config::<C, StdSystem<C>> {
         command: {
             let sequence = sequence.clone();
-            Some(Rc::new(move |_, _, key, command, _| {
+            Some(Rc::new(move |_, key, command, _| {
                 match command {
                     Command::Forward { distance } => sequence.borrow_mut().push(Action::Forward(to_i32(distance))),
                     Command::ChangeProperty { prop: Property::Heading, delta } => sequence.borrow_mut().push(Action::Turn(to_i32(delta.as_number().unwrap()))),
@@ -1878,7 +1878,7 @@ fn test_proc_basic_motion() {
         },
         request: {
             let sequence = sequence.clone();
-            Some(Rc::new(move |_, _, key, request, _| {
+            Some(Rc::new(move |_, key, request, _| {
                 match request {
                     Request::Property { prop: Property::XPos } => {
                         sequence.borrow_mut().push(Action::Position);
@@ -2315,7 +2315,7 @@ fn test_proc_extra_blocks() {
     let actions = Rc::new(RefCell::new(vec![]));
     let actions_clone = actions.clone();
     let config = Config::<C, StdSystem<C>> {
-        request: Some(Rc::new(move |_, _, key, request, _| match &request {
+        request: Some(Rc::new(move |_, key, request, _| match &request {
             Request::UnknownBlock { name, args } => {
                 match name.as_str() {
                     "tuneScopeSetInstrument" => {

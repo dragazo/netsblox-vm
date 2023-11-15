@@ -46,14 +46,14 @@ impl From<&Entity<'_, C, StdSystem<C>>> for ProcessState {
 
 fn default_properties_config() -> Config<C, StdSystem<C>> {
     Config {
-        request: Some(Rc::new(|_, _, key, request, proc| {
+        request: Some(Rc::new(|_, key, request, proc| {
             let entity = proc.get_call_stack().last().unwrap().entity.borrow();
             match request {
                 Request::Property { prop } => entity.state.props.perform_get_property(key, prop),
                 _ => RequestStatus::UseDefault { key, request },
             }
         })),
-        command: Some(Rc::new(|_, mc, key, command, proc| {
+        command: Some(Rc::new(|mc, key, command, proc| {
             let mut entity = proc.get_call_stack().last().unwrap().entity.borrow_mut(mc);
             match command {
                 Command::SetProperty { prop, value } => entity.state.props.perform_set_property(key, prop, value),
@@ -76,8 +76,8 @@ impl CustomTypes<StdSystem<C>> for C {
     type EntityState = EntityState;
     type ProcessState = ProcessState;
 
-    fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Result<Value<'gc, C, StdSystem<C>>, ErrorCause<C, StdSystem<C>>> {
-        Ok(Value::from_simple(mc, value))
+    fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Value<'gc, C, StdSystem<C>> {
+        Value::from_simple(mc, value)
     }
 }
 

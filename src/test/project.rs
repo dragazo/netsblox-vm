@@ -436,7 +436,7 @@ fn test_proj_stop_my_others_context() {
 fn test_proj_costumes() {
     let config = Config::<C, StdSystem<C>> {
         request: None,
-        command: Some(Rc::new(move |_, _, key, command, _| match command {
+        command: Some(Rc::new(move |_, key, command, _| match command {
             Command::SetCostume => {
                 key.complete(Ok(()));
                 CommandStatus::Handled

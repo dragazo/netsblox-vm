@@ -51,6 +51,8 @@ const STEPS_PER_IO_ITER: usize = 64;
 const MAX_REQUEST_SIZE_BYTES: usize = 1024 * 1024 * 1024;
 const YIELDS_BEFORE_IDLE_SLEEP: usize = 256;
 const IDLE_SLEEP_TIME: Duration = Duration::from_micros(500);
+const CLOCK_INTERVAL: Duration = Duration::from_millis(10);
+const COLLECT_INTERVAL: Duration = Duration::from_secs(60);
 
 macro_rules! crash {
     ($ret:literal : $($tt:tt)*) => {{
@@ -189,7 +191,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
     let config = overrides.fallback(&Config {
         command: {
             let update_flag = update_flag.clone();
-            Some(Rc::new(move |_, _, key, command, proc| match command {
+            Some(Rc::new(move |_, key, command, proc| match command {
                 Command::Print { style: _, value } => {
                     let entity = &*proc.get_call_stack().last().unwrap().entity.borrow();
                     if let Some(value) = value {
@@ -205,7 +207,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
         request: {
             let update_flag = update_flag.clone();
             let input_queries = input_queries.clone();
-            Some(Rc::new(move |_, _, key, request, proc| match request {
+            Some(Rc::new(move |_, key, request, proc| match request {
                 Request::Input { prompt } => {
                     let entity = &*proc.get_call_stack().last().unwrap().entity.borrow();
                     input_queries.borrow_mut().push_back((format!("{entity:?} {prompt:?} > "), key));
@@ -217,11 +219,11 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
         },
     });
 
-    let system = Rc::new(StdSystem::new_sync(server, Some(project_name), config, clock));
+    let system = Rc::new(StdSystem::new_sync(server, Some(project_name), config, clock.clone()));
     let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     print!("public id: {}\r\n", system.get_public_id());
 
-    let env = match get_env(role, system) {
+    let mut env = match get_env(role, system) {
         Ok(x) => x,
         Err(e) => {
             print!("error loading project: {e:?}\r\n");
@@ -230,6 +232,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
     };
     env.mutate(|mc, env| env.proj.borrow_mut(mc).input(mc, Input::Start));
 
+    let mut next_collect = clock.read(Precision::Medium) + COLLECT_INTERVAL;
     let mut input_sequence = Vec::with_capacity(16);
     let in_input_mode = || !input_queries.borrow().is_empty();
     'program: loop {
@@ -273,6 +276,10 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
                 idle_sleeper.consume(&res);
             }
         });
+        if clock.read(Precision::Low) > next_collect {
+            env.collect_all();
+            next_collect = clock.read(Precision::Medium) + COLLECT_INTERVAL;
+        }
 
         if update_flag.get() {
             update_flag.set(false);
@@ -299,7 +306,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
 fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C, StdSystem<C>>, clock: Arc<Clock>) {
     let config = overrides.fallback(&Config {
         request: None,
-        command: Some(Rc::new(move |_, _, key, command, proc| match command {
+        command: Some(Rc::new(move |_, key, command, proc| match command {
             Command::Print { style: _, value } => {
                 let entity = &*proc.get_call_stack().last().unwrap().entity.borrow();
                 if let Some(value) = value { println!("{entity:?} > {value:?}") }
@@ -310,11 +317,11 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
         })),
     });
 
-    let system = Rc::new(StdSystem::new_sync(server, Some(project_name), config, clock));
+    let system = Rc::new(StdSystem::new_sync(server, Some(project_name), config, clock.clone()));
     let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     println!(">>> public id: {}\n", system.get_public_id());
 
-    let env = match get_env(role, system) {
+    let mut env = match get_env(role, system) {
         Ok(x) => x,
         Err(e) => {
             println!(">>> error loading project: {e:?}");
@@ -323,6 +330,7 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
     };
     env.mutate(|mc, env| env.proj.borrow_mut(mc).input(mc, Input::Start));
 
+    let mut next_collect = clock.read(Precision::Medium) + COLLECT_INTERVAL;
     loop {
         env.mutate(|mc, env| {
             let mut proj = env.proj.borrow_mut(mc);
@@ -334,6 +342,10 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
                 idle_sleeper.consume(&res);
             }
         });
+        if clock.read(Precision::Low) > next_collect {
+            env.collect_all();
+            next_collect = clock.read(Precision::Medium) + COLLECT_INTERVAL;
+        }
     }
 }
 fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, port: u16, overrides: Config<C, StdSystem<C>>, clock: Arc<Clock>, syscalls: &[SyscallMenu]) {
@@ -385,7 +397,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
     let weak_state = Arc::downgrade(&state);
     let config = overrides.fallback(&Config {
         request: None,
-        command: Some(Rc::new(move |_, _, key, command, proc| match command {
+        command: Some(Rc::new(move |_, key, command, proc| match command {
             Command::Print { style: _, value } => {
                 let entity = &*proc.get_call_stack().last().unwrap().entity.borrow();
                 if let Some(value) = value { tee_println!(weak_state.upgrade() => "{entity:?} > {value:?}") }
@@ -395,7 +407,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
             _ => CommandStatus::UseDefault { key, command },
         })),
     });
-    let system = Rc::new(StdSystem::new_sync(nb_server, Some("native-server"), config, clock));
+    let system = Rc::new(StdSystem::new_sync(nb_server, Some("native-server"), config, clock.clone()));
     let mut idle_sleeper = IdleAction::new(YIELDS_BEFORE_IDLE_SLEEP, Box::new(|| thread::sleep(IDLE_SLEEP_TIME)));
     println!("public id: {}", system.get_public_id());
 
@@ -473,6 +485,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
     let (_, empty_role) = open_project(EMPTY_PROJECT, None).unwrap_or_else(|_| crash!(666: "default project failed to load"));
     let mut env = get_env(&empty_role, system.clone()).unwrap();
 
+    let mut next_collect = clock.read(Precision::Medium) + COLLECT_INTERVAL;
     'program: loop {
         'input: loop {
             match proj_receiver.try_recv() {
@@ -544,6 +557,10 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
                 idle_sleeper.consume(&res);
             }
         });
+        if clock.read(Precision::Low) > next_collect {
+            env.collect_all();
+            next_collect = clock.read(Precision::Medium) + COLLECT_INTERVAL;
+        }
     }
 }
 
@@ -553,7 +570,7 @@ pub fn run<C: CustomTypes<StdSystem<C>>>(mode: Mode, config: Config<C, StdSystem
     let clock = Arc::new(Clock::new(utc_offset, Some(Precision::Medium)));
     let clock_clone = clock.clone();
     thread::spawn(move || loop {
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(CLOCK_INTERVAL);
         clock_clone.update();
     });
 

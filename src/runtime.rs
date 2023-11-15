@@ -1675,9 +1675,9 @@ pub enum CommandStatus<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
 #[educe(Clone)]
 pub struct Config<C: CustomTypes<S>, S: System<C>> {
     /// A function used to perform asynchronous requests that yield a value back to the runtime.
-    pub request: Option<Rc<dyn for<'gc> Fn(&S, &Mutation<'gc>, S::RequestKey, Request<'gc, C, S>, &mut Process<'gc, C, S>) -> RequestStatus<'gc, C, S>>>,
+    pub request: Option<Rc<dyn for<'gc> Fn(&Mutation<'gc>, S::RequestKey, Request<'gc, C, S>, &mut Process<'gc, C, S>) -> RequestStatus<'gc, C, S>>>,
     /// A function used to perform asynchronous tasks whose completion is awaited by the runtime.
-    pub command: Option<Rc<dyn for<'gc, 'a> Fn(&S, &Mutation<'gc>, S::CommandKey, Command<'gc, 'a, C, S>, &mut Process<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S>>>,
+    pub command: Option<Rc<dyn for<'gc, 'a> Fn(&Mutation<'gc>, S::CommandKey, Command<'gc, 'a, C, S>, &mut Process<'gc, C, S>) -> CommandStatus<'gc, 'a, C, S>>>,
 }
 impl<C: CustomTypes<S>, S: System<C>> Default for Config<C, S> {
     fn default() -> Self {
@@ -1692,20 +1692,20 @@ impl<C: CustomTypes<S>, S: System<C>> Config<C, S> {
     pub fn fallback(&self, other: &Self) -> Self {
         Self {
             request: match (self.request.clone(), other.request.clone()) {
-                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, request, proc| {
-                    match a(system, mc, key, request, proc) {
+                (Some(a), Some(b)) => Some(Rc::new(move |mc, key, request, proc| {
+                    match a(mc, key, request, proc) {
                         RequestStatus::Handled => RequestStatus::Handled,
-                        RequestStatus::UseDefault { key, request } => b(system, mc, key, request, proc),
+                        RequestStatus::UseDefault { key, request } => b(mc, key, request, proc),
                     }
                 })),
                 (Some(a), None) | (None, Some(a)) => Some(a),
                 (None, None) => None,
             },
             command: match (self.command.clone(), other.command.clone()) {
-                (Some(a), Some(b)) => Some(Rc::new(move |system, mc, key, command, proc| {
-                    match a(system, mc, key, command, proc) {
+                (Some(a), Some(b)) => Some(Rc::new(move |mc, key, command, proc| {
+                    match a(mc, key, command, proc) {
                         CommandStatus::Handled => CommandStatus::Handled,
-                        CommandStatus::UseDefault { key, command } => b(system, mc, key, command, proc),
+                        CommandStatus::UseDefault { key, command } => b(mc, key, command, proc),
                     }
                 })),
                 (Some(a), None) | (None, Some(a)) => Some(a),
@@ -1740,7 +1740,7 @@ pub trait CustomTypes<S: System<Self>>: 'static + Sized {
     type ProcessState: 'static + for<'gc, 'a> From<&'a Entity<'gc, Self, S>>;
 
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
-    fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Result<Value<'gc, Self, S>, ErrorCause<Self, S>>;
+    fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Value<'gc, Self, S>;
 }
 
 /// The time as determined by an implementation of [`System`].

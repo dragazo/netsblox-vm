@@ -358,7 +358,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
 
         let context_clone = context.clone();
         let config = config.fallback(&Config {
-            request: Some(Rc::new(move |system, _, key, request, _| {
+            request: Some(Rc::new(move |_, key, request, proc| {
                 match request {
                     Request::Rpc { service, rpc, args } => match (service.as_str(), rpc.as_str(), args.as_slice()) {
                         ("PublicRoles", "getPublicRoleId", []) => {
@@ -367,7 +367,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                         }
                         _ => {
                             match args.into_iter().map(|(k, v)| Ok((k, v.to_simple()?.into_netsblox_json()?))).collect::<Result<_,ErrorCause<_,_>>>() {
-                                Ok(args) => system.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap(),
+                                Ok(args) => proc.global_context.borrow().system.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap(),
                                 Err(err) => key.complete(Err(format!("failed to convert RPC args to json: {err:?}"))),
                             }
                             RequestStatus::Handled
@@ -455,7 +455,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         Ok(match self.config.request.as_ref() {
             Some(handler) => {
                 let key = RequestKey(Arc::new(Mutex::new(AsyncResult::new())));
-                match handler(self, mc, RequestKey(key.0.clone()), request, proc) {
+                match handler(mc, RequestKey(key.0.clone()), request, proc) {
                     RequestStatus::Handled => key,
                     RequestStatus::UseDefault { key: _, request } => return Err(ErrorCause::NotSupported { feature: request.feature() }),
                 }
@@ -468,7 +468,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         Self::check_runtime_borrows(mc, proc);
 
         Ok(match key.poll() {
-            AsyncResult::Completed(Ok(x)) => AsyncResult::Completed(Ok(C::from_intermediate(mc, x)?)),
+            AsyncResult::Completed(Ok(x)) => AsyncResult::Completed(Ok(C::from_intermediate(mc, x))),
             AsyncResult::Completed(Err(x)) => AsyncResult::Completed(Err(x)),
             AsyncResult::Pending => AsyncResult::Pending,
             AsyncResult::Consumed => AsyncResult::Consumed,
@@ -482,7 +482,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         Ok(match self.config.command.as_ref() {
             Some(handler) => {
                 let key = CommandKey(Arc::new(Mutex::new(AsyncResult::new())));
-                match handler(self, mc, CommandKey(key.0.clone()), command, proc) {
+                match handler(mc, CommandKey(key.0.clone()), command, proc) {
                     CommandStatus::Handled => key,
                     CommandStatus::UseDefault { key: _, command } => return Err(ErrorCause::NotSupported { feature: command.feature() }),
                 }

@@ -7,7 +7,7 @@ use std::io::{BufRead, Write, BufReader, BufWriter};
 
 use netsblox_vm::cli::{run, Mode};
 use netsblox_vm::template::SyscallMenu;
-use netsblox_vm::runtime::{GetType, Value, Type, ErrorCause, EntityKind, Request, RequestStatus, Config, CustomTypes, Key, SimpleValue, Entity};
+use netsblox_vm::runtime::{GetType, Value, Type, EntityKind, Request, RequestStatus, Config, CustomTypes, Key, SimpleValue, Entity};
 use netsblox_vm::std_system::StdSystem;
 use netsblox_vm::gc::Mutation;
 use clap::Parser;
@@ -72,11 +72,11 @@ impl CustomTypes<StdSystem<C>> for C {
     type EntityState = EntityState;
     type ProcessState = ProcessState;
 
-    fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Result<Value<'gc, C, StdSystem<C>>, ErrorCause<C, StdSystem<C>>> {
-        Ok(match value {
+    fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Value<'gc, C, StdSystem<C>> {
+        match value {
             Intermediate::Simple(x) => Value::from_simple(mc, x),
             Intermediate::Native(x) => Value::Native(Rc::new(x)),
-        })
+        }
     }
 }
 
@@ -98,7 +98,7 @@ fn main() {
 
     if args.fs {
         let new_config = Config::<C, StdSystem<C>> {
-            request: Some(Rc::new(move |_, _, key, request, _| match &request {
+            request: Some(Rc::new(move |_, key, request, _| match &request {
                 Request::Syscall { name, args } => match name.as_str() {
                     "open" => {
                         let (path, mode) = match args.as_slice() {
