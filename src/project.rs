@@ -83,7 +83,7 @@ pub enum ProjectStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// The project had a running process which terminated successfully.
     /// This can be though of as a special case of [`ProjectStep::Normal`],
     /// but also returns the result and process so it can be queried for state information if needed.
-    ProcessTerminated { result: Option<Value<'gc, C, S>>, proc: Process<'gc, C, S> },
+    ProcessTerminated { result: Value<'gc, C, S>, proc: Process<'gc, C, S> },
     /// The project had a running process, which encountered a runtime error.
     /// The dead process is returned, which can be queried for diagnostic information.
     Error { error: ExecError<C, S>, proc: Process<'gc, C, S> },
@@ -363,6 +363,34 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     let proc = self.state.processes.remove(proc_key).unwrap();
                     all_contexts_consumer.do_once(self); // need to consume all contexts after dropping a process
                     ProjectStep::ProcessTerminated { result, proc }
+                }
+                ProcessStep::Abort { mode } => match mode {
+                    AbortMode::Current => {
+                        debug_assert!(!proc.is_running());
+                        self.state.processes.remove(proc_key);
+                        ProjectStep::Normal
+                    }
+                    AbortMode::All => {
+                        debug_assert!(!proc.is_running());
+                        self.state.processes.clear();
+                        self.state.process_queue.clear();
+                        ProjectStep::Normal
+                    }
+                    AbortMode::Others => {
+                        debug_assert!(proc.is_running());
+                        self.state.processes.retain_mut(|k, _| k == proc_key);
+                        debug_assert_eq!(self.state.processes.len(), 1);
+                        self.state.process_queue.clear();
+                        self.state.process_queue.push_front(proc_key); // keep executing the calling process
+                        ProjectStep::Normal
+                    }
+                    AbortMode::MyOthers => {
+                        debug_assert!(proc.is_running());
+                        let entity = proc.get_call_stack().first().unwrap().entity;
+                        self.state.processes.retain_mut(|k, v| k == proc_key || !Gc::ptr_eq(entity, v.get_call_stack().first().unwrap().entity));
+                        self.state.process_queue.push_front(proc_key); // keep executing the calling process
+                        ProjectStep::Normal
+                    }
                 }
                 ProcessStep::Idle => unreachable!(),
             }

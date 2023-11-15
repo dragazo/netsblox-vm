@@ -124,6 +124,24 @@ impl<K: Key, T> SlotMap<K, T> {
 
         #[cfg(test)] assert!(self.invariant());
     }
+    /// Retains only the values for which the predicate returns true.
+    /// For all retained values, any existing keys are still valid after this operation.
+    pub fn retain_mut<F: FnMut(K, &mut T) -> bool>(&mut self, mut f: F) {
+        #[cfg(test)] assert!(self.invariant());
+
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            if let Some(value) = &mut slot.value {
+                if !f(K::new(i, slot.generation), value) {
+                    slot.value = None;
+                    slot.generation += 1;
+                    self.num_values -= 1;
+                    self.empty_slots.push(i);
+                }
+            }
+        }
+
+        #[cfg(test)] assert!(self.invariant());
+    }
     /// Get a reference to a value in the map.
     pub fn get(&self, key: K) -> Option<&T> {
         let slot = self.slots.get(key.get_slot())?;
@@ -332,4 +350,28 @@ fn test_slotmap() {
     assert_eq!(map.remove(k2), Some(13));
     assert_eq!(map.remove(k2), None);
     assert_eq!(map.remove(k2), None);
+
+    map.clear();
+    let kv1 = map.insert(54);
+    let kv2 = map.insert(-4);
+    let kv3 = map.insert(51);
+    let kv4 = map.insert(-53);
+    let kv5 = map.insert(52);
+    let kv6 = map.insert(12);
+    let kv7 = map.insert(2);
+    assert_eq!(map.get(kv1).copied(), Some(54));
+    assert_eq!(map.get(kv2).copied(), Some(-4));
+    assert_eq!(map.get(kv3).copied(), Some(51));
+    assert_eq!(map.get(kv4).copied(), Some(-53));
+    assert_eq!(map.get(kv5).copied(), Some(52));
+    assert_eq!(map.get(kv6).copied(), Some(12));
+    assert_eq!(map.get(kv7).copied(), Some(2));
+    map.retain_mut(|k, v| k == kv6 || *v % 2 != 0);
+    assert_eq!(map.get(kv1).copied(), None);
+    assert_eq!(map.get(kv2).copied(), None);
+    assert_eq!(map.get(kv3).copied(), Some(51));
+    assert_eq!(map.get(kv4).copied(), Some(-53));
+    assert_eq!(map.get(kv5).copied(), None);
+    assert_eq!(map.get(kv6).copied(), Some(12));
+    assert_eq!(map.get(kv7).copied(), None);
 }

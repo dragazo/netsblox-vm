@@ -45,7 +45,7 @@ fn get_running_proc<'a, F>(xml: &'a str, settings: Settings, system: Rc<StdSyste
     }), ins_locs)
 }
 
-fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(&Mutation<'gc>, &Env, Result<(Option<Value<'gc, C, StdSystem<C>>>, usize), ExecError<C, StdSystem<C>>>) {
+fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(&Mutation<'gc>, &Env, Result<(Value<'gc, C, StdSystem<C>>, usize), ExecError<C, StdSystem<C>>>) {
     env.mutate(|mc, env| {
         let mut proc = env.proc.borrow_mut(mc);
         assert!(proc.is_running());
@@ -73,6 +73,7 @@ fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(&M
                 Ok(ProcessStep::CreatedClone { .. }) => panic!("proc tests should not clone"),
                 Ok(ProcessStep::Broadcast { .. }) => panic!("proc tests should not broadcast"),
                 Ok(ProcessStep::Watcher { .. }) => panic!("proc tests should not use watchers"),
+                Ok(ProcessStep::Abort { .. }) => panic!("proc tests should not abort"),
                 Ok(ProcessStep::Fork { .. }) => panic!("proc tests should not fork"),
                 Ok(ProcessStep::Pause) => panic!("proc tests should not pause"),
                 Err(e) => {
@@ -99,7 +100,7 @@ fn test_proc_ret() {
         methods = "",
     ), Settings::default(), system, |_| SymbolTable::default());
 
-    run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
+    run_till_term(&mut env, |_, _, res| match res.unwrap().0 {
         Value::String(x) => assert_eq!(&*x, ""),
         x => panic!("{:?}", x),
     });
@@ -122,7 +123,7 @@ fn test_proc_sum_123n() {
         });
         run_till_term(&mut env, |mc, _, res| {
             let expect = Value::from_simple(mc, SimpleValue::from_json(expect).unwrap());
-            assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "sum 123n");
+            assert_values_eq(&res.unwrap().0, &expect, 1e-20, "sum 123n");
         });
     }
 }
@@ -144,7 +145,7 @@ fn test_proc_recursive_factorial() {
         });
         run_till_term(&mut env, |mc, _, res| {
             let expect = Value::from_simple(mc, SimpleValue::from_json(expect).unwrap());
-            assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "recursive factorial");
+            assert_values_eq(&res.unwrap().0, &expect, 1e-20, "recursive factorial");
         });
     }
 }
@@ -185,7 +186,7 @@ fn test_proc_loops_lists_basic() {
             [6.5,5.5,4.5,3.5,2.5,1.5],
             ["56","44","176"],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expected, 1e-10, "loops lists");
+        assert_values_eq(&res.unwrap().0, &expected, 1e-10, "loops lists");
     });
 }
 
@@ -199,7 +200,7 @@ fn test_proc_recursively_self_containing_lists() {
         methods = "",
     ), Settings::default(), system, |_| SymbolTable::default());
 
-    run_till_term(&mut env, |mc, _, res| match res.unwrap().0.unwrap() {
+    run_till_term(&mut env, |mc, _, res| match res.unwrap().0 {
         Value::List(res) => {
             let res = res.borrow();
             assert_eq!(res.len(), 4);
@@ -251,7 +252,7 @@ fn test_proc_sieve_of_eratosthenes() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "primes");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-100, "primes");
     });
 }
 
@@ -267,7 +268,7 @@ fn test_proc_early_return() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([1,3])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "res");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-100, "res");
     });
 }
 
@@ -295,7 +296,7 @@ fn test_proc_short_circuit() {
             [false, false],
             ["xed", "sergb", true, false, false, false, true, true, true, false],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-100, "short circuit test");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-100, "short circuit test");
     });
 }
 
@@ -339,7 +340,7 @@ fn test_proc_all_arithmetic() {
             Value::List(Gc::new(mc, RefLock::new([1.0, 2.2973967099940698, 0.002093307544016197, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
             Value::List(Gc::new(mc, RefLock::new([Value::String(Rc::new("0".into())), Value::String(Rc::new("1.2".into())), Value::String(Rc::new("-8.9".into())), Number::new(inf).unwrap().into(), Number::new(-inf).unwrap().into()].into_iter().collect()))),
         ].into_iter().collect())));
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-7, "short circuit test");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-7, "short circuit test");
     });
 }
 
@@ -355,7 +356,7 @@ fn test_proc_lambda_local_shadow_capture() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!(["1", "1", "1"])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "local shadow capture");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-20, "local shadow capture");
     });
 }
 
@@ -414,7 +415,7 @@ fn test_proc_upvars() {
             ["gfdgr","rjhrthr"],
             "---",
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-10, "upvars");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-10, "upvars");
     });
 }
 
@@ -430,7 +431,7 @@ fn test_proc_generators_nested() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([1, 25, 169, 625, 1681, 3721, 7225, 12769, 21025, 32761])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "nested generators");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-20, "nested generators");
     });
 }
 
@@ -449,7 +450,7 @@ fn test_proc_call_in_closure() {
             [2, 4, 6, 8, 10],
             [1, 3, 5, 7, 9],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "call in closure");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-20, "call in closure");
     });
 }
 
@@ -471,7 +472,7 @@ fn test_proc_warp_yields() {
 
         run_till_term(&mut env, |mc, env, res| {
             let (res, yields) = res.unwrap();
-            assert_values_eq(res.as_ref().unwrap(), &Value::from_simple(mc, SimpleValue::from_json(json!("x")).unwrap()), 1e-20, &format!("yield test (mode {mode}) res"));
+            assert_values_eq(&res, &Value::from_simple(mc, SimpleValue::from_json(json!("x")).unwrap()), 1e-20, &format!("yield test (mode {mode}) res"));
             let counter = env.glob.borrow().globals.lookup("counter").unwrap().get().clone();
             assert_values_eq(&counter, &Number::new(expected_counter as f64).unwrap().into(), 1e-20, &format!("yield test (mode {mode}) value"));
             if yields != expected_yields { panic!("yield test (mode {}) yields - got {} expected {}", mode, yields, expected_yields) }
@@ -536,7 +537,7 @@ fn test_proc_string_ops() {
             [ "hello", "world" ],
             { "a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10 },
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "string ops");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-20, "string ops");
     });
 }
 
@@ -558,7 +559,7 @@ fn test_proc_str_cmp_case_insensitive() {
                 [false, true, true, false],
             ],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "str cmp case insensitive");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-20, "str cmp case insensitive");
     });
 }
 
@@ -578,7 +579,7 @@ fn test_proc_rpc_call_basic() {
             locals.define_or_redefine("long", Shared::Unique(Number::new(long).unwrap().into()));
             locals
         });
-        run_till_term(&mut env, |_, _, res| match res.unwrap().0.unwrap() {
+        run_till_term(&mut env, |_, _, res| match res.unwrap().0 {
             Value::String(ret) => assert_eq!(&*ret, city),
             x => panic!("{:?}", x),
         });
@@ -614,7 +615,7 @@ fn test_proc_list_index_blocks() {
             [],
             ["51"],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "index ops");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-20, "index ops");
     });
 }
 
@@ -630,7 +631,7 @@ fn test_proc_literal_types() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "50e4", "50e4s" ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-20, "literal types check");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-20, "literal types check");
     });
 }
 
@@ -709,7 +710,7 @@ fn test_proc_syscall() {
             "beep beep - called with empty args",
             ["5test9", ""],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "syscall checks");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "syscall checks");
     });
 }
 
@@ -726,7 +727,7 @@ fn test_proc_timer_wait() {
     let start = std::time::Instant::now();
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([0.0, 0.05, 0.15, 0.3, 0.5, 0.75, 1.05, 1.4, 1.8, 2.25, 2.75])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 0.01, "timer checks");
+        assert_values_eq(&res.unwrap().0, &expect, 0.01, "timer checks");
     });
     let duration = start.elapsed().as_millis();
     assert!(duration >= 2750);
@@ -755,7 +756,7 @@ fn test_proc_cons_cdr() {
             [1],
             []
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "cons cdr checks");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "cons cdr checks");
     });
 }
 
@@ -783,7 +784,7 @@ fn test_proc_list_find_contains() {
             [["1","2"], 0, false],
             [[], 5, true],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "cons cdr checks");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "cons cdr checks");
     });
 }
 
@@ -806,7 +807,7 @@ fn test_proc_append() {
             [1,2,3,4,2,3,"4"],
             [1,2,3,4,2,3,"4"],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "append result");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "append result");
     });
 }
 
@@ -826,7 +827,7 @@ fn test_proc_foreach_mutate() {
             [2,4,6,8,10,12,14,16,18,20],
             [2, 1.5, 1.3333333, 3, 2, 1.6666666, 4, 2.5, 2, 3, 2.5, 2.33333, 4, 3, 2.666666, 5, 3.5, 3, 4, 3.5, 3.333333, 5, 4, 3.666666, 6, 4.5, 4],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "map result");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "map result");
     });
 }
 
@@ -846,7 +847,7 @@ fn test_proc_map() {
             [1,4,9,16,25,36,49,64,81,100],
             [1.0, 1.4142135623730951, 1.7320508075688772, 2.0, 2.23606797749979, 2.449489742783178, 2.6457513110645907, 2.8284271247461903, 3.0, 3.1622776601683795, 1.4142135623730951, 2.0, 2.449489742783178, 2.8284271247461903, 3.1622776601683795, 3.4641016151377544, 3.7416573867739413, 4.0, 4.242640687119285, 4.47213595499958],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "map result");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "map result");
     });
 }
 
@@ -868,7 +869,7 @@ fn test_proc_keep_find() {
             14,
             "",
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "keep/find results");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "keep/find results");
     });
 }
 
@@ -890,7 +891,7 @@ fn test_proc_numeric_bases() {
             ["0o34", 28, 56, 784],
             ["0b101101", 45, 90, 2025],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "numeric bases results");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "numeric bases results");
     });
 }
 
@@ -917,7 +918,7 @@ fn test_proc_combine() {
             0,
             0,
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "keep/find results");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "keep/find results");
     });
 }
 
@@ -939,7 +940,7 @@ fn test_proc_autofill_closure_params() {
             55,
             3628800,
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "autofill closure params");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "autofill closure params");
     });
 }
 
@@ -956,7 +957,7 @@ fn test_proc_pick_random() {
     run_till_term(&mut env, |_, _, res| {
         let results = {
             let mut out = vec![];
-            for row in res.unwrap().0.unwrap().as_list().unwrap().borrow().iter() {
+            for row in res.unwrap().0.as_list().unwrap().borrow().iter() {
                 let mut vals = vec![];
                 for val in row.as_list().unwrap().borrow().iter() {
                     vals.push(match val {
@@ -1025,7 +1026,7 @@ fn test_proc_rand_list_ops() {
             }
 
             let mut out = vec![];
-            let res = res.unwrap().0.unwrap().as_list().unwrap();
+            let res = res.unwrap().0.as_list().unwrap();
             let res = res.borrow();
             let mut res = res.iter();
             let last = loop {
@@ -1081,7 +1082,7 @@ fn test_proc_variadic_sum_product() {
             [240, 320, 20],
             1,
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic sum product");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "variadic sum product");
     });
 }
 
@@ -1097,7 +1098,7 @@ fn test_proc_variadic_min_max() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "1", "2", "9", "17" ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic min/max");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "variadic min/max");
     });
 }
 
@@ -1122,7 +1123,7 @@ fn test_proc_atan2_new_cmp() {
             false,
             [false, true],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "atan2 and new cmp");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "atan2 and new cmp");
     });
 }
 
@@ -1166,7 +1167,7 @@ fn test_proc_list_columns() {
             [],
             false,
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "columns");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "columns");
     });
 }
 
@@ -1192,7 +1193,7 @@ fn test_proc_transpose_consistency() {
             [0],
             [0],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "transpose consistency");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "transpose consistency");
     });
 }
 
@@ -1261,7 +1262,7 @@ fn test_proc_compare_str() {
             [true, true, false, true, false, false],
             [true, true, false, true, false, false],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "compare str");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "compare str");
     });
 }
 
@@ -1290,7 +1291,7 @@ fn test_proc_new_min_max() {
             [["4"], ["4"], ["4", "1", "2"], ["4", "1", "2"]],
             [["4", "1", "2"], ["4", "1", "2"], ["4", "2"], ["4", "2"]],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "new min max");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "new min max");
     });
 }
 
@@ -1311,7 +1312,7 @@ fn test_proc_flatten() {
             ["hello world"],
             [""],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "flatten");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "flatten");
     });
 }
 
@@ -1337,7 +1338,7 @@ fn test_proc_list_len_rank_dims() {
             [2, 2, [2, 10]],
             [0, []],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list len, rank, dims");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "list len, rank, dims");
     });
 }
 
@@ -1360,7 +1361,7 @@ fn test_proc_string_index() {
             ["요", "d", "수", "r", "일"],
             [3, 2],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "string index");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "string index");
     });
 }
 
@@ -1389,7 +1390,7 @@ fn test_proc_type_query() {
             [false, false, false, true, false, false, false],
             [false, false, false, false, true, false, false],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "type query");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "type query");
     });
 }
 
@@ -1410,7 +1411,7 @@ fn test_proc_variadic_strcat() {
             "",
             "",
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic strcat");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "variadic strcat");
     });
 }
 
@@ -1431,7 +1432,7 @@ fn test_proc_list_lines() {
             "hello\nworld",
             "hello\nworld\n69",
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list lines");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "list lines");
     });
 }
 
@@ -1456,7 +1457,7 @@ fn test_proc_whitespace_in_numbers() {
             [true, true, false, true, false, false, false],
             [true, true, false, true, false, false, false],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "ws in nums");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "ws in nums");
     });
 }
 
@@ -1491,7 +1492,7 @@ fn test_proc_binary_make_range() {
                 [5,6,7,8],
             ],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "binary make range");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "binary make range");
     });
 }
 
@@ -1512,7 +1513,7 @@ fn test_proc_identical_to() {
             [false, false, true, true, true],
             [false, false, false, true],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "identical to");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "identical to");
     });
 }
 
@@ -1540,7 +1541,7 @@ fn test_proc_variadic_list_ctors() {
             [true, false],
             [true, false],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic list ctors");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "variadic list ctors");
     });
 }
 
@@ -1560,7 +1561,7 @@ fn test_proc_list_rev() {
             ["2", ["6", "4", "3"], "8", "1"],
             [["6", ["6", "4", "3"], "3"], ["6", "4", "3"], "8", "1"],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list rev");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "list rev");
     });
 }
 
@@ -1596,7 +1597,7 @@ fn test_proc_list_reshape() {
             "EmptyList",
             "EmptyList",
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list reshape");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "list reshape");
     });
 }
 
@@ -1619,7 +1620,7 @@ fn test_proc_list_json() {
             r#"14.0"#,
             r#""hello world \"again\"""#,
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list json");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "list json");
     });
 }
 
@@ -1645,7 +1646,7 @@ fn test_proc_explicit_to_string_cvt() {
             "hello [test,more] 8",
             "hello [1,2,3,4] 9",
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "explicit tostr");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "explicit tostr");
     });
 }
 
@@ -1667,7 +1668,7 @@ fn test_proc_empty_variadic_no_auto_insert() {
             [[], [], [], []],
             [[], [], [], []],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "no auto insert");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "no auto insert");
     });
 }
 
@@ -1689,7 +1690,7 @@ fn test_proc_c_ring_no_auto_insert() {
             [[""], ["", 4, ""], "", [], "", ["", "", 4, ""], "", 4],
             [[""], ["", 5, ""], "", [], "", ["", "", 5, ""], "", 5],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "no auto insert");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "no auto insert");
     });
 }
 
@@ -1714,7 +1715,7 @@ fn test_proc_signed_zero() {
             [false, true, true, false, true, false, true],
             [false, true, true, false, true, false, false],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "signed zero");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "signed zero");
     });
 }
 
@@ -1733,7 +1734,7 @@ fn test_proc_singleton_sum_product() {
             9, 9, [6, [4, 2], 1], [6, [4, 2], 1],
             9, 9, [6, [4, 2], 1], [6, [4, 2], 1],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "singleton sum product");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "singleton sum product");
     });
 }
 
@@ -1776,7 +1777,7 @@ fn test_proc_list_combinations() {
             ],
             [],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "list combinations");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "list combinations");
     });
 }
 
@@ -1795,7 +1796,7 @@ fn test_proc_unevaluated_inputs() {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
             "before", "waiting... 1", "waiting... 2", "waiting... 3", "waiting... 4", "waiting... 5", "waiting... 6", "after",
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "unevaluated inputs");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "unevaluated inputs");
     });
 }
 
@@ -1908,7 +1909,7 @@ fn test_proc_basic_motion() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expected = Value::from_simple(mc, SimpleValue::from_json(json!([ 13, 54, 39 ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expected, 1e-4, "basic motion test")
+        assert_values_eq(&res.unwrap().0, &expected, 1e-4, "basic motion test")
     });
 
     let expected = [
@@ -1942,7 +1943,7 @@ fn test_proc_string_cmp() {
             [false, true, true, false, false, false, false],
             [false, true, true, false, true, true, true],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "string cmp");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "string cmp");
     });
 }
 
@@ -2012,7 +2013,7 @@ fn test_proc_variadic_params() {
             [["3", "1"], [1, 2, 3, 4]],
             [["gf", "fd", "", "d"], [1, 2, 3, 4]],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "variadic params");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "variadic params");
     });
 }
 
@@ -2027,7 +2028,7 @@ fn test_proc_rand_str_char_cache() {
     ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, res| {
-        let res = res.unwrap().0.unwrap().as_string().unwrap().into_owned();
+        let res = res.unwrap().0.as_string().unwrap().into_owned();
         assert_eq!(res.len(), 8192);
         let mut counts: BTreeMap<char, usize> = BTreeMap::new();
         for ch in res.chars() {
@@ -2055,7 +2056,7 @@ fn test_proc_noop_upvars() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ 0, 0, 1, 0 ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "noop upvars");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "noop upvars");
     });
 }
 
@@ -2071,7 +2072,7 @@ fn test_proc_try_catch_throw() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "starting", "start code", "got error", "test error", "done" ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "try catch throw");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "try catch throw");
     });
 }
 
@@ -2087,7 +2088,7 @@ fn test_proc_exception_unregister() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "top start", "before test", "before inner", "inner error", "IndexOutOfBounds { index: 332534, len: 3 }", "after test", "top error", "IndexOutOfBounds { index: 332534, len: 6 }", "top done"])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "exception res");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "exception res");
     });
 }
 
@@ -2103,7 +2104,7 @@ fn test_proc_exception_rethrow() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([ "IndexOutOfBounds { index: 543548, len: 0 }", "test error here" ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "exception res");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "exception res");
     });
 }
 
@@ -2125,7 +2126,7 @@ fn test_proc_rpc_error() {
             ["latitude is required.", "latitude is required."],
             ["Nashville", ""],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "rpc error");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "rpc error");
     });
 }
 
@@ -2148,7 +2149,7 @@ fn test_proc_c_rings() {
             "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "bar 2", "---",
             "bar 2", "---",
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "c-rings");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "c-rings");
     });
 }
 
@@ -2165,7 +2166,7 @@ fn test_proc_wall_time() {
 
     run_till_term(&mut env, |_, _, res| {
         let t = OffsetDateTime::now_utc().to_offset(utc_offset);
-        let res = res.unwrap().0.unwrap().as_list().unwrap();
+        let res = res.unwrap().0.as_list().unwrap();
         let res = res.borrow();
         assert_eq!(res.len(), 8);
 
@@ -2202,7 +2203,7 @@ fn test_proc_to_csv() {
             "hello,\"one\ntwo\nthree\",world",
             "hello,\"one\ntwo\nthree\"\nworld,test,\"one\ntwo\n\"\nagain,\"\ntwo\",\"\ntwo\n\"",
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "to-csv");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "to-csv");
     });
 }
 
@@ -2236,7 +2237,7 @@ fn test_proc_from_csv() {
             "NotCsv { value: \"\\\"abc\\\"xyz\" }",
             "NotCsv { value: \"\\\"abcxyz\" }",
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "from-csv");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "from-csv");
     });
 }
 
@@ -2270,7 +2271,7 @@ fn test_proc_extra_cmp_tests() {
             [true, false, true],
             [false, true, false],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "extra-cmp-tests");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "extra-cmp-tests");
     });
 }
 
@@ -2345,7 +2346,7 @@ fn test_proc_extra_blocks() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!("cool")).unwrap());
-        assert_values_eq(&res.unwrap().0.unwrap(), &expect, 1e-5, "extra blocks");
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "extra blocks");
     });
 
     let expected = vec![

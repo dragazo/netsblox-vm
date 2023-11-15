@@ -58,8 +58,8 @@ pub(crate) enum Relation {
 }
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
-pub(crate) enum StopMode {
-    All, Process, Function, Others, MyOthers,
+pub enum AbortMode {
+    All, Current, Others, MyOthers,
 }
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
@@ -105,7 +105,6 @@ pub(crate) enum UnaryOp {
     UnicodeToChar, CharToUnicode,
 }
 
-impl From<StopMode> for Instruction<'_> { fn from(mode: StopMode) -> Self { Self::Stop { mode } } }
 impl From<Relation> for Instruction<'_> { fn from(relation: Relation) -> Self { Self::Cmp { relation } } }
 impl From<BinaryOp> for Instruction<'_> { fn from(op: BinaryOp) -> Self { Self::BinaryOp { op } } }
 impl From<UnaryOp> for Instruction<'_> { fn from(op: UnaryOp) -> Self { Self::UnaryOp { op } } }
@@ -342,9 +341,8 @@ pub(crate) enum Instruction<'a> {
     /// If the call stack is empty, this instead terminates the process
     /// with the reported value being the (only) value remaining in the value stack.
     Return,
-
-    /// Stops one of more processes/functions/etc. immediately without running any following code.
-    Stop { mode: StopMode },
+    /// Stops one of more processes immediately without running any following code.
+    Abort { mode: AbortMode },
 
     /// Pushes a new error handler onto the handler stack.
     PushHandler { pos: usize, var: &'a str },
@@ -499,7 +497,7 @@ macro_rules! read_write_u8_type {
         }
     )*}
 }
-read_write_u8_type! { PrintStyle, Property, Relation, TimeQuery, BinaryOp, UnaryOp, VariadicOp, BasicType, StopMode }
+read_write_u8_type! { PrintStyle, Property, Relation, TimeQuery, BinaryOp, UnaryOp, VariadicOp, BasicType, AbortMode }
 
 /// encodes values as a sequence of bytes of form [1: next][7: bits] in little-endian order.
 /// `bytes` can be used to force a specific size (too small will panic), otherwise calculates and uses the smallest possible size.
@@ -799,8 +797,7 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             81 => read_prefixed!(Instruction::CallClosure { new_entity: true, } : args),
             82 => read_prefixed!(Instruction::ForkClosure {} : args),
             83 => read_prefixed!(Instruction::Return),
-
-            84 => read_prefixed!(Instruction::Stop {} : mode),
+            84 => read_prefixed!(Instruction::Abort {} : mode),
 
             85 => read_prefixed!(Instruction::PushHandler {} : pos, var),
             86 => read_prefixed!(Instruction::PopHandler),
@@ -992,8 +989,7 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::CallClosure { new_entity: true, args } => append_prefixed!(81: args),
             Instruction::ForkClosure { args } => append_prefixed!(82: args),
             Instruction::Return => append_prefixed!(83),
-
-            Instruction::Stop { mode } => append_prefixed!(84: mode),
+            Instruction::Abort { mode } => append_prefixed!(84: mode),
 
             Instruction::PushHandler { pos, var } => append_prefixed!(85: move pos, move str var),
             Instruction::PopHandler => append_prefixed!(86),
@@ -1715,7 +1711,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             ast::StmtKind::ChangePenSize { delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeProperty { prop: Property::PenSize })?,
             ast::StmtKind::NextCostume => self.ins.push(Instruction::NextCostume.into()),
             ast::StmtKind::PenClear => self.ins.push(Instruction::ClearDrawings.into()),
-            ast::StmtKind::Stop { mode: ast::StopMode::ThisScript } => self.ins.push(Instruction::Stop { mode: StopMode::Process }.into()),
+            ast::StmtKind::Stop { mode: ast::StopMode::ThisScript } => self.ins.push(Instruction::Abort { mode: AbortMode::Current }.into()),
             ast::StmtKind::SetCostume { costume } => match costume {
                 Some(x) => self.append_simple_ins(entity, &[x], Instruction::SetCostume)?,
                 None => {

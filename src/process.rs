@@ -118,9 +118,12 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// Yielding is needed for executing an entire project's scripts so that they can appear to run simultaneously.
     /// If instead you are explicitly only using a single sandboxed process, this can be treated equivalently to [`ProcessStep::Normal`].
     Yield,
-    /// The process has successfully terminated with the given return value, or [`None`] if terminated by an (error-less) abort,
-    /// such as a stop script command or the death of the process's associated entity.
-    Terminate { result: Option<Value<'gc, C, S>> },
+    /// The process has successfully terminated with the given return value.
+    Terminate { result: Value<'gc, C, S> },
+    /// Aborts zero or more running processes, possibly including this one.
+    /// If this process is included in the abort set, this process is guaranteed to already be terminated.
+    /// For other processes, it is up to the receiver/scheduler to respect this abort request.
+    Abort { mode: AbortMode },
     /// The process has requested to broadcast a message to all entities (if `target` is `None`) or to a specific `target`, which may trigger other code to execute.
     Broadcast { msg_type: String, barrier: Option<Barrier>, targets: Option<Vec<Gc<'gc, RefLock<Entity<'gc, C, S>>>>> },
     /// The process has requested to create or destroy a new watcher for a variable.
@@ -282,7 +285,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
         }
 
-        if let Ok(ProcessStep::Terminate { .. }) | Err(_) = &res {
+        if let Ok(ProcessStep::Terminate { result: _ }) | Ok(ProcessStep::Abort { mode: AbortMode::Current | AbortMode::All }) | Err(_) = &res {
             self.pos = usize::MAX;
             self.barrier = None;
             self.reply_key = None;
@@ -346,30 +349,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
 
             Ok((closure.pos, locals))
-        }
-        fn do_return<'gc, C: CustomTypes<S>, S: System<C>>(return_value: Value<'gc, C, S>, proc: &mut Process<'gc, C, S>) -> Result<ProcessStep<'gc, C, S>, ErrorCause<C, S>> {
-            let CallStackEntry { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, .. } = proc.call_stack.last().unwrap();
-
-            proc.pos = *return_to;
-            proc.warp_counter = *warp_counter;
-            proc.value_stack.drain(value_stack_size..);
-            proc.handler_stack.drain(handler_stack_size..);
-            debug_assert_eq!(proc.value_stack.len(), *value_stack_size);
-            debug_assert_eq!(proc.handler_stack.len(), *handler_stack_size);
-
-            if proc.call_stack.len() > 1 {
-                proc.call_stack.pop();
-                proc.value_stack.push(return_value);
-                Ok(ProcessStep::Normal)
-            } else {
-                debug_assert_eq!(proc.value_stack.len(), 0);
-                debug_assert_eq!(*called_from, usize::MAX);
-                debug_assert_eq!(*return_to, usize::MAX);
-                debug_assert_eq!(*warp_counter, 0);
-                debug_assert_eq!(*value_stack_size, 0);
-                debug_assert_eq!(*handler_stack_size, 0);
-                Ok(ProcessStep::Terminate { result: Some(return_value) })
-            }
         }
 
         let system = self.global_context.borrow().system.clone();
@@ -976,14 +955,36 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
                 return Ok(ProcessStep::Fork { pos: closure_pos, locals, entity: self.call_stack.last().unwrap().entity });
             }
-            Instruction::Return => return do_return(self.value_stack.pop().unwrap(), self),
-            Instruction::Stop { mode } => {
-                self.pos = aft_pos;
-                match mode {
-                    StopMode::Process => return Ok(ProcessStep::Terminate { result: None }),
-                    StopMode::Function => return do_return(empty_string().into(), self),
-                    x => unimplemented!("{x:?}"),
+            Instruction::Return => {
+                let CallStackEntry { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, .. } = self.call_stack.last().unwrap();
+                let return_value = self.value_stack.pop().unwrap();
+
+                self.pos = *return_to;
+                self.warp_counter = *warp_counter;
+                self.value_stack.drain(value_stack_size..);
+                self.handler_stack.drain(handler_stack_size..);
+                debug_assert_eq!(self.value_stack.len(), *value_stack_size);
+                debug_assert_eq!(self.handler_stack.len(), *handler_stack_size);
+
+                if self.call_stack.len() > 1 {
+                    self.call_stack.pop();
+                    self.value_stack.push(return_value);
+                } else {
+                    debug_assert_eq!(self.value_stack.len(), 0);
+                    debug_assert_eq!(*called_from, usize::MAX);
+                    debug_assert_eq!(*return_to, usize::MAX);
+                    debug_assert_eq!(*warp_counter, 0);
+                    debug_assert_eq!(*value_stack_size, 0);
+                    debug_assert_eq!(*handler_stack_size, 0);
+                    return Ok(ProcessStep::Terminate { result: return_value });
                 }
+            }
+            Instruction::Abort { mode } => {
+                match mode {
+                    AbortMode::Current | AbortMode::All => (),
+                    AbortMode::Others | AbortMode::MyOthers => self.pos = aft_pos,
+                }
+                return Ok(ProcessStep::Abort { mode });
             }
             Instruction::PushHandler { pos, var } => {
                 self.handler_stack.push(Handler {
