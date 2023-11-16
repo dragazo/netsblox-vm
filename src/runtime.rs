@@ -1441,7 +1441,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
     }
 }
 
-pub enum OutgoingMessage<C: CustomTypes<S>, S: System<C>> {
+pub enum OutgoingMessage {
     Normal {
         msg_type: String,
         values: Vec<(String, Json)>,
@@ -1451,17 +1451,17 @@ pub enum OutgoingMessage<C: CustomTypes<S>, S: System<C>> {
         msg_type: String,
         values: Vec<(String, Json)>,
         targets: Vec<String>,
-        reply_key: S::ExternReplyKey,
+        reply_key: ExternReplyKey,
     },
     Reply {
         value: Json,
-        reply_key: S::InternReplyKey,
+        reply_key: InternReplyKey,
     },
 }
-pub struct IncomingMessage<C: CustomTypes<S>, S: System<C>> {
+pub struct IncomingMessage {
     pub msg_type: String,
     pub values: Vec<(String, SimpleValue)>,
-    pub reply_key: Option<S::InternReplyKey>,
+    pub reply_key: Option<InternReplyKey>,
 }
 
 /// A blocking handle for a [`BarrierCondition`].
@@ -1784,13 +1784,13 @@ pub enum Precision {
 /// A key type used to await a reply message from an external source.
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
 pub struct ExternReplyKey {
-    request_id: String,
+    pub request_id: String,
 }
 /// A key type required for this client to send a reply message.
 #[derive(Debug, Clone)]
 pub struct InternReplyKey {
-    src_id: String,
-    request_id: String,
+    pub src_id: String,
+    pub request_id: String,
 }
 
 /// Represents all the features of an implementing system.
@@ -1804,12 +1804,6 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     type RequestKey: 'static + Key<Result<C::Intermediate, String>>;
     /// Key type used to await the completion of an asynchronous command.
     type CommandKey: 'static + Key<Result<(), String>>;
-
-    /// Key type used to await the result of a "send message and wait" block (response from target).
-    type ExternReplyKey: 'static;
-    /// Key type used to reply to a message that was sent to this client with the expectation of receiving a response.
-    /// This type is required to be [`Clone`] because there can be multiple message handlers for the same message type.
-    type InternReplyKey: 'static + Clone;
 
     /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
     /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],
@@ -1838,15 +1832,15 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Sends a message containing a set of named `values` to each of the specified `targets`.
     /// The `expect_reply` value controls whether or not to use a reply mechanism to asynchronously receive a response from the target(s).
     /// In the case that there are multiple targets, only the first reply (if any) should be used.
-    fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<Self::ExternReplyKey>, ErrorCause<C, Self>>;
+    fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<ExternReplyKey>, ErrorCause<C, Self>>;
     /// Polls for a response from a client initiated by [`System::send_message`].
     /// If the client responds, a value of [`Some(x)`] is returned.
     /// The system may elect to impose a timeout for reply results, in which case [`None`] is returned instead.
-    fn poll_reply(&self, key: &Self::ExternReplyKey) -> AsyncResult<Option<Json>>;
+    fn poll_reply(&self, key: &ExternReplyKey) -> AsyncResult<Option<Json>>;
     /// Sends a reply to the sender of a blocking message this client received.
-    fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<C, Self>>;
+    fn send_reply(&self, key: InternReplyKey, value: Json) -> Result<(), ErrorCause<C, Self>>;
     /// Attempts to receive a message from the message buffer.
     /// This operation is always non-blocking and returns [`None`] if there are no messages in the buffer.
     /// If a message is received, a tuple of form `(msg_type, values, reply_key)` is returned.
-    fn receive_message(&self) -> Option<IncomingMessage<C, Self>>;
+    fn receive_message(&self) -> Option<IncomingMessage>;
 }

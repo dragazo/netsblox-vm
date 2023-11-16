@@ -170,7 +170,7 @@ struct Handler {
 enum Defer<C: CustomTypes<S>, S: System<C>> {
     Request { key: S::RequestKey, aft_pos: usize, action: RequestAction },
     Command { key: S::CommandKey, aft_pos: usize },
-    MessageReply { key: S::ExternReplyKey, aft_pos: usize },
+    MessageReply { key: ExternReplyKey, aft_pos: usize },
     Barrier { condition: BarrierCondition, aft_pos: usize },
     Sleep { until: u64, aft_pos: usize },
 }
@@ -189,7 +189,7 @@ pub struct ProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
                                pub locals: SymbolTable<'gc, C, S>,
     #[collect(require_static)] pub start_pos: usize,
     #[collect(require_static)] pub barrier: Option<Barrier>,
-    #[collect(require_static)] pub reply_key: Option<S::InternReplyKey>,
+    #[collect(require_static)] pub reply_key: Option<InternReplyKey>,
     #[collect(require_static)] pub local_message: Option<String>,
 }
 
@@ -204,7 +204,7 @@ pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub state: C::ProcessState,
     #[collect(require_static)]     pos: usize,
     #[collect(require_static)]     barrier: Option<Barrier>,
-    #[collect(require_static)]     reply_key: Option<S::InternReplyKey>,
+    #[collect(require_static)]     reply_key: Option<InternReplyKey>,
     #[collect(require_static)]     warp_counter: usize,
                                    call_stack: Vec<CallStackEntry<'gc, C, S>>,
                                    value_stack: Vec<Value<'gc, C, S>>,

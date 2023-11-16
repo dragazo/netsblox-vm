@@ -1,11 +1,6 @@
-//! An customizable implementation of [`System`].
+//! An customizable implementation of [`System`] which depends on the standard library.
 //! 
-//! This submodule is only available with the [`std`](crate) feature flag.
-//! 
-//! The primary type of interest is [`StdSystem`], which implements [`System`].
-//! [`StdSystem`] can be configured with [`CustomTypes`] and [`Config`],
-//! which together allow for the definition of any external features (e.g., defining syscalls),
-//! as well as overriding default behavior (e.g., rpc intercepting).
+//! This submodule is only available with the [`std-system`](crate) feature flag.
 
 use alloc::string::{String, ToString};
 use alloc::collections::BTreeMap;
@@ -49,7 +44,7 @@ struct RpcRequest<C: CustomTypes<S>, S: System<C>> {
     service: String,
     rpc: String,
     args: Vec<(String, Json)>,
-    key: RequestKey<C, S>,
+    key: AsyncKey<Result<C::Intermediate, String>>,
 }
 struct ReplyEntry {
     expiry: OffsetDateTime,
@@ -95,6 +90,10 @@ async fn call_rpc_async<C: CustomTypes<S>, S: System<C>>(context: &Context, clie
 }
 
 /// A type implementing the [`System`] trait which supports all features.
+/// 
+/// [`StdSystem`] can be configured with [`CustomTypes`] and [`Config`],
+/// which together allow for the definition of any external features (e.g., defining syscalls),
+/// as well as overriding default behavior (e.g., rpc intercepting).
 pub struct StdSystem<C: CustomTypes<StdSystem<C>>> {
     config: Config<C, Self>,
     context: Arc<Context>,
@@ -105,18 +104,18 @@ pub struct StdSystem<C: CustomTypes<StdSystem<C>>> {
     rpc_request_pipe: Sender<RpcRequest<C, Self>>,
 
     message_replies: Arc<Mutex<MessageReplies>>,
-    message_sender: Sender<OutgoingMessage<C, Self>>,
-    message_injector: Sender<IncomingMessage<C, Self>>,
-    message_receiver: Receiver<IncomingMessage<C, Self>>,
+    message_sender: Sender<OutgoingMessage>,
+    message_injector: Sender<IncomingMessage>,
+    message_receiver: Receiver<IncomingMessage>,
 }
 impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     /// Equivalent to [`StdSystem::new_async`] except that it can be executed outside of async context.
-    /// Note that using this from within async context will result in a panic from `tokio` trying to create a runtime within a runtime.
+    /// Note that using this from within async context can result in a panic from, e.g., `tokio` trying to create a runtime within a runtime.
     #[tokio::main(flavor = "current_thread")]
     pub async fn new_sync(base_url: String, project_name: Option<&str>, config: Config<C, Self>, clock: Arc<Clock>) -> Self {
         Self::new_async(base_url, project_name, config, clock).await
     }
-    /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url (e.g., `https://cloud.netsblox.org`).
+    /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url, e.g., `https://cloud.netsblox.org`.
     pub async fn new_async(base_url: String, project_name: Option<&str>, config: Config<C, Self>, clock: Arc<Clock>) -> Self {
         let configuration = reqwest::get(format!("{base_url}/configuration")).await.unwrap().json::<BTreeMap<String, Json>>().await.unwrap();
         let services_hosts = configuration["servicesHosts"].as_array().unwrap();
@@ -139,7 +138,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
             let (in_sender, in_receiver) = channel();
 
             #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
-            async fn handler<C: CustomTypes<StdSystem<C>>>(base_url: String, client_id: String, project_name: String, message_replies: Arc<Mutex<MessageReplies>>, out_receiver: Receiver<OutgoingMessage<C, StdSystem<C>>>, in_sender: Sender<IncomingMessage<C, StdSystem<C>>>) {
+            async fn handler(base_url: String, client_id: String, project_name: String, message_replies: Arc<Mutex<MessageReplies>>, out_receiver: Receiver<OutgoingMessage>, in_sender: Sender<IncomingMessage>) {
                 let ws_url = format!("{}/network/{client_id}/connect", if let Some(x) = base_url.strip_prefix("http") { format!("ws{x}") } else { format!("wss://{base_url}") });
                 let (ws, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
                 let (mut ws_sender, ws_receiver) = ws.split();
@@ -354,11 +353,8 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     }
 }
 impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
-    type RequestKey = RequestKey<C, Self>;
-    type CommandKey = CommandKey;
-
-    type ExternReplyKey = ExternReplyKey;
-    type InternReplyKey = InternReplyKey;
+    type RequestKey = AsyncKey<Result<C::Intermediate, String>>;
+    type CommandKey = AsyncKey<Result<(), String>>;
 
     fn rand<T: SampleUniform, R: SampleRange<T>>(&self, range: R) -> T {
         self.rng.lock().unwrap().gen_range(range)
@@ -374,7 +370,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
 
         Ok(match self.config.request.as_ref() {
             Some(handler) => {
-                let key = RequestKey::new();
+                let key = AsyncKey::new();
                 match handler(mc, key.clone(), request, proc) {
                     RequestStatus::Handled => key,
                     RequestStatus::UseDefault { key: _, request } => return Err(ErrorCause::NotSupported { feature: request.feature() }),
@@ -401,7 +397,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
 
         Ok(match self.config.command.as_ref() {
             Some(handler) => {
-                let key = CommandKey::new();
+                let key = AsyncKey::new();
                 match handler(mc, key.clone(), command, proc) {
                     CommandStatus::Handled => key,
                     CommandStatus::UseDefault { key: _, command } => return Err(ErrorCause::NotSupported { feature: command.feature() }),
@@ -417,7 +413,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         Ok(key.poll())
     }
 
-    fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<Self::ExternReplyKey>, ErrorCause<C, StdSystem<C>>> {
+    fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<ExternReplyKey>, ErrorCause<C, StdSystem<C>>> {
         let (msg, reply_key) = match expect_reply {
             false => (OutgoingMessage::Normal { msg_type, values, targets }, None),
             true => {
@@ -430,7 +426,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         self.message_sender.send(msg).unwrap();
         Ok(reply_key)
     }
-    fn poll_reply(&self, key: &Self::ExternReplyKey) -> AsyncResult<Option<Json>> {
+    fn poll_reply(&self, key: &ExternReplyKey) -> AsyncResult<Option<Json>> {
         let mut message_replies = self.message_replies.lock().unwrap();
         let entry = message_replies.get(key).unwrap();
         if entry.value.is_some() {
@@ -442,11 +438,11 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
         }
         AsyncResult::Pending
     }
-    fn send_reply(&self, key: Self::InternReplyKey, value: Json) -> Result<(), ErrorCause<C, Self>> {
+    fn send_reply(&self, key: InternReplyKey, value: Json) -> Result<(), ErrorCause<C, Self>> {
         self.message_sender.send(OutgoingMessage::Reply { value, reply_key: key }).unwrap();
         Ok(())
     }
-    fn receive_message(&self) -> Option<IncomingMessage<C, Self>> {
+    fn receive_message(&self) -> Option<IncomingMessage> {
         self.message_receiver.try_recv().ok()
     }
 }

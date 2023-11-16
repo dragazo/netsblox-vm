@@ -101,7 +101,7 @@ pub enum ProjectStep<'gc, C: CustomTypes<S>, S: System<C>> {
 pub struct PartialProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
                                pub locals: SymbolTable<'gc, C, S>,
     #[collect(require_static)] pub barrier: Option<Barrier>,
-    #[collect(require_static)] pub reply_key: Option<S::InternReplyKey>,
+    #[collect(require_static)] pub reply_key: Option<InternReplyKey>,
     #[collect(require_static)] pub local_message: Option<String>,
 }
 

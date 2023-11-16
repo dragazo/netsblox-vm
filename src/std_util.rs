@@ -1,4 +1,6 @@
-use alloc::string::String;
+//! A collection of helper types which depend on the standard library.
+//! 
+//! Note that this module is only available with the [`std`](crate) feature flag.
 
 use std::sync::{Arc, Mutex};
 
@@ -44,46 +46,23 @@ impl Clock {
     }
 }
 
-/// A shared [`Key`] type for an asynchronous request.
+/// A [`Key`] type which wraps a shared [`AsyncResult`].
 #[derive(Educe)]
 #[educe(Clone)]
-pub struct RequestKey<C: CustomTypes<S>, S: System<C>>(Arc<Mutex<AsyncResult<Result<C::Intermediate, String>>>>);
-impl<C: CustomTypes<S>, S: System<C>> RequestKey<C, S> {
+pub struct AsyncKey<T>(Arc<Mutex<AsyncResult<T>>>);
+impl<T> AsyncKey<T> {
+    /// Equivalent to [`AsyncResult::new`] to create a new shared [`AsyncResult`].
     pub fn new() -> Self {
         Self(Arc::new(Mutex::new(AsyncResult::new())))
     }
-    pub fn poll(&self) -> AsyncResult<Result<C::Intermediate, String>> {
+    /// Equivalent to [`AsyncResult::poll`] on the shared [`AsyncResult`].
+    pub fn poll(&self) -> AsyncResult<T> {
         self.0.lock().unwrap().poll()
     }
 }
-impl<C: CustomTypes<S>, S: System<C>> Key<Result<C::Intermediate, String>> for RequestKey<C, S> {
-    /// Completes the request with the given result.
-    /// A value of [`Ok`] denotes a successful request, whose value will be returned to the system
-    /// after conversion under [`CustomTypes::from_intermediate`].
-    /// A value of [`Err`] denotes a failed request, which will be returned as an error to the runtime,
-    /// subject to the caller's [`ErrorScheme`] setting.
-    fn complete(self, value: Result<C::Intermediate, String>) {
-        assert!(self.0.lock().unwrap().complete(value).is_ok())
-    }
-}
-
-/// A shared [`Key`] type for an asynchronous command.
-#[derive(Clone)]
-pub struct CommandKey(Arc<Mutex<AsyncResult<Result<(), String>>>>);
-impl CommandKey {
-    pub fn new() -> Self {
-        Self(Arc::new(Mutex::new(AsyncResult::new())))
-    }
-    pub fn poll(&self) -> AsyncResult<Result<(), String>> {
-        self.0.lock().unwrap().poll()
-    }
-}
-impl Key<Result<(), String>> for CommandKey {
-    /// Completes the command.
-    /// A value of [`Ok`] denotes a successful command.
-    /// A value of [`Err`] denotes a failed command, which will be returned as an error to the runtime,
-    /// subject to the caller's [`ErrorScheme`] setting.
-    fn complete(self, value: Result<(), String>) {
+impl<T> Key<T> for AsyncKey<T> {
+    /// Equivalent to [`AsyncResult::complete`] on the shared [`AsyncResult`]
+    fn complete(self, value: T) {
         assert!(self.0.lock().unwrap().complete(value).is_ok())
     }
 }
