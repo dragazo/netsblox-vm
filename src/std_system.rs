@@ -201,19 +201,28 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
 
                 ws_sender_sender.send(Message::Text(json!({ "type": "set-uuid", "clientId": client_id }).to_string())).await.unwrap();
 
+                let src_id = format!("{project_name}@{client_id}#vm");
+                fn resolve_targets<'a>(targets: &'a mut [String], src_id: &String) -> &'a mut [String] {
+                    for target in targets.iter_mut() {
+                        if target == "everyone in room" {
+                            target.clone_from(src_id);
+                        }
+                    }
+                    targets
+                }
                 while let Ok(request) = out_receiver.recv() {
                     let msg = match request {
-                        OutgoingMessage::Normal { msg_type, values, targets } => json!({
+                        OutgoingMessage::Normal { msg_type, values, mut targets } => json!({
                             "type": "message",
-                            "dstId": targets,
-                            "srcId": format!("{project_name}@{client_id}"),
+                            "dstId": resolve_targets(&mut targets, &src_id),
+                            "srcId": src_id,
                             "msgType": msg_type,
                             "content": values.into_iter().collect::<JsonMap<_,_>>(),
                         }),
-                        OutgoingMessage::Blocking { msg_type, values, targets, reply_key } => json!({
+                        OutgoingMessage::Blocking { msg_type, values, mut targets, reply_key } => json!({
                             "type": "message",
-                            "dstId": targets,
-                            "srcId": format!("{project_name}@{client_id}"),
+                            "dstId": resolve_targets(&mut targets, &src_id),
+                            "srcId": src_id,
                             "msgType": msg_type,
                             "requestId": reply_key.request_id,
                             "content": values.into_iter().collect::<JsonMap<_,_>>(),

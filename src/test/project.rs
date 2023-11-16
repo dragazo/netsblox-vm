@@ -654,6 +654,31 @@ fn test_proj_broadcast_to() {
 }
 
 #[test]
+fn test_proj_messaging() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let proj = get_running_project(include_str!("projects/messaging.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
+
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
+            25,
+            [49, 121, 169],
+            [49, [256, 16], 169],
+            [9, 4],
+            ["2", 5, 9],
+            ["2", 6, 24],
+            ["2", [3, 4], [7, 8]],
+            ["2", [2, 4], [8, 16]],
+            [["6", "3"], [7, 5], [11, 9]],
+            [["6", "3"], [6, 6], [24, 24]],
+        ])).unwrap());
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 1e-20, "res");
+    });
+}
+
+#[test]
 fn test_proj_any_msg() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/any-msg.xml"), system);
