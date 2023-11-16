@@ -1781,6 +1781,18 @@ pub enum Precision {
     High,
 }
 
+/// A key type used to await a reply message from an external source.
+#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
+pub struct ExternReplyKey {
+    request_id: String,
+}
+/// A key type required for this client to send a reply message.
+#[derive(Debug, Clone)]
+pub struct InternReplyKey {
+    src_id: String,
+    request_id: String,
+}
+
 /// Represents all the features of an implementing system.
 /// 
 /// This type encodes any features that cannot be performed without platform-specific resources.

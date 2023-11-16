@@ -1,5 +1,6 @@
 use netsblox_vm::real_time::*;
 use netsblox_vm::std_system::*;
+use netsblox_vm::std_util::*;
 use netsblox_vm::bytecode::*;
 use netsblox_vm::process::*;
 use netsblox_vm::runtime::*;

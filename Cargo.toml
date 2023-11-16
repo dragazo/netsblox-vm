@@ -23,11 +23,12 @@ strip = true
 
 [features]
 default = [
-    "std",
     "cli",
     "native-tls",
 ]
-std = [
+std = []
+std-system = [
+    "std",
     "tokio",
     "futures",
     "async-channel",
@@ -40,7 +41,7 @@ std = [
     "time/std",
 ]
 cli = [
-    "std",
+    "std-system",
     "actix-web",
     "actix-cors",
     "clap",

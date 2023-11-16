@@ -30,21 +30,10 @@ use crate::runtime::*;
 use crate::process::*;
 use crate::json::*;
 use crate::gc::*;
+use crate::std_util::*;
 use crate::*;
 
 const MESSAGE_REPLY_TIMEOUT: Duration = Duration::from_millis(1500);
-
-/// A [`StdSystem`] key type used to await a reply message from an external source.
-#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
-pub struct ExternReplyKey {
-    request_id: String,
-}
-/// A [`StdSystem`] key type required for this client to send a reply message.
-#[derive(Debug, Clone)]
-pub struct InternReplyKey {
-    src_id: String,
-    request_id: String,
-}
 
 struct Context {
     base_url: String,
@@ -56,89 +45,20 @@ struct Context {
     role_name: String,
     role_id: String,
 }
-struct RpcRequest<C: CustomTypes<StdSystem<C>>> {
+struct RpcRequest<C: CustomTypes<S>, S: System<C>> {
     service: String,
     rpc: String,
     args: Vec<(String, Json)>,
-    key: RequestKey<C>,
+    key: RequestKey<C, S>,
 }
 struct ReplyEntry {
     expiry: OffsetDateTime,
     value: Option<Json>,
 }
 
-/// A [`StdSystem`] key type for an asynchronous request.
-pub struct RequestKey<C: CustomTypes<StdSystem<C>>>(Arc<Mutex<AsyncResult<Result<C::Intermediate, String>>>>);
-impl<C: CustomTypes<StdSystem<C>>> RequestKey<C> {
-    fn poll(&self) -> AsyncResult<Result<C::Intermediate, String>> { self.0.lock().unwrap().poll() }
-}
-impl<C: CustomTypes<StdSystem<C>>> Key<Result<C::Intermediate, String>> for RequestKey<C> {
-    /// Completes the request with the given result.
-    /// A value of [`Ok`] denotes a successful request, whose value will be returned to the system
-    /// after conversion under [`CustomTypes::from_intermediate`].
-    /// A value of [`Err`] denotes a failed request, which will be returned as an error to the runtime,
-    /// subject to the caller's [`ErrorScheme`] setting.
-    fn complete(self, value: Result<C::Intermediate, String>) {
-        assert!(self.0.lock().unwrap().complete(value).is_ok())
-    }
-}
-
-/// A [`StdSystem`] key type for an asynchronous command.
-pub struct CommandKey(Arc<Mutex<AsyncResult<Result<(), String>>>>);
-impl CommandKey {
-    fn poll(&self) -> AsyncResult<Result<(), String>> { self.0.lock().unwrap().poll() }
-}
-impl Key<Result<(), String>> for CommandKey {
-    /// Completes the command.
-    /// A value of [`Ok`] denotes a successful command.
-    /// A value of [`Err`] denotes a failed command, which will be returned as an error to the runtime,
-    /// subject to the caller's [`ErrorScheme`] setting.
-    fn complete(self, value: Result<(), String>) {
-        assert!(self.0.lock().unwrap().complete(value).is_ok())
-    }
-}
-
-struct ClockCache {
-    value: Mutex<OffsetDateTime>,
-    precision: Precision,
-}
-
-/// A clock with optional coarse granularity.
-pub struct Clock {
-    utc_offset: UtcOffset,
-    cache: Option<ClockCache>,
-}
-impl Clock {
-    /// Creates a new [`Clock`] with the specified [`UtcOffset`] and (optional) cache [`Precision`] (see [`Clock::read`]).
-    pub fn new(utc_offset: UtcOffset, cache_precision: Option<Precision>) -> Self {
-        let mut res = Self { utc_offset, cache: None };
-        if let Some(precision) = cache_precision {
-            res.cache = Some(ClockCache { value: Mutex::new(res.update()), precision });
-        }
-        res
-    }
-    /// Reads the current time with the specified level of precision.
-    /// If caching was enabled by [`Clock::new`], requests at or below the cache precision level will use the cached timestamp.
-    /// In any other case, the real current time is fetched by [`Clock::update`] and the result is stored in the cache if caching is enabled.
-    pub fn read(&self, precision: Precision) -> OffsetDateTime {
-        match &self.cache {
-            Some(cache) if precision <= cache.precision => *cache.value.lock().unwrap(),
-            _ => self.update(),
-        }
-    }
-    /// Reads the real world time and stores the result in the cache if caching was enabled by [`Clock::new`].
-    pub fn update(&self) -> OffsetDateTime {
-        let t = OffsetDateTime::now_utc().to_offset(self.utc_offset);
-        if let Some(cache) = &self.cache {
-            *cache.value.lock().unwrap() = t;
-        }
-        t
-    }
-}
-
 type MessageReplies = BTreeMap<ExternReplyKey, ReplyEntry>;
 
-async fn call_rpc_async<C: CustomTypes<StdSystem<C>>>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<SimpleValue, String> {
+async fn call_rpc_async<C: CustomTypes<S>, S: System<C>>(context: &Context, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<SimpleValue, String> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
     let url = format!("{services_url}/{service}/{rpc}?clientId={client_id}&t={time}",
         services_url = context.services_url, client_id = context.client_id);
@@ -182,7 +102,7 @@ pub struct StdSystem<C: CustomTypes<StdSystem<C>>> {
     rng: Mutex<ChaChaRng>,
     clock: Arc<Clock>,
 
-    rpc_request_pipe: Sender<RpcRequest<C>>,
+    rpc_request_pipe: Sender<RpcRequest<C, Self>>,
 
     message_replies: Arc<Mutex<MessageReplies>>,
     message_sender: Sender<OutgoingMessage<C, Self>>,
@@ -339,11 +259,11 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
             let (sender, receiver) = channel();
 
             #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
-            async fn handler<C: CustomTypes<StdSystem<C>>>(client: Arc<reqwest::Client>, context: Arc<Context>, receiver: Receiver<RpcRequest<C>>) {
+            async fn handler<C: CustomTypes<StdSystem<C>>>(client: Arc<reqwest::Client>, context: Arc<Context>, receiver: Receiver<RpcRequest<C, StdSystem<C>>>) {
                 while let Ok(request) = receiver.recv() {
                     let (client, context) = (client.clone(), context.clone());
                     tokio::spawn(async move {
-                        let res = call_rpc_async::<C>(&context, &client, &request.service, &request.rpc, &request.args.iter().map(|x| (x.0.as_str(), &x.1)).collect::<Vec<_>>()).await;
+                        let res = call_rpc_async::<C, StdSystem<C>>(&context, &client, &request.service, &request.rpc, &request.args.iter().map(|x| (x.0.as_str(), &x.1)).collect::<Vec<_>>()).await;
                         request.key.complete(res.map(Into::into));
                     });
                 }
@@ -390,7 +310,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     /// Asynchronously calls an RPC and returns the result.
     /// This function directly makes requests to NetsBlox, bypassing any RPC hook defined by [`Config`].
     pub async fn call_rpc_async(&self, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<SimpleValue, String> {
-        call_rpc_async::<C>(&self.context, &self.client, service, rpc, args).await
+        call_rpc_async::<C, Self>(&self.context, &self.client, service, rpc, args).await
     }
 
     /// Gets the public id of the running system that can be used to send messages to this client.
@@ -434,7 +354,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     }
 }
 impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
-    type RequestKey = RequestKey<C>;
+    type RequestKey = RequestKey<C, Self>;
     type CommandKey = CommandKey;
 
     type ExternReplyKey = ExternReplyKey;
@@ -454,8 +374,8 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
 
         Ok(match self.config.request.as_ref() {
             Some(handler) => {
-                let key = RequestKey(Arc::new(Mutex::new(AsyncResult::new())));
-                match handler(mc, RequestKey(key.0.clone()), request, proc) {
+                let key = RequestKey::new();
+                match handler(mc, key.clone(), request, proc) {
                     RequestStatus::Handled => key,
                     RequestStatus::UseDefault { key: _, request } => return Err(ErrorCause::NotSupported { feature: request.feature() }),
                 }
@@ -481,8 +401,8 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
 
         Ok(match self.config.command.as_ref() {
             Some(handler) => {
-                let key = CommandKey(Arc::new(Mutex::new(AsyncResult::new())));
-                match handler(mc, CommandKey(key.0.clone()), command, proc) {
+                let key = CommandKey::new();
+                match handler(mc, key.clone(), command, proc) {
                     CommandStatus::Handled => key,
                     CommandStatus::UseDefault { key: _, command } => return Err(ErrorCause::NotSupported { feature: command.feature() }),
                 }

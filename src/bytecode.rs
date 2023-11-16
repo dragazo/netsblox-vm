@@ -11,9 +11,6 @@ use alloc::rc::Rc;
 
 use core::mem;
 
-#[cfg(feature = "std")]
-use std::io::{self, Write};
-
 #[cfg(feature = "serde")]
 use serde::{Serialize, Deserialize};
 
@@ -2574,7 +2571,7 @@ impl ByteCode {
     }
     /// Generates a hex dump of the stored code, including instructions and addresses.
     #[cfg(feature = "std")]
-    pub fn dump_code(&self, f: &mut dyn Write) -> io::Result<()> {
+    pub fn dump_code(&self, f: &mut dyn std::io::Write) -> std::io::Result<()> {
         let mut pos = 0;
         while pos < self.code.len() {
             let (ins, aft) = Instruction::read(&self.code, &self.data, pos);
@@ -2603,7 +2600,7 @@ impl ByteCode {
     }
     /// Generate a hex dump of the stored program data, including string literals and meta values.
     #[cfg(feature = "std")]
-    pub fn dump_data(&self, f: &mut dyn Write) -> io::Result<()> {
+    pub fn dump_data(&self, f: &mut dyn std::io::Write) -> std::io::Result<()> {
         for (i, bytes) in self.data.chunks(BYTES_PER_LINE).enumerate() {
             write!(f, "{:08}   ", i * BYTES_PER_LINE)?;
             for &b in bytes {

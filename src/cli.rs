@@ -40,6 +40,7 @@ use crate::gc::*;
 use crate::json::*;
 use crate::real_time::*;
 use crate::std_system::*;
+use crate::std_util::*;
 use crate::bytecode::*;
 use crate::runtime::*;
 use crate::process::*;

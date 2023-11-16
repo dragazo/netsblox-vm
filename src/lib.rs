@@ -42,7 +42,8 @@ mod meta {
     include!(concat!(env!("OUT_DIR"), "/meta.rs"));
 }
 
-#[cfg(feature = "std")] pub mod std_system;
+#[cfg(feature = "std")] pub mod std_util;
+#[cfg(feature = "std-system")] pub mod std_system;
 #[cfg(feature = "cli")] pub mod cli;
 
 #[cfg(test)] mod test;
