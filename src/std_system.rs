@@ -388,9 +388,9 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
             None => return Err(ErrorCause::NotSupported { feature: request.feature() }),
         })
     }
-    fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>> {
+    fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, _proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>> {
         #[cfg(debug_assertions)]
-        Self::check_runtime_borrows(mc, proc);
+        Self::check_runtime_borrows(mc, _proc);
 
         Ok(match key.poll() {
             AsyncResult::Completed(Ok(x)) => AsyncResult::Completed(Ok(C::from_intermediate(mc, x))),
@@ -415,9 +415,9 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
             None => return Err(ErrorCause::NotSupported { feature: command.feature() }),
         })
     }
-    fn poll_command<'gc>(&self, mc: &Mutation<'gc>, key: &Self::CommandKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>> {
+    fn poll_command<'gc>(&self, _mc: &Mutation<'gc>, key: &Self::CommandKey, _proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>> {
         #[cfg(debug_assertions)]
-        Self::check_runtime_borrows(mc, proc);
+        Self::check_runtime_borrows(_mc, _proc);
 
         Ok(key.poll())
     }
