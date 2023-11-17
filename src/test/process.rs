@@ -71,6 +71,7 @@ fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(&M
                 Ok(ProcessStep::Yield) => yields += 1,
                 Ok(ProcessStep::Terminate { result }) => break result,
                 Ok(ProcessStep::CreatedClone { .. }) => panic!("proc tests should not clone"),
+                Ok(ProcessStep::DeletedClone { .. }) => panic!("proc tests should not clone"),
                 Ok(ProcessStep::Broadcast { .. }) => panic!("proc tests should not broadcast"),
                 Ok(ProcessStep::Watcher { .. }) => panic!("proc tests should not use watchers"),
                 Ok(ProcessStep::Abort { .. }) => panic!("proc tests should not abort"),

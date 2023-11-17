@@ -433,6 +433,56 @@ fn test_proj_stop_my_others_context() {
 }
 
 #[test]
+fn test_proj_delete_clone() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let proj = get_running_project(include_str!("projects/delete-clone.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
+
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
+            "---",
+            "---",
+            [1, "1", 1],
+            [1, "2", 1],
+            [1, "1", 2],
+            [1, "2", 2],
+            [1, "1", 3],
+            [1, "2", 3],
+            [1, "1", 4],
+            [1, "2", 4],
+            [1, "1", 5],
+            [1, "2", 5],
+            [1, "1", 6],
+            "---",
+            "+++",
+            "+++",
+            "+++",
+            "---",
+            [2, "1", 1],
+            [2, "2", 1],
+            "---",
+            [3, "1", 1],
+            [3, "2", 1],
+            [3, "1", 2],
+            [3, "2", 2],
+            "---",
+            [4, "1", 1],
+            [4, "2", 1],
+            [4, "1", 2],
+            [4, "2", 2],
+            [4, "1", 3],
+            [4, "2", 3],
+            "---",
+            "AHHH!!!",
+            "---",
+        ])).unwrap());
+        assert_values_eq(&global_context.globals.lookup("log").unwrap().get(), &expected, 1e-10, "log");
+    });
+}
+
+#[test]
 fn test_proj_costumes() {
     let config = Config::<C, StdSystem<C>> {
         request: None,

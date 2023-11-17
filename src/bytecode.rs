@@ -420,6 +420,8 @@ pub(crate) enum Instruction<'a> {
 
     /// Pops one value, `target`, from the value stack and pushes a clone of entity `target` onto the value stack.
     Clone,
+    /// Deletes the current active entity if it is a clone, and requests to abort all of its associated processes.
+    DeleteClone,
 
     /// Clears all graphic effects on the entity.
     ClearEffects,
@@ -838,19 +840,20 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             115 => read_prefixed!(Instruction::NextCostume),
 
             116 => read_prefixed!(Instruction::Clone),
+            117 => read_prefixed!(Instruction::DeleteClone),
 
-            117 => read_prefixed!(Instruction::ClearEffects),
-            118 => read_prefixed!(Instruction::ClearDrawings),
+            118 => read_prefixed!(Instruction::ClearEffects),
+            119 => read_prefixed!(Instruction::ClearDrawings),
 
-            119 => read_prefixed!(Instruction::GotoXY),
-            120 => read_prefixed!(Instruction::Goto),
+            120 => read_prefixed!(Instruction::GotoXY),
+            121 => read_prefixed!(Instruction::Goto),
 
-            121 => read_prefixed!(Instruction::PointTowardsXY),
-            122 => read_prefixed!(Instruction::PointTowards),
+            122 => read_prefixed!(Instruction::PointTowardsXY),
+            123 => read_prefixed!(Instruction::PointTowards),
 
-            123 => read_prefixed!(Instruction::Forward),
+            124 => read_prefixed!(Instruction::Forward),
 
-            124 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
+            125 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
 
             _ => unreachable!(),
         }
@@ -1030,19 +1033,20 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::NextCostume => append_prefixed!(115),
 
             Instruction::Clone => append_prefixed!(116),
+            Instruction::DeleteClone => append_prefixed!(117),
 
-            Instruction::ClearEffects => append_prefixed!(117),
-            Instruction::ClearDrawings => append_prefixed!(118),
+            Instruction::ClearEffects => append_prefixed!(118),
+            Instruction::ClearDrawings => append_prefixed!(119),
 
-            Instruction::GotoXY => append_prefixed!(119),
-            Instruction::Goto => append_prefixed!(120),
+            Instruction::GotoXY => append_prefixed!(120),
+            Instruction::Goto => append_prefixed!(121),
 
-            Instruction::PointTowardsXY => append_prefixed!(121),
-            Instruction::PointTowards => append_prefixed!(122),
+            Instruction::PointTowardsXY => append_prefixed!(122),
+            Instruction::PointTowards => append_prefixed!(123),
 
-            Instruction::Forward => append_prefixed!(123),
+            Instruction::Forward => append_prefixed!(124),
 
-            Instruction::UnknownBlock { name, args } => append_prefixed!(124: move str name, args),
+            Instruction::UnknownBlock { name, args } => append_prefixed!(125: move str name, args),
         }
     }
 }
@@ -1840,6 +1844,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             ast::StmtKind::ChangePenSize { delta } => self.append_simple_ins(entity, &[delta], Instruction::ChangeProperty { prop: Property::PenSize })?,
             ast::StmtKind::NextCostume => self.ins.push(Instruction::NextCostume.into()),
             ast::StmtKind::PenClear => self.ins.push(Instruction::ClearDrawings.into()),
+            ast::StmtKind::DeleteClone => self.ins.push(Instruction::DeleteClone.into()),
             ast::StmtKind::Stop { mode: ast::StopMode::ThisScript } => self.ins.push(Instruction::Abort { mode: AbortMode::Current }.into()),
             ast::StmtKind::Stop { mode: ast::StopMode::All } => self.ins.push(Instruction::Abort { mode: AbortMode::All }.into()),
             ast::StmtKind::Stop { mode: ast::StopMode::AllButThisScript } => self.ins.push(Instruction::Abort { mode: AbortMode::Others }.into()),

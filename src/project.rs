@@ -317,14 +317,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     self.state.process_queue.push_front(proc_key); // keep executing the same process as before
                     ProjectStep::Normal
                 }
-                ProcessStep::CreatedClone { new_entity } => {
-                    let original = new_entity.borrow().original.unwrap();
+                ProcessStep::CreatedClone { clone } => {
+                    let original = clone.borrow().original.unwrap();
                     let mut new_scripts = vec![];
                     for script in self.scripts.iter() {
                         if Gc::ptr_eq(script.entity, original) {
                             new_scripts.push(Script {
                                 event: script.event.clone(),
-                                entity: new_entity,
+                                entity: clone,
                                 process: None,
                                 context_queue: Default::default(),
                             });
@@ -337,6 +337,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                         }
                     }
                     self.scripts.extend(new_scripts);
+                    self.state.process_queue.push_front(proc_key); // keep executing the same process as before
+                    ProjectStep::Normal
+                }
+                ProcessStep::DeletedClone { clone } => {
+                    debug_assert!(clone.borrow().original.is_some());
+                    self.scripts.retain_mut(|script| !Gc::ptr_eq(script.entity, clone));
+                    self.state.processes.retain_mut(|_, proc| !Gc::ptr_eq(proc.get_call_stack().first().unwrap().entity, clone));
                     self.state.process_queue.push_front(proc_key); // keep executing the same process as before
                     ProjectStep::Normal
                 }

@@ -137,7 +137,10 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// The process has created a new clone of an existing entity.
     /// The clone has already been created, so this is just an informational flag for any logging or other initialization logic.
     /// Projects use this event to bind new scripts to the clone, which is an aspect of projects but not processes or entities.
-    CreatedClone { new_entity: Gc<'gc, RefLock<Entity<'gc, C, S>>> },
+    CreatedClone { clone: Gc<'gc, RefLock<Entity<'gc, C, S>>> },
+    /// The process has requested to delete an existing clone.
+    /// Projects use this event to abort all the scripts and processes associated with the deleted entity.
+    DeletedClone { clone: Gc<'gc, RefLock<Entity<'gc, C, S>>> },
     /// The process has requested to pause execution of the (entire) project.
     /// This can be useful for student debugging (similar to breakpoints), but can be ignored by the executor if desired.
     Pause,
@@ -1265,19 +1268,25 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::Clone => {
                 let target_cell = self.value_stack.pop().unwrap().as_entity()?;
                 let target = target_cell.borrow();
-                let new_entity = Gc::new(mc, RefLock::new(Entity {
+                let clone = Gc::new(mc, RefLock::new(Entity {
                     name: target.name.clone(),
                     sound_list: target.sound_list.clone(),
                     costume_list: target.costume_list.clone(),
                     costume: target.costume.clone(),
                     state: C::EntityState::from(EntityKind::Clone { parent: &*target }),
-                    alive: true,
                     original: Some(target.original.unwrap_or(target_cell)),
                     fields: target.fields.clone(),
                 }));
-                self.value_stack.push(new_entity.into());
+                self.value_stack.push(clone.into());
                 self.pos = aft_pos;
-                return Ok(ProcessStep::CreatedClone { new_entity });
+                return Ok(ProcessStep::CreatedClone { clone });
+            }
+            Instruction::DeleteClone => {
+                self.pos = aft_pos;
+                let entity = self.call_stack.last().unwrap().entity;
+                if entity.borrow().original.is_some() {
+                    return Ok(ProcessStep::DeletedClone { clone: entity });
+                }
             }
             Instruction::ClearEffects => {
                 drop(global_context_raw);

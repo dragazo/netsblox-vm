@@ -1094,7 +1094,6 @@ pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub costume_list: Rc<Vec<(String, Rc<Image>)>>,
     #[collect(require_static)] pub costume: Option<Rc<Image>>,
     #[collect(require_static)] pub state: C::EntityState,
-    #[collect(require_static)] pub alive: bool,
                                pub original: Option<Gc<'gc, RefLock<Entity<'gc, C, S>>>>,
                                pub fields: SymbolTable<'gc, C, S>,
 }
@@ -1431,7 +1430,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             let name = Rc::new(entity_info.name.clone());
             let state = kind.into();
 
-            entities.push(((*name).clone(), Gc::new(mc, RefLock::new(Entity { alive: true, original: None, name, fields, sound_list, costume_list, costume, state }))));
+            entities.push(((*name).clone(), Gc::new(mc, RefLock::new(Entity { original: None, name, fields, sound_list, costume_list, costume, state }))));
         }
 
         let proj_name = init_info.proj_name.clone();
