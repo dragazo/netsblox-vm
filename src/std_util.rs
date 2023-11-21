@@ -3,10 +3,34 @@
 //! Note that this module is only available with the [`std`](crate) feature flag.
 
 use std::sync::{Arc, Mutex};
+use std::string::String;
+use std::vec::Vec;
 
 use crate::real_time::*;
 use crate::runtime::*;
+use crate::json::*;
 use crate::*;
+
+pub struct NetsBloxContext {
+    pub base_url: String,
+    pub client_id: String,
+    pub services_url: String,
+
+    pub project_name: String,
+    pub project_id: String,
+    pub role_name: String,
+    pub role_id: String,
+}
+pub struct RpcRequest<C: CustomTypes<S>, S: System<C>> {
+    pub service: String,
+    pub rpc: String,
+    pub args: Vec<(String, Json)>,
+    pub key: AsyncKey<Result<C::Intermediate, String>>,
+}
+pub struct ReplyEntry {
+    pub expiry: OffsetDateTime,
+    pub value: Option<Json>,
+}
 
 struct ClockCache {
     value: Mutex<OffsetDateTime>,
