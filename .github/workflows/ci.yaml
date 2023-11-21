@@ -72,3 +72,21 @@ jobs:
           use-cross: true
           command: build
           args: --lib --no-default-features ${{ matrix.opt }} --target thumbv6m-none-eabi
+
+  min-std:
+    name: min-std
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        opt: ["", "--release"]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --lib --no-default-features ${{ matrix.opt }} --features std
