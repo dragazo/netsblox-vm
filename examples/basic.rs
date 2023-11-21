@@ -45,8 +45,8 @@ impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
 }
 
 struct ProcessState; // a type to hold custom process (script) state - we don't have any, so just use a unit struct
-impl From<&Entity<'_, C, StdSystem<C>>> for ProcessState {
-    fn from(_: &Entity<'_, C, StdSystem<C>>) -> Self {
+impl From<ProcessKind<'_, '_, C, StdSystem<C>>> for ProcessState {
+    fn from(_: ProcessKind<'_, '_, C, StdSystem<C>>) -> Self {
         ProcessState
     }
 }

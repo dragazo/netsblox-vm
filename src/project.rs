@@ -95,11 +95,11 @@ pub enum ProjectStep<'gc, C: CustomTypes<S>, S: System<C>> {
     Pause,
 }
 
-#[derive(Collect, Educe)]
+#[derive(Collect)]
 #[collect(no_drop, bound = "")]
-#[educe(Clone, Default)]
 pub struct PartialProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
                                pub locals: SymbolTable<'gc, C, S>,
+    #[collect(require_static)] pub state: C::ProcessState,
     #[collect(require_static)] pub barrier: Option<Barrier>,
     #[collect(require_static)] pub reply_key: Option<InternReplyKey>,
     #[collect(require_static)] pub local_message: Option<String>,
@@ -124,8 +124,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Script<'gc, C, S> {
             None => match self.context_queue.pop_front() {
                 None => return,
                 Some(context) => {
-                    let process = Process::new(ProcContext { global_context: state.global_context, entity: self.entity, start_pos: self.event.1, locals: context.locals, barrier: context.barrier, reply_key: context.reply_key, local_message: context.local_message });
-                    let key = state.processes.insert(process);
+                    let proc = Process::new(ProcContext { global_context: state.global_context, entity: self.entity, state: context.state, start_pos: self.event.1, locals: context.locals, barrier: context.barrier, reply_key: context.reply_key, local_message: context.local_message });
+                    let key = state.processes.insert(proc);
                     state.process_queue.push_back(key);
                     self.process = Some(key);
                 }
@@ -214,9 +214,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
             Input::Start => {
                 for i in 0..self.scripts.len() {
                     if let Event::OnFlag = &self.scripts[i].event.0 {
+                        let state = C::ProcessState::from(ProcessKind { entity: self.scripts[i].entity, dispatcher: None });
+
                         all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
                         self.scripts[i].stop_all(&mut self.state);
-                        self.scripts[i].schedule(&mut self.state, Default::default(), 0);
+                        self.scripts[i].schedule(&mut self.state, PartialProcContext { state, locals: Default::default(), barrier: None, reply_key: None, local_message: None }, 0);
                     }
                 }
             }
@@ -231,9 +233,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                             locals.define_or_redefine(field, value.into());
                         }
 
+                        let state = C::ProcessState::from(ProcessKind { entity: self.scripts[i].entity, dispatcher: None });
+
                         all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
                         if interrupt { self.scripts[i].stop_all(&mut self.state); }
-                        self.scripts[i].schedule(&mut self.state, PartialProcContext { locals, ..Default::default() }, max_queue);
+                        self.scripts[i].schedule(&mut self.state, PartialProcContext { locals, state, barrier: None, reply_key: None, local_message: None }, max_queue);
                     }
                 }
             }
@@ -248,8 +252,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                 for i in 0..self.scripts.len() {
                     if let Event::OnKey { key_filter } = &self.scripts[i].event.0 {
                         if key_filter.map(|x| x == input_key).unwrap_or(true) {
+                            let state = C::ProcessState::from(ProcessKind { entity: self.scripts[i].entity, dispatcher: None });
+
                             all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
-                            self.scripts[i].schedule(&mut self.state, Default::default(), 0);
+                            self.scripts[i].schedule(&mut self.state, PartialProcContext { state, locals: Default::default(), barrier:None, reply_key: None, local_message: None }, 0);
                         }
                     }
                 }
@@ -273,8 +279,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                         locals.define_or_redefine(field, value.into());
                     }
 
+                    let state = C::ProcessState::from(ProcessKind { entity: self.scripts[i].entity, dispatcher: None });
+
                     all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
-                    self.scripts[i].schedule(&mut self.state, PartialProcContext { locals, barrier: None, reply_key: reply_key.clone(), local_message: None }, usize::MAX);
+                    self.scripts[i].schedule(&mut self.state, PartialProcContext { locals, state, barrier: None, reply_key: reply_key.clone(), local_message: None }, usize::MAX);
                 }
             }
         }
@@ -309,7 +317,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     ProjectStep::Pause
                 }
                 ProcessStep::Fork { pos, locals, entity } => {
-                    let proc = Process::new(ProcContext { global_context: self.state.global_context, entity, start_pos: pos, locals, barrier: None, reply_key: None, local_message: None });
+                    let state = C::ProcessState::from(ProcessKind { entity, dispatcher: Some(proc) });
+                    let proc = Process::new(ProcContext { global_context: self.state.global_context, entity, state, start_pos: pos, locals, barrier: None, reply_key: None, local_message: None });
                     let fork_proc_key = self.state.processes.insert(proc);
 
                     all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
@@ -332,8 +341,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                     }
                     for script in new_scripts.iter_mut() {
                         if let Event::OnClone = &script.event.0 {
+                            let state = C::ProcessState::from(ProcessKind { entity: script.entity, dispatcher: Some(self.state.processes.get(proc_key).unwrap()) });
+
                             all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
-                            script.schedule(&mut self.state, Default::default(), 0);
+                            script.schedule(&mut self.state, PartialProcContext { state, locals: Default::default(), barrier: None, reply_key: None, local_message: None }, 0);
                         }
                     }
                     self.scripts.extend(new_scripts);
@@ -357,9 +368,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                                     }
                                 }
 
+                                let state = C::ProcessState::from(ProcessKind { entity: self.scripts[i].entity, dispatcher: Some(self.state.processes.get(proc_key).unwrap()) });
+
                                 all_contexts_consumer.do_once(self); // need to consume all contexts before scheduling things in the future
                                 self.scripts[i].stop_all(&mut self.state);
-                                self.scripts[i].schedule(&mut self.state, PartialProcContext { locals: Default::default(), barrier: barrier.clone(), reply_key: None, local_message: Some(msg_type.clone()) }, 0);
+                                self.scripts[i].schedule(&mut self.state, PartialProcContext { state, locals: Default::default(), barrier: barrier.clone(), reply_key: None, local_message: Some(msg_type.clone()) }, 0);
                             }
                         }
                     }

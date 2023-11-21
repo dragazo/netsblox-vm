@@ -37,8 +37,9 @@ fn get_running_proc<'a, F>(xml: &'a str, settings: Settings, system: Rc<StdSyste
         let glob = GlobalContext::from_init(mc, &init_info, Rc::new(code), settings, system);
         let entity = glob.entities.iter().next().unwrap().1;
         let glob = Gc::new(mc, RefLock::new(glob));
+        let state = ProcessState::from(ProcessKind { entity, dispatcher: None });
 
-        let proc = Process::new(ProcContext { global_context: glob, entity, start_pos: main.1, locals: locals(mc), barrier: None, reply_key: None, local_message: None });
+        let proc = Process::new(ProcContext { global_context: glob, state, entity, start_pos: main.1, locals: locals(mc), barrier: None, reply_key: None, local_message: None });
         assert!(proc.is_running());
 
         Env { glob, proc: Gc::new(mc, RefLock::new(proc)) }

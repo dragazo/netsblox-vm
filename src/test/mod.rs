@@ -39,8 +39,8 @@ impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
 }
 
 struct ProcessState;
-impl From<&Entity<'_, C, StdSystem<C>>> for ProcessState {
-    fn from(_: &Entity<'_, C, StdSystem<C>>) -> Self {
+impl From<ProcessKind<'_, '_, C, StdSystem<C>>> for ProcessState {
+    fn from(_: ProcessKind<'_, '_, C, StdSystem<C>>) -> Self {
         ProcessState
     }
 }

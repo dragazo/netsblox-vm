@@ -1084,6 +1084,13 @@ pub enum EntityKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     Sprite { props: Properties },
     Clone { parent: &'a Entity<'gc, C, S> },
 }
+/// The kind of process being represented.
+pub struct ProcessKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
+    /// The entity associated with the new process.
+    pub entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
+    /// The existing process, if any, which triggered the creation of the new process.
+    pub dispatcher: Option<&'a Process<'gc, C, S>>,
+}
 
 /// Information about an entity (sprite or stage).
 #[derive(Collect)]
@@ -1426,9 +1433,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             props.pen_color_v = Number::new(v as f64 * 100.0).unwrap();
             props.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
 
-            let kind = if i == 0 { EntityKind::Stage { props } } else { EntityKind::Sprite { props } };
+            let state = C::EntityState::from(if i == 0 { EntityKind::Stage { props } } else { EntityKind::Sprite { props } });
             let name = Rc::new(entity_info.name.clone());
-            let state = kind.into();
 
             entities.push(((*name).clone(), Gc::new(mc, RefLock::new(Entity { original: None, name, fields, sound_list, costume_list, costume, state }))));
         }
@@ -1735,8 +1741,8 @@ pub trait CustomTypes<S: System<Self>>: 'static + Sized {
 
     /// Type used to represent a process's system-specific state.
     /// This should include any details outside of core process functionality (e.g., external script-locals).
-    /// This type should be constructable from [`Entity`], which is used to initialize a new process in the runtime.
-    type ProcessState: 'static + for<'gc, 'a> From<&'a Entity<'gc, Self, S>>;
+    /// This type should be constructable from [`ProcessKind`], which is used to initialize a new process in the runtime.
+    type ProcessState: 'static + for<'gc, 'a> From<ProcessKind<'gc, 'a, Self, S>>;
 
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Value<'gc, Self, S>;

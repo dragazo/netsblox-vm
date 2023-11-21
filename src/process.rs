@@ -183,13 +183,13 @@ enum RequestAction {
 }
 
 /// A collection of context info for starting a new [`Process`].
-#[derive(Collect, Educe)]
+#[derive(Collect)]
 #[collect(no_drop, bound = "")]
-#[educe(Clone)]
 pub struct ProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
                                pub global_context: Gc<'gc, RefLock<GlobalContext<'gc, C, S>>>,
                                pub entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
                                pub locals: SymbolTable<'gc, C, S>,
+    #[collect(require_static)] pub state: C::ProcessState,
     #[collect(require_static)] pub start_pos: usize,
     #[collect(require_static)] pub barrier: Option<Barrier>,
     #[collect(require_static)] pub reply_key: Option<InternReplyKey>,
@@ -227,7 +227,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             reply_key: context.reply_key,
             pos: context.start_pos,
             warp_counter: 0,
-            state: C::ProcessState::from(&*context.entity.borrow()),
+            state: context.state,
             call_stack: vec![CallStackEntry {
                 called_from: usize::MAX,
                 return_to: usize::MAX,
