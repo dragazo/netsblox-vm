@@ -93,12 +93,15 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     }
     /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url, e.g., `https://cloud.netsblox.org`.
     pub async fn new_async(base_url: String, project_name: Option<&str>, config: Config<C, Self>, clock: Arc<Clock>) -> Self {
-        let configuration = reqwest::get(format!("{base_url}/configuration")).await.unwrap().json::<BTreeMap<String, Json>>().await.unwrap();
-        let services_hosts = configuration["servicesHosts"].as_array().unwrap();
+        let services_url = {
+            let configuration = reqwest::get(format!("{base_url}/configuration")).await.unwrap().json::<BTreeMap<String, Json>>().await.unwrap();
+            let services_hosts = configuration["servicesHosts"].as_array().unwrap();
+            services_hosts[0].as_object().unwrap().get("url").unwrap().as_str().unwrap().to_owned()
+        };
 
         let mut context = NetsBloxContext {
             base_url,
-            services_url: services_hosts[0].as_object().unwrap().get("url").unwrap().as_str().unwrap().to_owned(),
+            services_url,
             client_id: format!("_vm-{}", names::Generator::default().next().unwrap()),
             project_name: project_name.unwrap_or("untitled").to_owned(),
 
@@ -227,7 +230,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
             .json::<BTreeMap<String, Json>>().await.unwrap();
         context.project_id = meta["id"].as_str().unwrap().to_owned();
 
-        let roles = &meta["roles"].as_object().unwrap();
+        let roles = meta["roles"].as_object().unwrap();
         let (first_role_id, first_role_meta) = roles.get_key_value(roles.keys().next().unwrap()).unwrap();
         let first_role_meta = first_role_meta.as_object().unwrap();
         context.role_id = first_role_id.to_owned();
