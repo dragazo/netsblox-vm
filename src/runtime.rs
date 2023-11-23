@@ -35,10 +35,10 @@ pub enum NumberError {
 pub struct NumberChecker;
 impl FloatChecker<f64> for NumberChecker {
     type Error = NumberError;
-    fn check(value: f64) -> Result<(), Self::Error> {
+    fn check(value: f64) -> Result<f64, Self::Error> {
         if value.is_nan() { return Err(NumberError::Nan); }
         if value.is_infinite() { return Err(NumberError::Infinity); }
-        Ok(())
+        Ok(if value.to_bits() == 0x8000000000000000 { 0.0 } else { value }) // we don't support signed zero - only useful in conjunction with infinity
     }
 }
 
@@ -699,7 +699,7 @@ impl SimpleValue {
     pub fn into_json<C: CustomTypes<S>, S: System<C>>(self) -> Result<Json, IntoJsonError<C, S>> {
         Ok(match self {
             SimpleValue::Bool(x) => Json::Bool(x),
-            SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).unwrap()), // Number forbids NaN and Infinity, so this is infallible
+            SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
             SimpleValue::String(x) => Json::String(x),
             SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_json).collect::<Result<_,_>>()?),
             SimpleValue::Image(_) => return Err(IntoJsonError::ComplexType(Type::Image)),
@@ -713,7 +713,7 @@ impl SimpleValue {
         Ok(match value {
             Json::Null => return Err(FromJsonError::Null),
             Json::Bool(x) => SimpleValue::Bool(x),
-            Json::Number(x) => SimpleValue::Number(Number::new(x.as_f64().unwrap()).unwrap()), // Json forbids NaN and Infinity, so this is infallible
+            Json::Number(x) => SimpleValue::Number(Number::new(x.as_f64().unwrap()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
             Json::String(x) => SimpleValue::String(x),
             Json::Array(x) => SimpleValue::List(x.into_iter().map(SimpleValue::from_json).collect::<Result<_,_>>()?),
             Json::Object(x) => SimpleValue::List(x.into_iter().map(|(k, v)| {
@@ -726,7 +726,7 @@ impl SimpleValue {
     pub fn into_netsblox_json(self) -> Json {
         match self {
             SimpleValue::Bool(x) => Json::Bool(x),
-            SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).unwrap()), // Number forbids NaN and Infinity, so this is infallible
+            SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
             SimpleValue::String(x) => Json::String(x),
             SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_netsblox_json).collect()),
             SimpleValue::Image(img) => {
@@ -741,7 +741,7 @@ impl SimpleValue {
         Ok(match value {
             Json::Null => return Err(FromNetsBloxJsonError::Null),
             Json::Bool(x) => SimpleValue::Bool(x),
-            Json::Number(x) => SimpleValue::Number(Number::new(x.as_f64().unwrap()).unwrap()), // Json forbids NaN and Infinity, so this is infallible
+            Json::Number(x) => SimpleValue::Number(Number::new(x.as_f64().unwrap()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
             Json::Array(x) => SimpleValue::List(x.into_iter().map(SimpleValue::from_netsblox_json).collect::<Result<_,_>>()?),
             Json::Object(x) => SimpleValue::List(x.into_iter().map(|(k, v)| {
                 Ok(SimpleValue::List(vec![SimpleValue::String(k), SimpleValue::from_netsblox_json(v)?]))

@@ -1708,16 +1708,16 @@ fn test_proc_signed_zero() {
 
     run_till_term(&mut env, |mc, _, res| {
         let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
-            [0.0, -0.0, -0.0],
-            ["0", "-0", "-0"],
-            [false, true, true, false, true, false, false],
+            [0.0, 0.0, 0.0],
+            ["0", "0", "0"],
             [false, true, true, false, true, false, true],
-            [false, true, true, false, true, false, false],
-            [false, true, true, false, true, false, false],
             [false, true, true, false, true, false, true],
-            [false, true, true, false, true, false, false],
+            [false, true, true, false, true, false, true],
+            [false, true, true, false, true, false, true],
+            [false, true, true, false, true, false, true],
+            [false, true, true, false, true, false, true],
         ])).unwrap());
-        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "signed zero");
+        assert_values_eq(&res.unwrap().0, &expect, 0.0, "signed zero");
     });
 }
 

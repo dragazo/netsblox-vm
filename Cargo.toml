@@ -78,7 +78,7 @@ num-traits = { version = "0.2.17", default-features = false }
 num-derive = { version = "0.4.1", default-features = false }
 bin-pool = { version = "0.1.1", default-features = false }
 rand = { version = "0.8.5", default-features = false }
-checked-float = { version = "0.1.4", default-features = false, features = ["serde"] }
+checked-float = { version = "0.1.5", default-features = false, features = ["serde"] }
 educe = { version = "0.4.23", default-features = false, features = ["Debug", "Clone", "Copy", "PartialOrd", "Ord", "PartialEq", "Eq", "Default"] }
 libm = { version = "0.2.8", default-features = false }
 monostate = { version = "0.1.9", default-features = false }

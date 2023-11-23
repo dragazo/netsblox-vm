@@ -92,7 +92,10 @@ fn assert_values_eq<'gc>(got: &Value<'gc, C, StdSystem<C>>, expected: &Value<'gc
         }
         (Value::Number(got), Value::Number(expected)) => {
             let (got, expected) = (got.get(), expected.get());
-            let good = if got.is_finite() && expected.is_finite() { (got - expected).abs() <= epsilon } else { got == expected };
+            let good = match epsilon <= 0.0 {
+                true => got.to_bits() == expected.to_bits(),
+                false => if got.is_finite() && expected.is_finite() { (got - expected).abs() <= epsilon } else { got == expected },
+            };
             if !good { panic!("{} - number error - got {} expected {}", path, got, expected) }
         }
         (Value::String(got), Value::String(expected)) => {
