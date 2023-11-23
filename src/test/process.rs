@@ -313,36 +313,36 @@ fn test_proc_all_arithmetic() {
     ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |mc, _, res| {
-        let inf = core::f64::INFINITY;
-        let expect = Value::List(Gc::new(mc, RefLock::new([
-            Value::List(Gc::new(mc, RefLock::new([8.5, 2.9, -2.9, -8.5].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([2.9, 8.5, -8.5, -2.9].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([15.96, -15.96, -15.96, 15.96].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([2.035714285714286, -2.035714285714286, -2.035714285714286, 2.035714285714286].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([inf, -inf, -inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([130.75237792066878, 0.007648044463151016].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([0.1, -2.7, 2.7, -0.1, 5.8, -1.3, 1.3, -5.8].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([7.0, 8.0, -7.0, -8.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([56.8, 6.3, inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([-56.8, 6.3, -inf, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([8.0, 8.0, -7.0, -7.0, inf, -inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([7.0, 7.0, -8.0, -8.0, inf, -inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([2.701851217221259, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([0.12706460860135046, 0.7071067811865475].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([0.9918944425900297, 0.7071067811865476].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([0.12810295445305653, 1.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([0.0, 30.0, -30.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([90.0, 60.0, 120.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([0.0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([-0.6931471805599453, 0.0, 2.186051276738094, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([-0.3010299956639812, 0.0, 0.9493900066449128, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([-1.0, 0.0, 3.1538053360790355, inf].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([1.0, 3.3201169227365472, 0.0001363889264820114, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([1.0, 15.848931924611133, 1.2589254117941663e-9, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([1.0, 2.2973967099940698, 0.002093307544016197, inf, 0.0].into_iter().map(|x| Number::new(x).unwrap().into()).collect()))),
-            Value::List(Gc::new(mc, RefLock::new([Value::String(Rc::new("0".into())), Value::String(Rc::new("1.2".into())), Value::String(Rc::new("-8.9".into())), Number::new(inf).unwrap().into(), Number::new(-inf).unwrap().into()].into_iter().collect()))),
-        ].into_iter().collect())));
-        assert_values_eq(&res.unwrap().0, &expect, 1e-7, "short circuit test");
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
+            [8.5, 2.9, -2.9, -8.5],
+            [2.9, 8.5, -8.5, -2.9],
+            [15.96, -15.96, -15.96, 15.96],
+            [2.035714285714286, -2.035714285714286, -2.035714285714286, 2.035714285714286],
+            [130.75237792066878, 0.007648044463151016],
+            [0.1, -2.7, 2.7, -0.1, 5.8, -1.3, 1.3, -5.8],
+            [7.0, 8.0, -7.0, -8.0],
+            [56.8, 6.3],
+            [-56.8, 6.3],
+            [8.0, 8.0, -7.0, -7.0],
+            [7.0, 7.0, -8.0, -8.0],
+            [2.701851217221259],
+            [0.12706460860135046, 0.7071067811865475],
+            [0.9918944425900297, 0.7071067811865476],
+            [0.12810295445305653, 1.0],
+            [0.0, 30.0, -30.0],
+            [90.0, 60.0, 120.0],
+            [0.0, 26.56505117707799, -26.56505117707799, 88.72696997994328, -89.91635658567779],
+            [-0.6931471805599453, 0.0, 2.186051276738094],
+            [-0.3010299956639812, 0.0, 0.9493900066449128],
+            [-1.0, 0.0, 3.1538053360790355],
+            [1.0, 3.3201169227365472, 0.0001363889264820114],
+            [1.0, 15.848931924611133, 1.2589254117941663e-9],
+            [1.0, 2.2973967099940698, 0.002093307544016197],
+            ["0", "1.2", "-8.9"],
+            "NumberError { error: Nan }",
+            "NumberError { error: Infinity }",
+        ])).unwrap());
+        assert_values_eq(&res.unwrap().0, &expect, 1e-7, "arith tests");
     });
 }
 

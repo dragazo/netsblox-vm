@@ -1155,7 +1155,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let values = {
                     let field_names = tokens.map(ToOwned::to_owned).collect::<Vec<_>>();
                     let field_count = field_names.len();
-                    iter::zip(field_names.into_iter(), self.value_stack.drain(self.value_stack.len() - field_count..)).map(|(k, v)| Ok((k, v.to_simple()?.into_netsblox_json()?))).collect::<Result<_,ErrorCause<C, S>>>()?
+                    iter::zip(field_names.into_iter(), self.value_stack.drain(self.value_stack.len() - field_count..)).map(|(k, v)| Ok((k, v.to_simple()?.into_netsblox_json()))).collect::<Result<_,ToSimpleError<_,_>>>()?
                 };
 
                 match system.send_message(msg_type.into(), values, targets, expect_reply)? {
@@ -1164,7 +1164,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 }
             }
             Instruction::SendNetworkReply => {
-                let value = self.value_stack.pop().unwrap().to_simple()?.into_netsblox_json()?;
+                let value = self.value_stack.pop().unwrap().to_simple()?.into_netsblox_json();
                 if let Some(key) = self.reply_key.take() {
                     system.send_reply(key, value)?;
                 }

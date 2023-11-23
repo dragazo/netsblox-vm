@@ -28,6 +28,7 @@ use crate::process::*;
 #[derive(Debug)]
 pub enum NumberError {
     Nan,
+    Infinity,
 }
 
 /// [`FloatChecker`] type used for validating a [`Number`].
@@ -36,6 +37,7 @@ impl FloatChecker<f64> for NumberChecker {
     type Error = NumberError;
     fn check(value: f64) -> Result<(), Self::Error> {
         if value.is_nan() { return Err(NumberError::Nan); }
+        if value.is_infinite() { return Err(NumberError::Infinity); }
         Ok(())
     }
 }
@@ -108,12 +110,10 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     NotCsv { value: String },
     /// Attempt to parse an invalid JSON-encoded string.
     NotJson { value: String },
-    /// A failed attempt to convert a native vm [`Value`] to [`SimpleValue`] for use outside the vm.
+    /// A failed attempt to convert a native vm [`Value`] to [`SimpleValue`].
     ToSimpleError { error: ToSimpleError<C, S> },
-    /// A failed attempt to convert a [`SimpleValue`] to [`Json`] for use outside the vm.
+    /// A failed attempt to convert a [`SimpleValue`] to [`Json`].
     IntoJsonError { error: IntoJsonError<C, S> },
-    /// A failed attempt to convert a [`SimpleValue`] to [`Json`] for use in NetsBlox.
-    IntoNetsBloxJsonError { error: IntoNetsBloxJsonError },
     /// A failed attempt to convert a [`Json`] value into a [`SimpleValue`] for use in the vm.
     FromJsonError { error: FromJsonError },
     /// A failed attempt to convert a [`Json`] value from NetsBlox into a [`SimpleValue`] for use in the vm.
@@ -130,7 +130,6 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
 impl<C: CustomTypes<S>, S: System<C>> From<ConversionError<C, S>> for ErrorCause<C, S> { fn from(e: ConversionError<C, S>) -> Self { Self::ConversionError { got: e.got, expected: e.expected } } }
 impl<C: CustomTypes<S>, S: System<C>> From<ToSimpleError<C, S>> for ErrorCause<C, S> { fn from(error: ToSimpleError<C, S>) -> Self { Self::ToSimpleError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<IntoJsonError<C, S>> for ErrorCause<C, S> { fn from(error: IntoJsonError<C, S>) -> Self { Self::IntoJsonError { error } } }
-impl<C: CustomTypes<S>, S: System<C>> From<IntoNetsBloxJsonError> for ErrorCause<C, S> { fn from(error: IntoNetsBloxJsonError) -> Self { Self::IntoNetsBloxJsonError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<FromJsonError> for ErrorCause<C, S> { fn from(error: FromJsonError) -> Self { Self::FromJsonError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<FromNetsBloxJsonError> for ErrorCause<C, S> { fn from(error: FromNetsBloxJsonError) -> Self { Self::FromNetsBloxJsonError { error } } }
 impl<C: CustomTypes<S>, S: System<C>> From<NumberError> for ErrorCause<C, S> { fn from(error: NumberError) -> Self { Self::NumberError { error } } }
@@ -655,31 +654,22 @@ pub enum ToSimpleError<C: CustomTypes<S>, S: System<C>> {
     Cyclic,
     ComplexType(Type<C, S>),
 }
-
 /// An error produced by [`SimpleValue::into_json`]
 #[derive(Educe)]
 #[educe(Debug)]
 pub enum IntoJsonError<C: CustomTypes<S>, S: System<C>> {
-    BadNumber(Number),
     ComplexType(Type<C, S>),
 }
+
 /// An error produced by [`SimpleValue::from_json`]
 #[derive(Debug)]
 pub enum FromJsonError {
     Null,
-    BadNumber(JsonNumber),
-}
-
-/// An error produced by [`SimpleValue::into_netsblox_json`]
-#[derive(Debug)]
-pub enum IntoNetsBloxJsonError {
-    BadNumber(Number),
 }
 /// An error produced by [`SimpleValue::from_netsblox_json`]
 #[derive(Debug)]
 pub enum FromNetsBloxJsonError {
     Null,
-    BadNumber(JsonNumber),
     BadImage,
     BadAudio,
 }
@@ -709,7 +699,7 @@ impl SimpleValue {
     pub fn into_json<C: CustomTypes<S>, S: System<C>>(self) -> Result<Json, IntoJsonError<C, S>> {
         Ok(match self {
             SimpleValue::Bool(x) => Json::Bool(x),
-            SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).ok_or(IntoJsonError::BadNumber(x))?),
+            SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).unwrap()), // Number forbids NaN and Infinity, so this is infallible
             SimpleValue::String(x) => Json::String(x),
             SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_json).collect::<Result<_,_>>()?),
             SimpleValue::Image(_) => return Err(IntoJsonError::ComplexType(Type::Image)),
@@ -723,7 +713,7 @@ impl SimpleValue {
         Ok(match value {
             Json::Null => return Err(FromJsonError::Null),
             Json::Bool(x) => SimpleValue::Bool(x),
-            Json::Number(x) => SimpleValue::Number(x.as_f64().and_then(|x| Number::new(x).ok()).ok_or(FromJsonError::BadNumber(x))?),
+            Json::Number(x) => SimpleValue::Number(Number::new(x.as_f64().unwrap()).unwrap()), // Json forbids NaN and Infinity, so this is infallible
             Json::String(x) => SimpleValue::String(x),
             Json::Array(x) => SimpleValue::List(x.into_iter().map(SimpleValue::from_json).collect::<Result<_,_>>()?),
             Json::Object(x) => SimpleValue::List(x.into_iter().map(|(k, v)| {
@@ -733,25 +723,25 @@ impl SimpleValue {
     }
 
     /// Converts this [`SimpleValue`] into an encoded JSON equivalent suitable for communication with NetsBlox.
-    pub fn into_netsblox_json(self) -> Result<Json, IntoNetsBloxJsonError> {
-        Ok(match self {
+    pub fn into_netsblox_json(self) -> Json {
+        match self {
             SimpleValue::Bool(x) => Json::Bool(x),
-            SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).ok_or(IntoNetsBloxJsonError::BadNumber(x))?),
+            SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).unwrap()), // Number forbids NaN and Infinity, so this is infallible
             SimpleValue::String(x) => Json::String(x),
-            SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_netsblox_json).collect::<Result<_,_>>()?),
+            SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_netsblox_json).collect()),
             SimpleValue::Image(img) => {
                 let center_attrs = img.center.map(|(x, y)| format!(" center-x=\"{x}\" center-y=\"{y}\"")).unwrap_or_default();
                 Json::String(format!("<costume{center_attrs} image=\"data:image/png;base64,{}\" />", crate::util::base64_encode(&img.content)))
             },
             SimpleValue::Audio(audio) => Json::String(format!("<sound sound=\"data:audio/mpeg;base64,{}\" />", crate::util::base64_encode(&audio.content))),
-        })
+        }
     }
     /// Converts a JSON object returned from NetsBlox into its equivalent [`SimpleValue`] form.
     pub fn from_netsblox_json(value: Json) -> Result<Self, FromNetsBloxJsonError> {
         Ok(match value {
             Json::Null => return Err(FromNetsBloxJsonError::Null),
             Json::Bool(x) => SimpleValue::Bool(x),
-            Json::Number(x) => SimpleValue::Number(x.as_f64().and_then(|x| Number::new(x).ok()).ok_or(FromNetsBloxJsonError::BadNumber(x))?),
+            Json::Number(x) => SimpleValue::Number(Number::new(x.as_f64().unwrap()).unwrap()), // Json forbids NaN and Infinity, so this is infallible
             Json::Array(x) => SimpleValue::List(x.into_iter().map(SimpleValue::from_netsblox_json).collect::<Result<_,_>>()?),
             Json::Object(x) => SimpleValue::List(x.into_iter().map(|(k, v)| {
                 Ok(SimpleValue::List(vec![SimpleValue::String(k), SimpleValue::from_netsblox_json(v)?]))
@@ -834,7 +824,7 @@ fn test_netsblox_json() {
         SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128], center: None }),
         SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128, 6, 9], center: Some((Number::new(12.5).unwrap(), Number::new(-54.0).unwrap())) }),
     ]);
-    let js = val.clone().into_netsblox_json().unwrap();
+    let js = val.clone().into_netsblox_json();
     let back = SimpleValue::from_netsblox_json(js).unwrap();
     assert_eq!(val, back);
 }

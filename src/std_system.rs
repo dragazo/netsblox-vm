@@ -280,7 +280,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                             RequestStatus::Handled
                         }
                         _ => {
-                            match args.into_iter().map(|(k, v)| Ok((k, v.to_simple()?.into_netsblox_json()?))).collect::<Result<_,ErrorCause<_,_>>>() {
+                            match args.into_iter().map(|(k, v)| Ok((k, v.to_simple()?.into_netsblox_json()))).collect::<Result<_,ToSimpleError<_,_>>>() {
                                 Ok(args) => proc.global_context.borrow().system.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap(),
                                 Err(err) => key.complete(Err(format!("failed to convert RPC args to json: {err:?}"))),
                             }
