@@ -654,8 +654,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let val = self.value_stack.pop().unwrap();
                 let mut list = list.borrow_mut(mc);
 
-                let index = ops::prep_index(&index, list.len() + 1)?;
-                list.insert(index, val);
+                let index_set = ops::prep_index_set(&index, list.len() + 1)?;
+                for index in index_set.into_iter().rev() {
+                    list.insert(index, val.clone());
+                }
+
                 self.pos = aft_pos;
             }
             Instruction::ListInsertLast => {
@@ -702,8 +705,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let index = self.value_stack.pop().unwrap();
                 let mut list = list.borrow_mut(mc);
 
-                let index = ops::prep_index(&index, list.len())?;
-                list[index] = value;
+                let index_set = ops::prep_index_set(&index, list.len())?;
+                for index in index_set {
+                    list[index] = value.clone();
+                }
+
                 self.pos = aft_pos;
             }
             Instruction::ListAssignLast => {
@@ -728,8 +734,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let list = self.value_stack.pop().unwrap().as_list()?;
                 let index = self.value_stack.pop().unwrap();
                 let mut list = list.borrow_mut(mc);
-                let index = ops::prep_index(&index, list.len())?;
-                list.remove(index);
+
+                let index_set = ops::prep_index_set(&index, list.len())?;
+                for index in index_set.into_iter().rev() {
+                    list.remove(index);
+                }
+
                 self.pos = aft_pos;
             }
             Instruction::ListRemoveLast => {
@@ -1419,6 +1429,30 @@ mod ops {
     pub(super) fn prep_rand_index<C: CustomTypes<S>, S: System<C>>(system: &S, len: usize) -> Result<usize, ErrorCause<C, S>> {
         if len == 0 { return Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }) }
         Ok(system.rand(0..len))
+    }
+    pub(super) fn prep_index_set<'gc, C: CustomTypes<S>, S: System<C>>(index: &Value<'gc, C, S>, len: usize) -> Result<BTreeSet<usize>, ErrorCause<C, S>> {
+        fn set_impl<'gc, C: CustomTypes<S>, S: System<C>>(index: &Value<'gc, C, S>, len: usize, dest: &mut BTreeSet<usize>, cache: &mut BTreeSet<Identity<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
+            match index {
+                Value::List(values) => {
+                    let key = index.identity();
+                    if cache.insert(key) {
+                        for value in values.borrow().iter() {
+                            set_impl(value, len, dest, cache)?;
+                        }
+                        cache.remove(&key);
+                    }
+                }
+                _ => {
+                    dest.insert(ops::prep_index(index, len)?);
+                }
+            }
+            Ok(())
+        }
+        let mut res = Default::default();
+        let mut cache = Default::default();
+        set_impl(index, len, &mut res, &mut cache)?;
+        debug_assert_eq!(cache.len(), 0);
+        Ok(res)
     }
 
     pub(super) fn flatten<'gc, C: CustomTypes<S>, S: System<C>>(value: &Value<'gc, C, S>) -> Result<VecDeque<Value<'gc, C, S>>, ErrorCause<C, S>> {

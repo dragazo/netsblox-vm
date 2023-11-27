@@ -1008,6 +1008,68 @@ fn test_proc_pick_random() {
 }
 
 #[test]
+fn test_proc_tensor_list_idx() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/tensor-list-idx.xml"),
+        methods = "",
+    ), Settings::default(), system, |_| SymbolTable::default());
+
+    run_till_term(&mut env, |mc, _, res| {
+        let results = res.unwrap().0.as_list().unwrap();
+        let results = &*results.borrow();
+
+        assert_eq!(results.len(), 6);
+        assert_values_eq(&results[0], &Value::from_simple(mc, SimpleValue::from_json(json!(["11", 2, "help", ["4", "3", "5"], "tr", "34", -7])).unwrap()), 1e-5, "tensor list idx 0");
+        match &results[1] {
+            Value::List(x) => {
+                let x = &*x.borrow();
+                assert_eq!(x.len(), 5);
+                match &x[0] {
+                    Value::String(x) => assert_eq!(x.as_str(), "help"),
+                    x => panic!("{x:?}"),
+                }
+                match &x[1] {
+                    Value::String(x) => assert_eq!(x.as_str(), "11"),
+                    x => panic!("{x:?}"),
+                }
+                match &x[2] {
+                    Value::List(x) => {
+                        let x = &*x.borrow();
+                        assert_eq!(x.len(), 3);
+                        match &x[0] {
+                            Value::Number(x) => assert!(x.get() == 2.0),
+                            x => panic!("{x:?}"),
+                        }
+                        match &x[1] {
+                            Value::String(x) => assert_eq!(x.as_str(), "11"),
+                            x => panic!("{x:?}"),
+                        }
+                        match &x[2] {
+                            Value::String(x) => assert_eq!(x.as_str(), "help"),
+                            x => panic!("{x:?}"),
+                        }
+                    }
+                    x => panic!("{x:?}"),
+                }
+                match &x[3] {
+                    Value::Number(x) => assert!(x.get() == -7.0),
+                    x => panic!("{x:?}"),
+                }
+                assert_eq!(results[1].identity(), x[4].identity());
+            }
+            x => panic!("{x:?}"),
+        }
+        assert_values_eq(&results[2], &Value::from_simple(mc, SimpleValue::from_json(json!(["11", 2, "help", ["4", "3", "5"], "tr", "34", -7])).unwrap()), 1e-5, "tensor list idx 2");
+        assert_values_eq(&results[3], &Value::from_simple(mc, SimpleValue::from_json(json!([["1", "2"], ["1", "2"], ["1", "2"], ["4", "3", "5"], "tr", "34", ["1", "2"]])).unwrap()), 1e-5, "tensor list idx 3");
+        assert_values_eq(&results[4], &Value::from_simple(mc, SimpleValue::from_json(json!([["7", "5"], ["1", "2"], ["7", "5"], ["1", "2"], ["7", "5"], ["1", "2"], ["4", "3", "5"], "tr", "34", ["7", "5"], ["1", "2"]])).unwrap()), 1e-5, "tensor list idx 4");
+        assert_values_eq(&results[5], &Value::from_simple(mc, SimpleValue::from_json(json!([["1", "2"], ["7", "5"], ["1", "2"], "tr", "34", ["7", "5"], ["1", "2"]])).unwrap()), 1e-5, "tensor list idx 5");
+    });
+}
+
+#[test]
 fn test_proc_rand_list_ops() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
