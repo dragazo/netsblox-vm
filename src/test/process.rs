@@ -1151,6 +1151,28 @@ fn test_proc_variadic_sum_product() {
 }
 
 #[test]
+fn test_proc_preserve_tensor_topology() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/preserve-tensor-topology.xml"),
+        methods = "",
+    ), Settings::default(), system, |_| SymbolTable::default());
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
+            [[["5", "3", "4"], ["5", "3", "4"], ["5", "3", "4"]], true, false, false],
+            [[[6, 4, 5], [6, 4, 5], [6, 4, 5]], true, false, false],
+            [[[10, 6, 8], [10, 6, 8], [10, 6, 8]], true, false, false],
+            [[[-5, -3, -4], [-5, -3, -4], [-5, -3, -4]], true, false, false],
+            [[[32, 8, 16], [32, 8, 16], [32, 8, 16]], true, false, false],
+        ])).unwrap());
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "preserve tensor topology");
+    });
+}
+
+#[test]
 fn test_proc_variadic_min_max() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
