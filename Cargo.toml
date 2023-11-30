@@ -81,7 +81,7 @@ rand = { version = "0.8.5", default-features = false }
 checked-float = { version = "0.1.5", default-features = false, features = ["serde"] }
 educe = { version = "0.4.23", default-features = false, features = ["Debug", "Clone", "Copy", "PartialOrd", "Ord", "PartialEq", "Eq", "Default"] }
 libm = { version = "0.2.8", default-features = false }
-monostate = { version = "0.1.9", default-features = false }
+monostate = { version = "0.1.10", default-features = false }
 replace_with = { version = "0.1.7", default-features = false }
 unicase = { version = "2.7.0", default-features = false }
 time = { version = "0.3.30", default-features = false }
@@ -92,16 +92,16 @@ base64 = { version = "0.21.5", default-features = false, features = ["alloc"] }
 # std deps
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"], optional = true }
 futures = { version = "0.3.29", default-features = false, optional = true }
-async-channel = { version = "2.0.0", default-features = false, optional = true }
+async-channel = { version = "2.1.1", default-features = false, optional = true }
 reqwest = { version = "0.11", default-features = false, features = ["json"], optional = true }
 tokio-tungstenite = { version = "0.20.1", default-features = false, features = ["connect"], optional = true }
 names = { version = "0.14.0", default-features = false, optional = true }
-uuid = { version = "1.5.0", default-features = false, features = ["v4", "fast-rng"], optional = true }
+uuid = { version = "1.6.1", default-features = false, features = ["v4", "fast-rng"], optional = true }
 rand_chacha = { version = "0.3.1", default-features = false, optional = true }
-getrandom = { version = "0.2.10", default-features = false, optional = true }
+getrandom = { version = "0.2.11", default-features = false, optional = true }
 
 # cli deps
-clap = { version = "4.4.7", features = ["derive"], optional = true }
+clap = { version = "4.4.10", features = ["derive"], optional = true }
 crossterm = { version = "0.27.0", default-features = false, optional = true, features = ["events"] }
 actix-web = { version = "4.4.0", default-features = false, features = ["macros"], optional = true }
 actix-cors = { version = "0.6.4", default-features = false, optional = true }
