@@ -679,6 +679,57 @@ fn test_proj_broadcast() {
 }
 
 #[test]
+fn test_proj_delayed_capture_upvar() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let proj = get_running_project(include_str!("projects/delayed-capture-upvar.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
+
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
+            ["test 1", 13],
+            ["test 1", 13],
+            ["test 1", 13],
+            ["test 2", 13],
+            ["test 2", 13],
+            ["test 2", 13],
+            ["test 3", 13],
+            ["test 3", 13],
+            ["test 3", 13],
+            ["tracking 4", 0],
+            ["tracking 4", 0],
+            ["tracking 4", 0],
+            ["test 4", 11],
+            ["test 4", 12],
+            ["test 4", 13],
+            ["tracking 5", 0],
+            ["tracking 5", 0],
+            ["tracking 5", 0],
+            ["test 5", 11],
+            ["test 5", 12],
+            ["test 5", 13],
+            ["tracking 6", 0],
+            ["tracking 6", 0],
+            ["tracking 6", 0],
+            ["test 6", 11],
+            ["test 6", 12],
+            ["test 6", 13],
+            ["test 7", 11],
+            ["test 7", 12],
+            ["test 7", 13],
+            ["test 8", 11],
+            ["test 8", 12],
+            ["test 8", 13],
+            ["test 9", 11],
+            ["test 9", 12],
+            ["test 9", 13],
+        ])).unwrap());
+        assert_values_eq(&global_context.globals.lookup("res").unwrap().get().clone(), &expected, 1e-20, "res");
+    });
+}
+
+#[test]
 fn test_proj_broadcast_to() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/broadcast-to.xml"), system);

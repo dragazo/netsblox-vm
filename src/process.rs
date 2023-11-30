@@ -858,7 +858,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
 
             Instruction::DeclareLocal { var } => {
-                self.call_stack.last_mut().unwrap().locals.define_if_undefined(var, || Shared::Unique(Number::new(0.0).unwrap().into()));
+                self.call_stack.last_mut().unwrap().locals.define_or_redefine(var, Shared::Unique(Number::new(0.0).unwrap().into()));
                 self.pos = aft_pos;
             }
             Instruction::InitUpvar { var } => {

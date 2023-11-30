@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 #![no_std]
 
+#![recursion_limit = "256"]
+
 #![doc = include_str!("../README.md")]
 
 #[cfg(feature = "std")]
