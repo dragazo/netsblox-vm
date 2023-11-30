@@ -363,6 +363,29 @@ fn test_proc_lambda_local_shadow_capture() {
 }
 
 #[test]
+fn test_proc_custom_script_vars() {
+    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/custom-script-vars.xml"),
+        methods = "",
+    ), Settings::default(), system, |_| SymbolTable::default());
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
+            [0, 0, 0],
+            [0, 0],
+            ["56", 0],
+            ["56", "-12"],
+            [0, "-12"],
+            [0, 0],
+        ])).unwrap());
+        assert_values_eq(&res.unwrap().0, &expect, 1e-20, "custom script vars");
+    });
+}
+
+#[test]
 fn test_proc_upvars() {
     let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
