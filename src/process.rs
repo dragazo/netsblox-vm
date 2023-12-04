@@ -8,12 +8,14 @@
 
 use alloc::rc::Rc;
 use alloc::vec::Vec;
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 use alloc::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
 use alloc::borrow::ToOwned;
 
 use core::iter::{self, Cycle};
 use core::cmp::Ordering;
+
+use compact_str::CompactString;
 
 use unicase::UniCase;
 
@@ -27,11 +29,11 @@ use crate::runtime::*;
 use crate::bytecode::*;
 use crate::util::*;
 
-fn empty_string() -> Rc<String> {
+fn empty_string() -> Rc<CompactString> {
     #[cfg(feature = "std")]
     {
         std::thread_local! {
-            static VALUE: Rc<String> = Rc::new(String::new());
+            static VALUE: Rc<CompactString> = Rc::new(CompactString::default());
         }
         VALUE.with(|x| x.clone())
     }
@@ -45,22 +47,22 @@ fn empty_string() -> Rc<String> {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, Clone)]
 pub struct VarEntry {
-    pub name: String,
-    pub value: String,
+    pub name: CompactString,
+    pub value: CompactString,
 }
 /// A trace entry in the structure expected by the standard js extension.
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, Clone)]
 pub struct TraceEntry {
-    pub location: String,
+    pub location: CompactString,
     pub locals: Vec<VarEntry>,
 }
 /// A error message in the structure expected by the standard js extension.
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, Clone)]
 pub struct ErrorSummary {
-    pub cause: String,
-    pub entity: String,
+    pub cause: CompactString,
+    pub entity: CompactString,
     pub globals: Vec<VarEntry>,
     pub fields: Vec<VarEntry>,
     pub trace: Vec<TraceEntry>,
@@ -68,13 +70,13 @@ pub struct ErrorSummary {
 impl ErrorSummary {
     pub fn extract<C: CustomTypes<S>, S: System<C>>(error: &ExecError<C, S>, process: &Process<C, S>, locations: &Locations) -> Self {
         let raw_entity = process.call_stack.last().unwrap().entity;
-        let entity = raw_entity.borrow().name.as_str().to_owned();
-        let cause = format!("{:?}", error.cause);
+        let entity = raw_entity.borrow().name.as_ref().clone();
+        let cause = format!("{:?}", error.cause).into();
 
         fn summarize_symbols<C: CustomTypes<S>, S: System<C>>(symbols: &SymbolTable<'_, C, S>) -> Vec<VarEntry> {
             let mut res = Vec::with_capacity(symbols.len());
             for (k, v) in symbols {
-                res.push(VarEntry { name: k.clone(), value: format!("{:?}", &*v.get()) });
+                res.push(VarEntry { name: k.clone(), value: format!("{:?}", &*v.get()).into() });
             }
             res
         }
@@ -125,7 +127,7 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// For other processes, it is up to the receiver/scheduler to respect this abort request.
     Abort { mode: AbortMode },
     /// The process has requested to broadcast a message to all entities (if `target` is `None`) or to a specific `target`, which may trigger other code to execute.
-    Broadcast { msg_type: String, barrier: Option<Barrier>, targets: Option<Vec<Gc<'gc, RefLock<Entity<'gc, C, S>>>>> },
+    Broadcast { msg_type: CompactString, barrier: Option<Barrier>, targets: Option<Vec<Gc<'gc, RefLock<Entity<'gc, C, S>>>>> },
     /// The process has requested to create or destroy a new watcher for a variable.
     /// If `create` is true, the process is requesting to register the given watcher.
     /// If `create` if false, the process is requesting to remove a watcher which is equivalent to the given watcher.
@@ -164,7 +166,7 @@ pub struct CallStackEntry<'gc, C: CustomTypes<S>, S: System<C>> {
 
 struct Handler {
     pos: usize,
-    var: String,
+    var: CompactString,
     warp_counter: usize,
     call_stack_size: usize,
     value_stack_size: usize,
@@ -193,7 +195,7 @@ pub struct ProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub start_pos: usize,
     #[collect(require_static)] pub barrier: Option<Barrier>,
     #[collect(require_static)] pub reply_key: Option<InternReplyKey>,
-    #[collect(require_static)] pub local_message: Option<String>,
+    #[collect(require_static)] pub local_message: Option<CompactString>,
 }
 
 /// A [`ByteCode`] execution primitive.
@@ -280,7 +282,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 let msg = match &err.cause {
                     ErrorCause::Custom { msg } => msg.clone(),
-                    x => format!("{x:?}"),
+                    x => format!("{x:?}").into(),
                 };
                 self.call_stack.last_mut().unwrap().locals.define_or_redefine(var, Shared::Unique(Value::String(Rc::new(msg))));
                 self.pos = *pos;
@@ -298,7 +300,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         res
     }
     fn step_impl(&mut self, mc: &Mutation<'gc>) -> Result<ProcessStep<'gc, C, S>, ErrorCause<C, S>> {
-        fn process_result<'gc, C: CustomTypes<S>, S: System<C>, T>(result: Result<T, String>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, C, S>>>, last_ok: Option<&mut Option<Value<'gc, C, S>>>, last_err: Option<&mut Option<Value<'gc, C, S>>>, to_value: fn(T) -> Option<Value<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
+        fn process_result<'gc, C: CustomTypes<S>, S: System<C>, T>(result: Result<T, CompactString>, error_scheme: ErrorScheme, stack: Option<&mut Vec<Value<'gc, C, S>>>, last_ok: Option<&mut Option<Value<'gc, C, S>>>, last_err: Option<&mut Option<Value<'gc, C, S>>>, to_value: fn(T) -> Option<Value<'gc, C, S>>) -> Result<(), ErrorCause<C, S>> {
             match result {
                 Ok(x) => match to_value(x) {
                     Some(x) => {
@@ -469,7 +471,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::PushString { value } => {
-                self.value_stack.push(Value::String(Rc::new(value.to_owned())));
+                self.value_stack.push(Value::String(Rc::new(CompactString::new(value))));
                 self.pos = aft_pos;
             }
             Instruction::PushVariable { var } => {
@@ -614,7 +616,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
             Instruction::ListJson => {
                 let value = self.value_stack.pop().unwrap().to_simple()?.into_json()?;
-                self.value_stack.push(Rc::new(value.to_string()).into());
+                self.value_stack.push(Value::String(Rc::new(value.to_string().into())));
                 self.pos = aft_pos;
             }
             Instruction::ListCsv => {

@@ -2,8 +2,7 @@
 
 use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 use alloc::rc::{Rc, Weak};
-use alloc::borrow::{Cow, ToOwned};
-use alloc::string::{String, ToString};
+use alloc::borrow::ToOwned;
 use alloc::vec::Vec;
 
 use core::marker::PhantomData;
@@ -13,6 +12,7 @@ use core::cell::Ref;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
 use checked_float::{FloatChecker, CheckedFloat};
+use compact_str::CompactString;
 
 #[cfg(feature = "serde")]
 use serde::{Serialize, Deserialize};
@@ -48,7 +48,7 @@ pub type Number = CheckedFloat<f64, NumberChecker>;
 #[derive(Debug)]
 pub enum FromAstError<'a> {
     BadNumber { error: NumberError },
-    BadKeycode { key: String },
+    BadKeycode { key: CompactString },
     UnsupportedEvent { kind: &'a ast::HatKind },
     CompileError { error: CompileError<'a> },
 }
@@ -75,11 +75,11 @@ pub struct ConversionError<C: CustomTypes<S>, S: System<C>> {
 #[educe(Debug)]
 pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     /// A variable lookup operation failed. `name` holds the name of the variable that was expected.
-    UndefinedVariable { name: String },
+    UndefinedVariable { name: CompactString },
     /// A name-based costume lookup operation failed.
-    UndefinedCostume { name: String },
+    UndefinedCostume { name: CompactString },
     /// A name-based entity lookup operation failed.
-    UndefinedEntity { name: String },
+    UndefinedEntity { name: CompactString },
     /// An upvar was created at the root scope, which is not allowed (it has nothing to refer up to).
     UpvarAtRoot,
     /// The result of a failed type conversion.
@@ -107,9 +107,9 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     /// An acyclic operation received a cyclic input value.
     CyclicValue,
     /// Attempt to parse an invalid CSV-encoded string.
-    NotCsv { value: String },
+    NotCsv { value: CompactString },
     /// Attempt to parse an invalid JSON-encoded string.
-    NotJson { value: String },
+    NotJson { value: CompactString },
     /// A failed attempt to convert a native vm [`Value`] to [`SimpleValue`].
     ToSimpleError { error: ToSimpleError<C, S> },
     /// A failed attempt to convert a [`SimpleValue`] to [`Json`].
@@ -123,9 +123,9 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     /// Attempt to use an unsupported feature.
     NotSupported { feature: Feature },
     /// A soft error (e.g., RPC or syscall failure) was promoted to a hard error.
-    Promoted { error: String },
+    Promoted { error: CompactString },
     /// A custom error generated explicitly from user code.
-    Custom { msg: String },
+    Custom { msg: CompactString },
 }
 impl<C: CustomTypes<S>, S: System<C>> From<ConversionError<C, S>> for ErrorCause<C, S> { fn from(e: ConversionError<C, S>) -> Self { Self::ConversionError { got: e.got, expected: e.expected } } }
 impl<C: CustomTypes<S>, S: System<C>> From<ToSimpleError<C, S>> for ErrorCause<C, S> { fn from(error: ToSimpleError<C, S>) -> Self { Self::ToSimpleError { error } } }
@@ -416,7 +416,7 @@ impl Properties {
                 f(self, x);
                 key.complete(Ok(()));
             }
-            Err(e) => key.complete(Err(format!("{e:?}"))),
+            Err(e) => key.complete(Err(format!("{e:?}").into())),
         }
     }
 
@@ -599,13 +599,13 @@ pub enum Event {
     /// Fire when a new clone of this entity is created.
     OnClone,
     /// Fire when a message is received locally (Control message blocks). `None` is used to denote any message type.
-    LocalMessage { msg_type: Option<String> },
+    LocalMessage { msg_type: Option<CompactString> },
     /// Fire when a message is received over the network (Network message blocks).
-    NetworkMessage { msg_type: String, fields: Vec<String> },
+    NetworkMessage { msg_type: CompactString, fields: Vec<CompactString> },
     /// Fire when a key is pressed. [`None`] is used to denote any key press.
     OnKey { key_filter: Option<KeyCode> },
     /// Fire when explicitly requested from an input command.
-    Custom { name: String, fields: Vec<String> },
+    Custom { name: CompactString, fields: Vec<CompactString> },
 }
 
 #[derive(Debug, Clone, Copy, FromPrimitive)]
@@ -679,7 +679,7 @@ pub enum FromNetsBloxJsonError {
 pub enum SimpleValue {
     Bool(bool),
     Number(Number),
-    String(String),
+    String(CompactString),
     Image(Image),
     Audio(Audio),
     List(Vec<SimpleValue>),
@@ -687,7 +687,8 @@ pub enum SimpleValue {
 
 impl From<bool> for SimpleValue { fn from(x: bool) -> Self { Self::Bool(x) } }
 impl From<Number> for SimpleValue { fn from(x: Number) -> Self { Self::Number(x) } }
-impl From<String> for SimpleValue { fn from(x: String) -> Self { Self::String(x) } }
+impl From<CompactString> for SimpleValue { fn from(x: CompactString) -> Self { Self::String(x) } }
+impl From<alloc::string::String> for SimpleValue { fn from(x: alloc::string::String) -> Self { Self::String(x.into()) } }
 impl From<Image> for SimpleValue { fn from(x: Image) -> Self { Self::Image(x) } }
 impl From<Audio> for SimpleValue { fn from(x: Audio) -> Self { Self::Audio(x) } }
 impl From<Vec<SimpleValue>> for SimpleValue { fn from(x: Vec<SimpleValue>) -> Self { Self::List(x) } }
@@ -700,7 +701,7 @@ impl SimpleValue {
         Ok(match self {
             SimpleValue::Bool(x) => Json::Bool(x),
             SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
-            SimpleValue::String(x) => Json::String(x),
+            SimpleValue::String(x) => Json::String(x.as_str().to_owned()),
             SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_json).collect::<Result<_,_>>()?),
             SimpleValue::Image(_) => return Err(IntoJsonError::ComplexType(Type::Image)),
             SimpleValue::Audio(_) => return Err(IntoJsonError::ComplexType(Type::Audio)),
@@ -714,10 +715,10 @@ impl SimpleValue {
             Json::Null => return Err(FromJsonError::Null),
             Json::Bool(x) => SimpleValue::Bool(x),
             Json::Number(x) => SimpleValue::Number(Number::new(x.as_f64().unwrap()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
-            Json::String(x) => SimpleValue::String(x),
+            Json::String(x) => SimpleValue::String(x.into()),
             Json::Array(x) => SimpleValue::List(x.into_iter().map(SimpleValue::from_json).collect::<Result<_,_>>()?),
             Json::Object(x) => SimpleValue::List(x.into_iter().map(|(k, v)| {
-                Ok(SimpleValue::List(vec![SimpleValue::String(k), SimpleValue::from_json(v)?]))
+                Ok(SimpleValue::List(vec![SimpleValue::String(k.into()), SimpleValue::from_json(v)?]))
             }).collect::<Result<_,_>>()?),
         })
     }
@@ -727,7 +728,7 @@ impl SimpleValue {
         match self {
             SimpleValue::Bool(x) => Json::Bool(x),
             SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
-            SimpleValue::String(x) => Json::String(x),
+            SimpleValue::String(x) => Json::String(x.into()),
             SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_netsblox_json).collect()),
             SimpleValue::Image(img) => {
                 let center_attrs = img.center.map(|(x, y)| format!(" center-x=\"{x}\" center-y=\"{y}\"")).unwrap_or_default();
@@ -744,7 +745,7 @@ impl SimpleValue {
             Json::Number(x) => SimpleValue::Number(Number::new(x.as_f64().unwrap()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
             Json::Array(x) => SimpleValue::List(x.into_iter().map(SimpleValue::from_netsblox_json).collect::<Result<_,_>>()?),
             Json::Object(x) => SimpleValue::List(x.into_iter().map(|(k, v)| {
-                Ok(SimpleValue::List(vec![SimpleValue::String(k), SimpleValue::from_netsblox_json(v)?]))
+                Ok(SimpleValue::List(vec![SimpleValue::String(k.into()), SimpleValue::from_netsblox_json(v)?]))
             }).collect::<Result<_,_>>()?),
             Json::String(x) => {
                 let mut tokenizer = xmlparser::Tokenizer::from(x.as_str());
@@ -767,10 +768,10 @@ impl SimpleValue {
                                     }
                                     Some(Ok(xmlparser::Token::ElementEnd { .. })) => match content {
                                         Some(content) => return Ok(SimpleValue::Image(Image { content, center: center_x.zip(center_y) })),
-                                        None => return Ok(SimpleValue::String(x)),
+                                        None => return Ok(SimpleValue::String(x.into())),
                                     }
                                     Some(Ok(_)) => (),
-                                    None | Some(Err(_)) => return Ok(SimpleValue::String(x)),
+                                    None | Some(Err(_)) => return Ok(SimpleValue::String(x.into())),
                                 }
                             }
                         }
@@ -787,16 +788,16 @@ impl SimpleValue {
                                     }
                                     Some(Ok(xmlparser::Token::ElementEnd { .. })) => match content {
                                         Some(content) => return Ok(SimpleValue::Audio(Audio { content })),
-                                        None => return Ok(SimpleValue::String(x)),
+                                        None => return Ok(SimpleValue::String(x.into())),
                                     }
                                     Some(Ok(_)) => (),
-                                    None | Some(Err(_)) => return Ok(SimpleValue::String(x)),
+                                    None | Some(Err(_)) => return Ok(SimpleValue::String(x.into())),
                                 }
                             }
                         }
-                        _ => SimpleValue::String(x),
+                        _ => SimpleValue::String(x.into()),
                     }
-                    _ => SimpleValue::String(x),
+                    _ => SimpleValue::String(x.into()),
                 }
             }
         })
@@ -839,7 +840,7 @@ pub enum Value<'gc, C: CustomTypes<S>, S: System<C>> {
     /// A primitive numeric value. Snap! and NetsBlox use 64-bit floating point values for all numbers.
     Number(#[collect(require_static)] Number),
     /// A primitive string value, which is an immutable reference type.
-    String(#[collect(require_static)] Rc<String>),
+    String(#[collect(require_static)] Rc<CompactString>),
     /// An image stored as a binary buffer.
     Image(#[collect(require_static)] Rc<Image>),
     /// An audio clip stored as as a binary buffer.
@@ -867,6 +868,20 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GetType for Value<'gc, C, S> {
             Value::Closure(_) => Type::Closure,
             Value::Entity(_) => Type::Entity,
             Value::Native(x) => Type::Native(x.get_type()),
+        }
+    }
+}
+
+enum CompactCow<'a> {
+    Borrowed(&'a str),
+    Owned(CompactString),
+}
+impl Deref for CompactCow<'_> {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Borrowed(x) => x,
+            Self::Owned(x) => &x,
         }
     }
 }
@@ -925,7 +940,7 @@ fn format_value<C: CustomTypes<S>, S: System<C>>(value: &Value<'_, C, S>, f: &mu
 
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<bool> for Value<'gc, C, S> { fn from(v: bool) -> Self { Value::Bool(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Number> for Value<'gc, C, S> { fn from(v: Number) -> Self { Value::Number(v) } }
-impl<'gc, C: CustomTypes<S>, S: System<C>> From<Rc<String>> for Value<'gc, C, S> { fn from(v: Rc<String>) -> Self { Value::String(v) } }
+impl<'gc, C: CustomTypes<S>, S: System<C>> From<Rc<CompactString>> for Value<'gc, C, S> { fn from(v: Rc<CompactString>) -> Self { Value::String(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>) -> Self { Value::List(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<Closure<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<Closure<'gc, C, S>>>) -> Self { Value::Closure(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<Entity<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<Entity<'gc, C, S>>>) -> Self { Value::Entity(v) } }
@@ -984,13 +999,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         }
     }
 
-    /// Attempts to interpret this value as a bool.
-    pub fn as_bool(&self) -> Result<bool, ConversionError<C, S>> {
-        Ok(match self {
-            Value::Bool(x) => *x,
-            x => return Err(ConversionError { got: x.get_type(), expected: Type::Bool }),
-        })
-    }
     pub(crate) fn parse_number(s: &str) -> Option<Number> {
         let s = s.trim();
         let parsed = match s.get(..2) {
@@ -1001,6 +1009,19 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         };
         parsed.and_then(|x| Number::new(x).ok())
     }
+    pub(crate) fn stringify_number(v: Number) -> CompactString {
+        debug_assert!(v.get().is_finite());
+        let res = ryu::Buffer::new().format_finite(v.get());
+        CompactString::new(res.strip_suffix(".0").unwrap_or(res))
+    }
+
+    /// Attempts to interpret this value as a bool.
+    pub fn as_bool(&self) -> Result<bool, ConversionError<C, S>> {
+        Ok(match self {
+            Value::Bool(x) => *x,
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::Bool }),
+        })
+    }
     /// Attempts to interpret this value as a number.
     pub fn as_number(&self) -> Result<Number, ConversionError<C, S>> {
         match self {
@@ -1010,10 +1031,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         }
     }
     /// Attempts to interpret this value as a string.
-    pub fn as_string(&self) -> Result<Cow<str>, ConversionError<C, S>> {
+    pub fn as_string(&self) -> Result<CompactCow, ConversionError<C, S>> {
         Ok(match self {
-            Value::String(x) => Cow::Borrowed(&**x),
-            Value::Number(x) => Cow::Owned(x.to_string()),
+            Value::String(x) => CompactCow::Borrowed(&**x),
+            Value::Number(x) => CompactCow::Owned(Self::stringify_number(*x)),
             x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
         })
     }
@@ -1059,7 +1080,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
 #[collect(no_drop, bound = "")]
 pub struct Closure<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub(crate) pos: usize,
-    #[collect(require_static)] pub(crate) params: Vec<String>,
+    #[collect(require_static)] pub(crate) params: Vec<CompactString>,
                                pub(crate) captures: SymbolTable<'gc, C, S>,
 }
 impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Closure<'_, C, S> {
@@ -1086,9 +1107,9 @@ pub struct ProcessKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
-    #[collect(require_static)] pub name: Rc<String>,
-    #[collect(require_static)] pub sound_list: Rc<Vec<(String, Rc<Audio>)>>,
-    #[collect(require_static)] pub costume_list: Rc<Vec<(String, Rc<Image>)>>,
+    #[collect(require_static)] pub name: Rc<CompactString>,
+    #[collect(require_static)] pub sound_list: Rc<Vec<(CompactString, Rc<Audio>)>>,
+    #[collect(require_static)] pub costume_list: Rc<Vec<(CompactString, Rc<Image>)>>,
     #[collect(require_static)] pub costume: Option<Rc<Image>>,
     #[collect(require_static)] pub state: C::EntityState,
                                pub original: Option<Gc<'gc, RefLock<Entity<'gc, C, S>>>>,
@@ -1110,7 +1131,8 @@ pub struct Watcher<'gc, C: CustomTypes<S>, S: System<C>> {
     /// The entity associated with the variable being watched.
     pub entity: GcWeak<'gc, RefLock<Entity<'gc, C, S>>>,
     /// The name of the variable being watched.
-    pub name: String,
+    #[collect(require_static)]
+    pub name: CompactString,
     /// The value of the variable being watched.
     pub value: GcWeak<'gc, RefLock<Value<'gc, C, S>>>,
 }
@@ -1189,7 +1211,7 @@ impl<'a, T> Deref for SharedRef<'a, T> {
 #[derive(Collect, Educe)]
 #[collect(no_drop, bound = "")]
 #[educe(Default, Debug)]
-pub struct SymbolTable<'gc, C: CustomTypes<S>, S: System<C>>(BTreeMap<String, Shared<'gc, Value<'gc, C, S>>>);
+pub struct SymbolTable<'gc, C: CustomTypes<S>, S: System<C>>(BTreeMap<StaticCollect<CompactString>, Shared<'gc, Value<'gc, C, S>>>);
 impl<'gc, C: CustomTypes<S>, S: System<C>> Clone for SymbolTable<'gc, C, S> {
     /// Creates a shallow (non-aliasing) copy of all variables currently stored in this symbol table.
     fn clone(&self) -> Self {
@@ -1204,7 +1226,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> SymbolTable<'gc, C, S> {
     /// Defines or redefines a value in the symbol table to a new instance of [`Shared<Value>`].
     /// If a variable named `var` already existed and was [`Shared::Aliased`], its value is not modified.
     pub fn define_or_redefine(&mut self, var: &str, value: Shared<'gc, Value<'gc, C, S>>) {
-        self.0.insert(var.to_owned(), value);
+        self.0.insert(StaticCollect(CompactString::new(var)), value);
     }
     /// Looks up the given variable in the symbol table.
     /// If a variable with the given name does not exist, returns [`None`].
@@ -1233,7 +1255,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> SymbolTable<'gc, C, S> {
     }
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> IntoIterator for SymbolTable<'gc, C, S> {
-    type Item = (String, Shared<'gc, Value<'gc, C, S>>);
+    type Item = (CompactString, Shared<'gc, Value<'gc, C, S>>);
     type IntoIter = symbol_table::IntoIter<'gc, C, S>;
     fn into_iter(self) -> Self::IntoIter { symbol_table::IntoIter(self.0.into_iter()) }
 }
@@ -1250,12 +1272,12 @@ impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> IntoIterator for &'a mut SymbolTa
 pub mod symbol_table {
     //! Special types for working with a [`SymbolTable`].
     use super::*;
-    pub struct IntoIter<'gc, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::IntoIter<String, Shared<'gc, Value<'gc, C, S>>>);
-    pub struct Iter<'gc, 'a, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::Iter<'a, String, Shared<'gc, Value<'gc, C, S>>>);
-    pub struct IterMut<'gc, 'a, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::IterMut<'a, String, Shared<'gc, Value<'gc, C, S>>>);
-    impl<'gc, C: CustomTypes<S>, S: System<C>> Iterator for IntoIter<'gc, C, S> { type Item = (String, Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
-    impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> Iterator for Iter<'gc, 'a, C, S> { type Item = (&'a String, &'a Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
-    impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> Iterator for IterMut<'gc, 'a, C, S> { type Item = (&'a String, &'a mut Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
+    pub struct IntoIter<'gc, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::IntoIter<CompactString, Shared<'gc, Value<'gc, C, S>>>);
+    pub struct Iter<'gc, 'a, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::Iter<'a, CompactString, Shared<'gc, Value<'gc, C, S>>>);
+    pub struct IterMut<'gc, 'a, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::IterMut<'a, CompactString, Shared<'gc, Value<'gc, C, S>>>);
+    impl<'gc, C: CustomTypes<S>, S: System<C>> Iterator for IntoIter<'gc, C, S> { type Item = (CompactString, Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
+    impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> Iterator for Iter<'gc, 'a, C, S> { type Item = (&'a CompactString, &'a Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
+    impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> Iterator for IterMut<'gc, 'a, C, S> { type Item = (&'a CompactString, &'a mut Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
 }
 
 /// A collection of symbol tables with hierarchical context searching.
@@ -1328,9 +1350,9 @@ pub struct GlobalContext<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub settings: Settings,
     #[collect(require_static)] pub system: Rc<S>,
     #[collect(require_static)] pub timer_start: u64,
-    #[collect(require_static)] pub proj_name: String,
+    #[collect(require_static)] pub proj_name: CompactString,
                                pub globals: SymbolTable<'gc, C, S>,
-                               pub entities: Vec<(String, Gc<'gc, RefLock<Entity<'gc, C, S>>>)>,
+                               pub entities: Vec<(CompactString, Gc<'gc, RefLock<Entity<'gc, C, S>>>)>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
     pub fn from_init(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
@@ -1431,14 +1453,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
 
 pub enum OutgoingMessage {
     Normal {
-        msg_type: String,
-        values: Vec<(String, Json)>,
-        targets: Vec<String>,
+        msg_type: CompactString,
+        values: Vec<(CompactString, Json)>,
+        targets: Vec<CompactString>,
     },
     Blocking {
-        msg_type: String,
-        values: Vec<(String, Json)>,
-        targets: Vec<String>,
+        msg_type: CompactString,
+        values: Vec<(CompactString, Json)>,
+        targets: Vec<CompactString>,
         reply_key: ExternReplyKey,
     },
     Reply {
@@ -1447,8 +1469,8 @@ pub enum OutgoingMessage {
     },
 }
 pub struct IncomingMessage {
-    pub msg_type: String,
-    pub values: Vec<(String, SimpleValue)>,
+    pub msg_type: CompactString,
+    pub values: Vec<(CompactString, SimpleValue)>,
     pub reply_key: Option<InternReplyKey>,
 }
 
@@ -1526,9 +1548,9 @@ pub enum Feature {
     Print,
 
     /// The ability of a process to perform a syscall of the given name.
-    Syscall { name: String },
+    Syscall { name: CompactString },
     /// The ability of a process to perform an RPC call.
-    Rpc { service: String, rpc: String },
+    Rpc { service: CompactString, rpc: CompactString },
 
     /// The ability of an entity to get a certain property.
     GetProperty { prop: Property },
@@ -1559,7 +1581,7 @@ pub enum Feature {
     Forward,
 
     /// The ability of an entity to execute a specific block that was not built in to the ast parser or bytecode compiler (e.g., extension blocks).
-    UnknownBlock { name: String },
+    UnknownBlock { name: CompactString },
 }
 
 /// A value-returning request issued from the runtime.
@@ -1567,14 +1589,14 @@ pub enum Request<'gc, C: CustomTypes<S>, S: System<C>> {
     /// Request input from the user. The `prompt` argument is either [`Some`] prompt to display, or [`None`] for no prompt.
     Input { prompt: Option<Value<'gc, C, S>> },
     /// Performs a system call on the local hardware to access device resources.
-    Syscall { name: String, args: Vec<Value<'gc, C, S>> },
+    Syscall { name: CompactString, args: Vec<Value<'gc, C, S>> },
     /// Requests the system to execute the given RPC.
-    Rpc { service: String, rpc: String, args: Vec<(String, Value<'gc, C, S>)> },
+    Rpc { service: CompactString, rpc: CompactString, args: Vec<(CompactString, Value<'gc, C, S>)> },
     /// Request to get the current value of an entity property.
     Property { prop: Property },
     /// Request to run a block which was not known by the ast parser or bytecode compiler.
     /// This is typically used for implementing extension blocks in the VM, which cannot be handled otherwise.
-    UnknownBlock { name: String, args: Vec<Value<'gc, C, S>> },
+    UnknownBlock { name: CompactString, args: Vec<Value<'gc, C, S>> },
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> Request<'gc, C, S> {
     /// Gets the [`Feature`] associated with this request.
@@ -1772,13 +1794,13 @@ pub enum Precision {
 /// A key type used to await a reply message from an external source.
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
 pub struct ExternReplyKey {
-    pub request_id: String,
+    pub request_id: CompactString,
 }
 /// A key type required for this client to send a reply message.
 #[derive(Debug, Clone)]
 pub struct InternReplyKey {
-    pub src_id: String,
-    pub request_id: String,
+    pub src_id: CompactString,
+    pub request_id: CompactString,
 }
 
 /// Represents all the features of an implementing system.
@@ -1789,9 +1811,9 @@ pub struct InternReplyKey {
 /// This can be accomplished by returning the [`ErrorCause::NotSupported`] variant for the relevant [`Feature`].
 pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Key type used to await the result of an asynchronous request.
-    type RequestKey: 'static + Key<Result<C::Intermediate, String>>;
+    type RequestKey: 'static + Key<Result<C::Intermediate, CompactString>>;
     /// Key type used to await the completion of an asynchronous command.
-    type CommandKey: 'static + Key<Result<(), String>>;
+    type CommandKey: 'static + Key<Result<(), CompactString>>;
 
     /// Gets a random value sampled from the given `range`, which is assumed to be non-empty.
     /// The input for this generic function is such that it is compatible with [`rand::Rng::gen_range`],
@@ -1807,7 +1829,7 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     fn perform_request<'gc>(&self, mc: &Mutation<'gc>, request: Request<'gc, C, Self>, proc: &mut Process<'gc, C, Self>) -> Result<Self::RequestKey, ErrorCause<C, Self>>;
     /// Poll for the completion of an asynchronous request.
     /// The [`Entity`] that made the request is provided for context.
-    fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, String>>, ErrorCause<C, Self>>;
+    fn poll_request<'gc>(&self, mc: &Mutation<'gc>, key: &Self::RequestKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<Value<'gc, C, Self>, CompactString>>, ErrorCause<C, Self>>;
 
     /// Performs a general command which does not return a value to the system.
     /// Ideally, this function should be non-blocking, and the commander will await the task's completion asynchronously.
@@ -1815,12 +1837,12 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     fn perform_command<'gc>(&self, mc: &Mutation<'gc>, command: Command<'gc, '_, C, Self>, proc: &mut Process<'gc, C, Self>) -> Result<Self::CommandKey, ErrorCause<C, Self>>;
     /// Poll for the completion of an asynchronous command.
     /// The [`Entity`] that issued the command is provided for context.
-    fn poll_command<'gc>(&self, mc: &Mutation<'gc>, key: &Self::CommandKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<(), String>>, ErrorCause<C, Self>>;
+    fn poll_command<'gc>(&self, mc: &Mutation<'gc>, key: &Self::CommandKey, proc: &mut Process<'gc, C, Self>) -> Result<AsyncResult<Result<(), CompactString>>, ErrorCause<C, Self>>;
 
     /// Sends a message containing a set of named `values` to each of the specified `targets`.
     /// The `expect_reply` value controls whether or not to use a reply mechanism to asynchronously receive a response from the target(s).
     /// In the case that there are multiple targets, only the first reply (if any) should be used.
-    fn send_message(&self, msg_type: String, values: Vec<(String, Json)>, targets: Vec<String>, expect_reply: bool) -> Result<Option<ExternReplyKey>, ErrorCause<C, Self>>;
+    fn send_message(&self, msg_type: CompactString, values: Vec<(CompactString, Json)>, targets: Vec<CompactString>, expect_reply: bool) -> Result<Option<ExternReplyKey>, ErrorCause<C, Self>>;
     /// Polls for a response from a client initiated by [`System::send_message`].
     /// If the client responds, a value of [`Some(x)`] is returned.
     /// The system may elect to impose a timeout for reply results, in which case [`None`] is returned instead.

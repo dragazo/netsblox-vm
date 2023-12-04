@@ -3,8 +3,7 @@
 //! To generate bytecode from a project, you can use [`ByteCode::compile`].
 
 use alloc::collections::{BTreeMap, VecDeque};
-use alloc::string::{String, ToString};
-use alloc::borrow::ToOwned;
+use alloc::string::ToString;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use alloc::rc::Rc;
@@ -17,6 +16,7 @@ use serde::{Serialize, Deserialize};
 use monostate::MustBeU128;
 use num_traits::FromPrimitive;
 use bin_pool::BinPool;
+use compact_str::CompactString;
 
 use crate::*;
 use crate::meta::*;
@@ -43,7 +43,7 @@ pub enum CompileError<'a> {
     InvalidLocation { loc: &'a str },
     BadNumber { error: NumberError },
     UndefinedRef { value: &'a ast::Value },
-    CurrentlyUnsupported { info: String },
+    CurrentlyUnsupported { info: CompactString },
     InvalidBlock { loc: Option<&'a str> },
 }
 impl From<NumberError> for CompileError<'_> { fn from(error: NumberError) -> Self { Self::BadNumber { error } } }
@@ -1080,14 +1080,14 @@ pub(crate) enum RefValue {
     List(Vec<InitValue>),
     Image(Vec<u8>, Option<(Number, Number)>),
     Audio(Vec<u8>),
-    String(String),
+    String(CompactString),
 }
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct EntityInitInfo {
-    pub(crate) name: String,
-    pub(crate) fields: Vec<(String, InitValue)>,
-    pub(crate) costumes: Vec<(String, InitValue)>,
-    pub(crate) sounds: Vec<(String, InitValue)>,
+    pub(crate) name: CompactString,
+    pub(crate) fields: Vec<(CompactString, InitValue)>,
+    pub(crate) costumes: Vec<(CompactString, InitValue)>,
+    pub(crate) sounds: Vec<(CompactString, InitValue)>,
     pub(crate) scripts: Vec<(Event, usize)>,
 
     pub(crate) visible: bool,
@@ -1109,9 +1109,9 @@ pub(crate) struct EntityInitInfo {
 pub struct InitInfo {
     #[allow(dead_code)] tag: MustBeU128<FINGERPRINT>,
 
-    pub(crate) proj_name: String,
+    pub(crate) proj_name: CompactString,
     pub(crate) ref_values: Vec<RefValue>,
-    pub(crate) globals: Vec<(String, InitValue)>,
+    pub(crate) globals: Vec<(CompactString, InitValue)>,
     pub(crate) entities: Vec<EntityInitInfo>,
 }
 
@@ -1182,9 +1182,9 @@ fn test_locations_tokenizer() {
 pub struct Locations {
     #[allow(dead_code)] tag: MustBeU128<FINGERPRINT>,
 
-    prefix: String,
-    separator: String,
-    suffix: String,
+    prefix: CompactString,
+    separator: CompactString,
+    suffix: CompactString,
 
     base_token: isize,
     value_data: Vec<u8>,
@@ -1196,9 +1196,9 @@ impl Locations {
             return Ok(Self {
                 tag: Default::default(),
 
-                prefix: String::new(),
-                separator: String::new(),
-                suffix: String::new(),
+                prefix: CompactString::default(),
+                separator: CompactString::default(),
+                suffix: CompactString::default(),
 
                 base_token: 0,
                 value_data: Default::default(),
@@ -1208,8 +1208,8 @@ impl Locations {
 
         let (prefix, suffix) = {
             let mut tokens = LocationTokenizer::new(*orig_locs.values().next().unwrap()).enumerate();
-            let prefix = tokens.next().map(|x| x.1.to_owned()).unwrap_or_default();
-            let suffix = tokens.last().filter(|x| x.0 & 1 == 0).map(|x| x.1.to_owned()).unwrap_or_default();
+            let prefix = tokens.next().map(|x| CompactString::new(x.1)).unwrap_or_default();
+            let suffix = tokens.last().filter(|x| x.0 & 1 == 0).map(|x| CompactString::new(x.1)).unwrap_or_default();
             (prefix, suffix)
         };
         let mut separator = None;
@@ -1242,10 +1242,10 @@ impl Locations {
                             }
                         } else {
                             match &separator {
-                                Some(separator) => if token != separator {
+                                Some(separator) => if token != *separator {
                                     return Err(CompileError::InvalidLocation { loc });
                                 }
-                                None => separator = Some(token.to_owned()),
+                                None => separator = Some(CompactString::new(token)),
                             }
                         }
                     }
@@ -1293,7 +1293,7 @@ impl Locations {
     ///
     /// Note that it is possible for blocks to not have location information,
     /// hence returning the most local location that was provided in the ast.
-    pub fn lookup(&self, bytecode_pos: usize) -> Option<String> {
+    pub fn lookup(&self, bytecode_pos: usize) -> Option<CompactString> {
         let mut start = {
             let p = self.locs.partition_point(|x| x.0 <= bytecode_pos);
             debug_assert!(p <= self.locs.len());
@@ -1376,7 +1376,7 @@ struct ByteCodeBuilder<'a: 'b, 'b> {
     call_holes: Vec<(usize, &'a ast::FnRef, Option<&'a ast::Entity>)>, // (hole pos, function, entity)
     closure_holes: VecDeque<(usize, &'a [ast::VariableDef], &'a [ast::VariableRef], &'a [ast::Stmt], Option<&'a ast::Entity>)>, // (hole pos, params, captures, stmts, entity)
     ins_locations: BTreeMap<usize, &'a str>,
-    string_arena: &'b typed_arena::Arena<String>,
+    string_arena: &'b typed_arena::Arena<CompactString>,
 }
 impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
     fn append_simple_ins(&mut self, entity: Option<&'a ast::Entity>, values: &[&'a ast::Expr], op: Instruction<'a>) -> Result<(), CompileError<'a>> {

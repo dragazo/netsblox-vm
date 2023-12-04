@@ -1,15 +1,16 @@
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use base64::engine::Engine as Base64Engine;
 use base64::DecodeError as Base64DecodeError;
 
+use compact_str::CompactString;
+
 pub struct LosslessJoin {
-    content: String,
+    content: CompactString,
 }
 impl LosslessJoin {
     pub fn new() -> Self {
-        Self { content: String::new() }
+        Self { content: CompactString::default() }
     }
     pub fn push(&mut self, val: &str) {
         assert!(val.as_bytes().iter().all(|&x| x != 0));
@@ -17,7 +18,7 @@ impl LosslessJoin {
         self.content.push('\0');
         self.content.push_str(val);
     }
-    pub fn finish(self) -> String {
+    pub fn finish(self) -> CompactString {
         self.content
     }
 }
@@ -50,8 +51,8 @@ fn test_lossless_split() {
     assert_round_trip(&["", "test", "", "merp", ""], "\0\0test\0\0merp\0");
 }
 
-pub fn base64_encode(content: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(content)
+pub fn base64_encode(content: &[u8]) -> CompactString {
+    base64::engine::general_purpose::STANDARD.encode(content).into()
 }
 pub fn base64_decode(content: &str) -> Result<Vec<u8>, Base64DecodeError> {
     base64::engine::general_purpose::STANDARD.decode(content)
