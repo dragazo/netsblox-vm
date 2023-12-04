@@ -3,29 +3,30 @@
 //! Note that this module is only available with the [`std`](crate) feature flag.
 
 use std::sync::{Arc, Mutex};
-use std::string::String;
-use std::vec::Vec;
 
 use crate::real_time::*;
 use crate::runtime::*;
 use crate::json::*;
+use crate::vecmap::VecMap;
 use crate::*;
 
-pub struct NetsBloxContext {
-    pub base_url: String,
-    pub client_id: String,
-    pub services_url: String,
+use compact_str::CompactString;
 
-    pub project_name: String,
-    pub project_id: String,
-    pub role_name: String,
-    pub role_id: String,
+pub struct NetsBloxContext {
+    pub base_url: CompactString,
+    pub client_id: CompactString,
+    pub services_url: CompactString,
+
+    pub project_name: CompactString,
+    pub project_id: CompactString,
+    pub role_name: CompactString,
+    pub role_id: CompactString,
 }
 pub struct RpcRequest<C: CustomTypes<S>, S: System<C>> {
-    pub service: String,
-    pub rpc: String,
-    pub args: Vec<(String, Json)>,
-    pub key: AsyncKey<Result<C::Intermediate, String>>,
+    pub service: CompactString,
+    pub rpc: CompactString,
+    pub args: VecMap<CompactString, Json, false>,
+    pub key: AsyncKey<Result<C::Intermediate, CompactString>>,
 }
 pub struct ReplyEntry {
     pub expiry: OffsetDateTime,

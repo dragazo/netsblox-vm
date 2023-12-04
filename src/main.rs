@@ -10,6 +10,7 @@ use netsblox_vm::template::SyscallMenu;
 use netsblox_vm::runtime::{GetType, Value, Type, EntityKind, Request, RequestStatus, Config, CustomTypes, Key, SimpleValue, ProcessKind};
 use netsblox_vm::std_system::StdSystem;
 use netsblox_vm::gc::Mutation;
+use netsblox_vm::compact_str::format_compact;
 use clap::Parser;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,12 +106,12 @@ fn main() {
                             [path, mode] => match (path.as_string(), mode.as_string()) {
                                 (Ok(path), Ok(mode)) => (path, mode),
                                 _ => {
-                                    key.complete(Err(format!("syscall open - expected 2 string args, received {:?} and {:?}", path.get_type(), mode.get_type())));
+                                    key.complete(Err(format_compact!("syscall open - expected 2 string args, received {:?} and {:?}", path.get_type(), mode.get_type())));
                                     return RequestStatus::Handled;
                                 }
                             }
                             _ => {
-                                key.complete(Err(format!("syscall open - expected 2 args, received {}", args.len())));
+                                key.complete(Err(format_compact!("syscall open - expected 2 args, received {}", args.len())));
                                 return RequestStatus::Handled;
                             }
                         };
@@ -121,7 +122,7 @@ fn main() {
                             "w" => { opts.write(true).create(true).truncate(true); }
                             "a" => { opts.write(true).create(true).append(true); }
                             x => {
-                                key.complete(Err(format!("syscall open - unknown mode '{x}' expected 'r', 'w', or 'a'")));
+                                key.complete(Err(format_compact!("syscall open - unknown mode '{x}' expected 'r', 'w', or 'a'")));
                                 return RequestStatus::Handled;
                             }
                         }
@@ -129,7 +130,7 @@ fn main() {
                         let file = match opts.open(path.as_ref()) {
                             Ok(x) => x,
                             Err(e) => {
-                                key.complete(Err(format!("syscall open - file open error: {e:?}")));
+                                key.complete(Err(format_compact!("syscall open - file open error: {e:?}")));
                                 return RequestStatus::Handled;
                             }
                         };
@@ -154,12 +155,12 @@ fn main() {
                                 RequestStatus::Handled
                             }
                             _ => {
-                                key.complete(Err(format!("syscall readLine - expected type {:?} or {:?}, received type {:?}", NativeType::InputFile, NativeType::OutputFile, file.get_type())));
+                                key.complete(Err(format_compact!("syscall readLine - expected type {:?} or {:?}, received type {:?}", NativeType::InputFile, NativeType::OutputFile, file.get_type())));
                                 RequestStatus::Handled
                             }
                         }
                         _ => {
-                            key.complete(Err(format!("syscall close - expected 1 arg, received {}", args.len())));
+                            key.complete(Err(format_compact!("syscall close - expected 1 arg, received {}", args.len())));
                             RequestStatus::Handled
                         }
                     }
@@ -170,11 +171,11 @@ fn main() {
                                     Some(handle) => {
                                         let mut res = String::new();
                                         if let Err(e) = handle.read_line(&mut res) {
-                                            key.complete(Err(format!("syscall readLine - read error: {e:?}")));
+                                            key.complete(Err(format_compact!("syscall readLine - read error: {e:?}")));
                                             return RequestStatus::Handled;
                                         }
 
-                                        key.complete(Ok(SimpleValue::String(res).into()));
+                                        key.complete(Ok(SimpleValue::String(res.into()).into()));
                                         RequestStatus::Handled
                                     }
                                     None => {
@@ -183,17 +184,17 @@ fn main() {
                                     }
                                 }
                                 _ => {
-                                    key.complete(Err(format!("syscall readLine - expected type {:?}, received type {:?}", NativeType::InputFile, file.get_type())));
+                                    key.complete(Err(format_compact!("syscall readLine - expected type {:?}, received type {:?}", NativeType::InputFile, file.get_type())));
                                     RequestStatus::Handled
                                 }
                             }
                             _ => {
-                                key.complete(Err(format!("syscall readLine - expected type {:?}, received type {:?}", NativeType::InputFile, file.get_type())));
+                                key.complete(Err(format_compact!("syscall readLine - expected type {:?}, received type {:?}", NativeType::InputFile, file.get_type())));
                                 RequestStatus::Handled
                             }
                         }
                         _ => {
-                            key.complete(Err(format!("syscall readLine - expected 1 arg, received {}", args.len())));
+                            key.complete(Err(format_compact!("syscall readLine - expected 1 arg, received {}", args.len())));
                             RequestStatus::Handled
                         }
                     }
@@ -207,7 +208,7 @@ fn main() {
                                             RequestStatus::Handled
                                         }
                                         Err(e) => {
-                                            key.complete(Err(format!("syscall writeLine - write error: {e:?}")));
+                                            key.complete(Err(format_compact!("syscall writeLine - write error: {e:?}")));
                                             RequestStatus::Handled
                                         }
                                     }
@@ -217,17 +218,17 @@ fn main() {
                                     }
                                 }
                                 _ => {
-                                    key.complete(Err(format!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::String, file.get_type(), Type::<C, StdSystem<C>>::String)));
+                                    key.complete(Err(format_compact!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::String, file.get_type(), Type::<C, StdSystem<C>>::String)));
                                     RequestStatus::Handled
                                 }
                             }
                             _ => {
-                                key.complete(Err(format!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::String, file.get_type(), content.get_type())));
+                                key.complete(Err(format_compact!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::String, file.get_type(), content.get_type())));
                                 RequestStatus::Handled
                             }
                         }
                         _ => {
-                            key.complete(Err(format!("syscall writeLine - expected 2 args, received {}", args.len())));
+                            key.complete(Err(format_compact!("syscall writeLine - expected 2 args, received {}", args.len())));
                             RequestStatus::Handled
                         }
                     }

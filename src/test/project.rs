@@ -10,6 +10,7 @@ use crate::real_time::*;
 use crate::bytecode::*;
 use crate::project::*;
 use crate::std_system::*;
+use crate::compact_str::CompactString;
 
 use super::*;
 
@@ -59,7 +60,7 @@ fn run_till_term<'gc>(mc: &Mutation<'gc>, proj: &mut Project<'gc, C, StdSystem<C
 
 #[test]
 fn test_proj_counting() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/counting.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -76,7 +77,7 @@ fn test_proj_counting() {
 
 #[test]
 fn test_proj_effects() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/effects.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -99,7 +100,7 @@ fn test_proj_effects() {
 
 #[test]
 fn test_proj_size_visible() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/size-visible.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -126,7 +127,7 @@ fn test_proj_size_visible() {
 
 #[test]
 fn test_proj_motion() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/motion.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -167,7 +168,7 @@ fn test_proj_motion() {
 
 #[test]
 fn test_proj_pen_basic() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/pen-basic.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -223,7 +224,7 @@ fn test_proj_pen_basic() {
 
 #[test]
 fn test_proj_watchers() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/watchers.xml"), system);
     proj.mutate(|mc, proj| {
         let events = run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -249,7 +250,7 @@ fn test_proj_watchers() {
 
 #[test]
 fn test_proj_stop_current() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/stop-current.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -282,7 +283,7 @@ fn test_proj_stop_current() {
 
 #[test]
 fn test_proj_stop_all() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/stop-all.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -309,7 +310,7 @@ fn test_proj_stop_all() {
 
 #[test]
 fn test_proj_stop_others() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/stop-others.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -344,7 +345,7 @@ fn test_proj_stop_others() {
 
 #[test]
 fn test_proj_stop_my_others() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/stop-my-others.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -395,7 +396,7 @@ fn test_proj_stop_my_others() {
 
 #[test]
 fn test_proj_stop_my_others_context() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/stop-my-others-context.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -434,7 +435,7 @@ fn test_proj_stop_my_others_context() {
 
 #[test]
 fn test_proj_delete_clone() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/delete-clone.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -494,7 +495,7 @@ fn test_proj_costumes() {
             _ => CommandStatus::UseDefault { key, command },
         })),
     };
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/costumes.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -657,7 +658,7 @@ fn test_proj_costumes() {
 
 #[test]
 fn test_proj_broadcast() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/broadcast.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -680,7 +681,7 @@ fn test_proj_broadcast() {
 
 #[test]
 fn test_proj_delayed_capture_upvar() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/delayed-capture-upvar.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -731,7 +732,7 @@ fn test_proj_delayed_capture_upvar() {
 
 #[test]
 fn test_proj_broadcast_to() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/broadcast-to.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -756,7 +757,7 @@ fn test_proj_broadcast_to() {
 
 #[test]
 fn test_proj_messaging() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/messaging.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -781,7 +782,7 @@ fn test_proj_messaging() {
 
 #[test]
 fn test_proj_any_msg() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/any-msg.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -826,7 +827,7 @@ fn test_proj_any_msg() {
 
 #[test]
 fn test_proj_launch() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/launch.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -864,7 +865,7 @@ fn test_proj_launch() {
 
 #[test]
 fn test_proj_cloning() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/cloning.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -880,7 +881,7 @@ fn test_proj_cloning() {
 
 #[test]
 fn test_proj_pause() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/pause.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -894,7 +895,7 @@ fn test_proj_pause() {
 
 #[test]
 fn test_proj_loop_yields() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/loop-yields.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -912,7 +913,7 @@ fn test_proj_loop_yields() {
 
 #[test]
 fn test_proj_run_call_ask_tell() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/run-call-ask-tell.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -937,7 +938,7 @@ fn test_proj_run_call_ask_tell() {
 
 #[test]
 fn test_proj_custom_events() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, default_properties_config(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/custom-events.xml"), system);
     proj.mutate(|mc, proj| {
         let mut proj = proj.proj.borrow_mut(mc);
@@ -970,7 +971,7 @@ fn test_proj_custom_events() {
 
 #[test]
 fn test_proj_parallel_rpcs() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/parallel-rpcs.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -1012,7 +1013,7 @@ fn test_proj_parallel_rpcs() {
 
 #[test]
 fn test_proj_wait_until() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/wait-until.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
@@ -1026,7 +1027,7 @@ fn test_proj_wait_until() {
 
 #[test]
 fn test_proj_nested_lists_consts() {
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let proj = get_running_project(include_str!("projects/nested-lists-consts.xml"), system);
     proj.mutate(|mc, proj| {
         run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();

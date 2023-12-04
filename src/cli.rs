@@ -35,6 +35,8 @@ use crossterm::event::{self, Event, KeyCode as RawKeyCode, KeyModifiers as RawKe
 use crossterm::terminal::{self, ClearType};
 use crossterm::style::{ResetColor, SetForegroundColor, Color, Print};
 
+use compact_str::{CompactString, format_compact};
+
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
@@ -97,32 +99,32 @@ pub enum Mode {
     /// Compiles and runs a single project file
     Run {
         /// Path to the (xml) project file
-        src: String,
+        src: CompactString,
         /// The specific role to run, or none if not ambiguous
         #[clap(long)]
-        role: Option<String>,
+        role: Option<CompactString>,
 
         /// Address of the NetsBlox server
-        #[clap(long, default_value_t = String::from(DEFAULT_BASE_URL))]
-        server: String,
+        #[clap(long, default_value_t = CompactString::from(DEFAULT_BASE_URL))]
+        server: CompactString,
     },
     /// Compiles a single project file and dumps its disassembly to stdout
     Dump {
         /// Path to the (xml) project file
-        src: String,
+        src: CompactString,
         /// The specific role to compile, or none if not ambiguous
         #[clap(long)]
-        role: Option<String>,
+        role: Option<CompactString>,
     },
     /// Starts an execution server which you can connect to from the browser
     Start {
         /// Address of the NetsBlox server
-        #[clap(long, default_value_t = String::from(DEFAULT_BASE_URL))]
-        server: String,
+        #[clap(long, default_value_t = CompactString::from(DEFAULT_BASE_URL))]
+        server: CompactString,
 
         /// The address of this machine, which others use to send HTTP requests
-        #[clap(long, default_value_t = String::from("127.0.0.1"))]
-        addr: String,
+        #[clap(long, default_value_t = CompactString::from("127.0.0.1"))]
+        addr: CompactString,
         /// The port to bind for the web server
         #[clap(long, default_value_t = 6286)]
         port: u16,
@@ -153,7 +155,7 @@ fn read_file(src: &str) -> io::Result<String> {
     file.read_to_string(&mut s)?;
     Ok(s)
 }
-fn open_project<'a>(content: &str, role: Option<&'a str>) -> Result<(String, ast::Role), OpenProjectError<'a>> {
+fn open_project<'a>(content: &str, role: Option<&'a str>) -> Result<(CompactString, ast::Role), OpenProjectError<'a>> {
     let parsed = match ast::Parser::default().parse(content) {
         Ok(x) => x,
         Err(error) => return Err(OpenProjectError::ParseError { error }),
@@ -172,7 +174,7 @@ fn open_project<'a>(content: &str, role: Option<&'a str>) -> Result<(String, ast
     Ok((parsed.name, role))
 }
 
-fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C, StdSystem<C>>, clock: Arc<Clock>) {
+fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: CompactString, role: &ast::Role, overrides: Config<C, StdSystem<C>>, clock: Arc<Clock>) {
     terminal::enable_raw_mode().unwrap();
     execute!(stdout(), cursor::Hide).unwrap();
     let _tty_mode_guard = AtExit::new(|| {
@@ -189,7 +191,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
     let update_flag = Rc::new(Cell::new(false));
     let input_queries = Rc::new(RefCell::new(VecDeque::new()));
     let mut term_size = terminal::size().unwrap();
-    let mut input_value = String::new();
+    let mut input_value = CompactString::default();
 
     let config = overrides.fallback(&Config {
         command: {
@@ -306,7 +308,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String
 
     execute!(stdout(), terminal::Clear(ClearType::CurrentLine)).unwrap();
 }
-fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: String, role: &ast::Role, overrides: Config<C, StdSystem<C>>, clock: Arc<Clock>) {
+fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: CompactString, role: &ast::Role, overrides: Config<C, StdSystem<C>>, clock: Arc<Clock>) {
     let config = overrides.fallback(&Config {
         request: None,
         command: Some(Rc::new(move |_, key, command, proc| match command {
@@ -351,7 +353,7 @@ fn run_proj_non_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: St
         }
     }
 }
-fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, port: u16, overrides: Config<C, StdSystem<C>>, clock: Arc<Clock>, syscalls: &[SyscallMenu]) {
+fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: CompactString, addr: CompactString, port: u16, overrides: Config<C, StdSystem<C>>, clock: Arc<Clock>, syscalls: &[SyscallMenu]) {
     println!(r#"connect from {DEFAULT_EDITOR_URL}/?extensions=["http://{addr}:{port}/extension.js"]"#);
 
     let extension = ExtensionArgs {
@@ -508,7 +510,7 @@ fn run_server<C: CustomTypes<StdSystem<C>>>(nb_server: String, addr: String, por
                         Err(e) => match e {
                             OpenProjectError::ParseError { error } if error.location.collab_id.is_some() => {
                                 let mut state = weak_state.upgrade().unwrap();
-                                let cause = format!("{:?}", error.kind);
+                                let cause = format_compact!("{:?}", error.kind);
                                 state.errors.lock().unwrap().push(ErrorSummary {
                                     cause: cause.clone(),
                                     entity: error.location.entity.unwrap_or_default(),

@@ -10,12 +10,11 @@ use alloc::rc::Rc;
 use alloc::vec::Vec;
 use alloc::string::ToString;
 use alloc::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
-use alloc::borrow::ToOwned;
 
 use core::iter::{self, Cycle};
 use core::cmp::Ordering;
 
-use compact_str::CompactString;
+use compact_str::{CompactString, format_compact, ToCompactString};
 
 use unicase::UniCase;
 
@@ -71,12 +70,12 @@ impl ErrorSummary {
     pub fn extract<C: CustomTypes<S>, S: System<C>>(error: &ExecError<C, S>, process: &Process<C, S>, locations: &Locations) -> Self {
         let raw_entity = process.call_stack.last().unwrap().entity;
         let entity = raw_entity.borrow().name.as_ref().clone();
-        let cause = format!("{:?}", error.cause).into();
+        let cause = format_compact!("{:?}", error.cause);
 
         fn summarize_symbols<C: CustomTypes<S>, S: System<C>>(symbols: &SymbolTable<'_, C, S>) -> Vec<VarEntry> {
             let mut res = Vec::with_capacity(symbols.len());
-            for (k, v) in symbols {
-                res.push(VarEntry { name: k.clone(), value: format!("{:?}", &*v.get()).into() });
+            for (k, v) in symbols.iter() {
+                res.push(VarEntry { name: k.clone(), value: format_compact!("{:?}", &*v.get()) });
             }
             res
         }
@@ -282,7 +281,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 let msg = match &err.cause {
                     ErrorCause::Custom { msg } => msg.clone(),
-                    x => format!("{x:?}").into(),
+                    x => format_compact!("{x:?}"),
                 };
                 self.call_stack.last_mut().unwrap().locals.define_or_redefine(var, Shared::Unique(Value::String(Rc::new(msg))));
                 self.pos = *pos;
@@ -478,9 +477,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(lookup_var!(var).get().clone());
                 self.pos = aft_pos;
             }
-            Instruction::PushEntity { name } => match global_context.entities.iter().find(|&x| x.0 == name) {
+            Instruction::PushEntity { name } => match global_context.entities.get(name).copied() {
                 Some(x) => {
-                    self.value_stack.push(Value::Entity(x.1));
+                    self.value_stack.push(Value::Entity(x));
                     self.pos = aft_pos;
                 }
                 None => return Err(ErrorCause::UndefinedEntity { name: name.into() }),
@@ -807,7 +806,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     VariadicOp::Min => |_, _, values| combine_by_relation(values, Relation::Less),
                     VariadicOp::Max => |_, _, values| combine_by_relation(values, Relation::Greater),
                     VariadicOp::StrCat => |_, _, values| {
-                        let mut acc = String::new();
+                        let mut acc = CompactString::default();
                         for item in values {
                             core::fmt::write(&mut acc, format_args!("{item}")).unwrap();
                         }
@@ -893,7 +892,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::Watcher { create, var } => {
                 let watcher = Watcher {
                     entity: Gc::downgrade(self.call_stack.last().unwrap().entity),
-                    name: var.to_owned(),
+                    name: CompactString::new(var),
                     value: Gc::downgrade(lookup_var!(mut var).alias_inner(mc)),
                 };
                 self.pos = aft_pos;
@@ -937,7 +936,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::MakeClosure { pos, params, tokens } => {
                 let mut tokens = lossless_split(tokens);
-                let params = (&mut tokens).take(params).map(ToOwned::to_owned).collect::<Vec<_>>();
+                let params = (&mut tokens).take(params).map(CompactString::new).collect::<Vec<_>>();
                 let captures = tokens.collect::<Vec<_>>();
 
                 let mut caps = SymbolTable::default();
@@ -1004,7 +1003,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             Instruction::PushHandler { pos, var } => {
                 self.handler_stack.push(Handler {
                     pos,
-                    var: var.to_owned(),
+                    var: CompactString::new(var),
                     warp_counter: self.warp_counter,
                     call_stack_size: self.call_stack.len(),
                     value_stack_size: self.value_stack.len(),
@@ -1021,10 +1020,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::CallRpc { tokens } => {
                 let mut tokens = lossless_split(tokens);
-                let service = tokens.next().unwrap().to_owned();
-                let rpc = tokens.next().unwrap().to_owned();
+                let service = CompactString::new(tokens.next().unwrap());
+                let rpc = CompactString::new(tokens.next().unwrap());
 
-                let arg_names = tokens.map(ToOwned::to_owned).collect::<Vec<_>>();
+                let arg_names = tokens.map(CompactString::new).collect::<Vec<_>>();
                 let arg_count = arg_names.len();
                 let args = iter::zip(arg_names, self.value_stack.drain(self.value_stack.len() - arg_count..)).collect();
 
@@ -1149,13 +1148,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let msg_type = tokens.next().unwrap();
 
                 let targets = match self.value_stack.pop().unwrap() {
-                    Value::String(x) => vec![x.as_str().to_owned()],
+                    Value::String(x) => vec![CompactString::new(x.as_str())],
                     Value::List(x) => {
                         let x = x.borrow();
                         let mut res = Vec::with_capacity(x.len());
                         for val in x.iter() {
                             match val {
-                                Value::String(x) => res.push(x.as_str().to_owned()),
+                                Value::String(x) => res.push(CompactString::new(x.as_str())),
                                 x => return Err(ErrorCause::VariadicConversionError { got: x.get_type(), expected: Type::String }),
                             }
                         }
@@ -1165,7 +1164,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 };
 
                 let values = {
-                    let field_names = tokens.map(ToOwned::to_owned).collect::<Vec<_>>();
+                    let field_names = tokens.map(CompactString::new).collect::<Vec<_>>();
                     let field_count = field_names.len();
                     iter::zip(field_names.into_iter(), self.value_stack.drain(self.value_stack.len() - field_count..)).map(|(k, v)| Ok((k, v.to_simple()?.into_netsblox_json()))).collect::<Result<_,ToSimpleError<_,_>>>()?
                 };
@@ -1232,7 +1231,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     Value::Image(x) => Some(x),
                     Value::String(x) => match x.as_str() {
                         "" => None,
-                        x => match entity.costume_list.iter().find(|&c| c.0 == x) {
+                        x => match entity.costume_list.iter().find(|&c| c.0.as_str() == x) {
                             Some(c) => Some(c.1.clone()),
                             None => return Err(ErrorCause::UndefinedCostume { name: x.into() }),
                         }
@@ -1259,7 +1258,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 match entity.costume.as_ref().and_then(|x| entity.costume_list.iter().enumerate().find(|c| Rc::ptr_eq(x, &c.1.1))).map(|x| x.0) {
                     Some(idx) => {
-                        let new_costume = Some(entity.costume_list[(idx + 1) % entity.costume_list.len()].1.clone());
+                        let new_costume = Some(entity.costume_list.as_slice()[(idx + 1) % entity.costume_list.len()].value.clone());
 
                         if new_costume.as_ref().map(Rc::as_ptr) != entity.costume.as_ref().map(Rc::as_ptr) {
                             entity.costume = new_costume;
@@ -1390,7 +1389,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 });
             }
             Instruction::UnknownBlock { name, args } => {
-                let name = name.to_owned();
+                let name = CompactString::new(name);
                 let args = self.value_stack.drain(self.value_stack.len() - args..).collect();
 
                 drop(global_context_raw);
@@ -1568,7 +1567,7 @@ mod ops {
             let mut vector = VecDeque::new();
 
             'next_scalar: loop {
-                let mut scalar = String::new();
+                let mut scalar = CompactString::default();
                 let mut in_quote = false;
 
                 loop {
@@ -1592,20 +1591,20 @@ mod ops {
                     match src.next() {
                         Some('"') if !in_quote => match scalar.is_empty() {
                             true => in_quote = true,
-                            false => return Err(ErrorCause::NotCsv { value: value.to_owned() }),
+                            false => return Err(ErrorCause::NotCsv { value: CompactString::new(value) }),
                         }
                         Some('"') if in_quote => match src.next() {
                             Some('"') => scalar.push('"'),
                             Some(',') => finish!(scalar),
                             Some('\n') => finish!(vector),
                             None => finish!(table),
-                            Some(_) => return Err(ErrorCause::NotCsv { value: value.to_owned() }),
+                            Some(_) => return Err(ErrorCause::NotCsv { value: CompactString::new(value) }),
                         }
                         Some(',') if !in_quote => finish!(scalar),
                         Some('\n') if !in_quote => finish!(vector),
                         Some(x) => scalar.push(x),
                         None => match in_quote {
-                            true => return Err(ErrorCause::NotCsv { value: value.to_owned() }),
+                            true => return Err(ErrorCause::NotCsv { value: CompactString::new(value) }),
                             false => finish!(table),
                         }
                     }
@@ -1613,11 +1612,11 @@ mod ops {
             }
         }
     }
-    pub(super) fn to_csv<C: CustomTypes<S>, S: System<C>>(value: &Value<C, S>) -> Result<String, ErrorCause<C, S>> {
+    pub(super) fn to_csv<C: CustomTypes<S>, S: System<C>>(value: &Value<C, S>) -> Result<CompactString, ErrorCause<C, S>> {
         let value = value.as_list()?;
         let value = value.borrow();
 
-        fn process_scalar(res: &mut String, value: &str) {
+        fn process_scalar(res: &mut CompactString, value: &str) {
             let needs_quotes = value.chars().any(|x| matches!(x, '"' | ',' | '\n'));
 
             if needs_quotes { res.push('"'); }
@@ -1629,14 +1628,14 @@ mod ops {
             }
             if needs_quotes { res.push('"'); }
         }
-        fn process_vector<C: CustomTypes<S>, S: System<C>>(res: &mut String, value: &VecDeque<Value<C, S>>) -> Result<(), ErrorCause<C, S>> {
+        fn process_vector<C: CustomTypes<S>, S: System<C>>(res: &mut CompactString, value: &VecDeque<Value<C, S>>) -> Result<(), ErrorCause<C, S>> {
             for (i, x) in value.iter().enumerate() {
                 if i != 0 { res.push(','); }
                 process_scalar(res, x.as_string()?.as_ref())
             }
             Ok(())
         }
-        fn process_table<C: CustomTypes<S>, S: System<C>>(res: &mut String, value: &VecDeque<Value<C, S>>) -> Result<(), ErrorCause<C, S>> {
+        fn process_table<C: CustomTypes<S>, S: System<C>>(res: &mut CompactString, value: &VecDeque<Value<C, S>>) -> Result<(), ErrorCause<C, S>> {
             for (i, x) in value.iter().enumerate() {
                 if i != 0 { res.push('\n'); }
                 process_vector(res, &*x.as_list()?.borrow())?;
@@ -1644,7 +1643,7 @@ mod ops {
             Ok(())
         }
 
-        let mut res = String::new();
+        let mut res = CompactString::default();
         let table_mode = value.iter().any(|x| matches!(x, Value::List(..)));
         let f = if table_mode { process_table } else { process_vector };
         f(&mut res, &*value)?;
@@ -1710,7 +1709,7 @@ mod ops {
             BinaryOp::StrGet => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
                 let string = b.as_string()?;
                 let index = prep_index(a, string.chars().count())?;
-                Ok(Rc::new(string.chars().nth(index).unwrap().to_string()).into())
+                Ok(Rc::new(string.chars().nth(index).unwrap().to_compact_string()).into())
             }),
 
             BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
@@ -1719,7 +1718,7 @@ mod ops {
             }),
             BinaryOp::SplitBy => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
                 let (text, pattern) = (a.as_string()?, b.as_string()?);
-                Ok(Gc::new(mc, RefLock::new(text.split(pattern.as_ref()).map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(text.split(pattern.as_ref()).map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
             }),
 
             BinaryOp::Range => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
@@ -1798,29 +1797,29 @@ mod ops {
             UnaryOp::StrLen   => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(x.as_string()?.chars().count() as f64)?.into())),
 
             UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| match x.as_string()?.chars().next_back() {
-                Some(ch) => Ok(Rc::new(ch.to_string()).into()),
+                Some(ch) => Ok(Rc::new(ch.to_compact_string()).into()),
                 None => Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }),
             }),
             UnaryOp::StrGetRandom => unary_op_impl(mc, system, x, &mut cache, OpType::Nondeterministic, &|_, system, x| {
                 let x = x.as_string()?;
                 let i = prep_rand_index(system, x.chars().count())?;
-                Ok(Rc::new(x.chars().nth(i).unwrap().to_string()).into())
+                Ok(Rc::new(x.chars().nth(i).unwrap().to_compact_string()).into())
             }),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.chars().map(|x| Rc::new(x.to_string()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.chars().map(|x| Rc::new(x.to_compact_string()).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitWord => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split_whitespace().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split_whitespace().map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitTab => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split('\t').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split('\t').map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitCR => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split('\r').map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split('\r').map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitLF => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.lines().map(|x| Rc::new(x.to_owned()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.lines().map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitCsv => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
                 let value = from_csv(mc, x.as_string()?.as_ref())?;
@@ -1840,7 +1839,7 @@ mod ops {
                 let num = fnum as u32;
                 if num as f64 != fnum { return Err(ErrorCause::InvalidUnicode { value: fnum }) }
                 match char::from_u32(num) {
-                    Some(ch) => Ok(Rc::new(ch.to_string()).into()),
+                    Some(ch) => Ok(Rc::new(ch.to_compact_string()).into()),
                     None => Err(ErrorCause::InvalidUnicode { value: fnum }),
                 }
             }),
@@ -1879,11 +1878,11 @@ mod ops {
             }
             (Value::Number(a), Value::String(b)) => match Value::<C, S>::parse_number(b) {
                 Some(b) => a.cmp(&b).into(),
-                None => UniCase::new(&a.to_string()).cmp(&UniCase::new(b.as_ref())).into(),
+                None => UniCase::new(Value::<C, S>::stringify_number(*a).as_str()).cmp(&UniCase::new(b.as_str())).into(),
             }
             (Value::String(a), Value::Number(b)) => match Value::<C, S>::parse_number(a) {
                 Some(a) => a.cmp(b).into(),
-                None => UniCase::new(a.as_ref()).cmp(&UniCase::new(&b.to_string())).into(),
+                None => UniCase::new(a.as_str()).cmp(&UniCase::new(&Value::<C, S>::stringify_number(*b).as_str())).into(),
             }
             (Value::Number(_), _) | (_, Value::Number(_)) => None,
             (Value::String(_), _) | (_, Value::String(_)) => None,

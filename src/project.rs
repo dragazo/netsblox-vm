@@ -1,6 +1,5 @@
 use alloc::vec::Vec;
 use alloc::boxed::Box;
-use alloc::string::String;
 use alloc::collections::{VecDeque, BTreeMap};
 use alloc::rc::Rc;
 
@@ -10,6 +9,9 @@ use crate::slotmap::*;
 use crate::runtime::*;
 use crate::bytecode::*;
 use crate::process::*;
+use crate::vecmap::VecMap;
+
+use compact_str::CompactString;
 
 new_key! {
     struct ProcessKey;
@@ -69,7 +71,7 @@ pub enum Input {
     /// Trigger the execution of a custom event (hat) block script with the given set of message-style input variables.
     /// The `interrupt` flag can be set to cause any running scripts to stop and wipe their current queues, placing this new execution front and center.
     /// The `max_queue` field controls the maximum size of the context/schedule execution queue; beyond this size, this (and only this) execution will be dropped.
-    CustomEvent { name: String, args: BTreeMap<String, SimpleValue>, interrupt: bool, max_queue: usize },
+    CustomEvent { name: CompactString, args: VecMap<CompactString, SimpleValue, false>, interrupt: bool, max_queue: usize },
 }
 
 /// Result of stepping through the execution of a [`Project`].
@@ -102,7 +104,7 @@ pub struct PartialProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub state: C::ProcessState,
     #[collect(require_static)] pub barrier: Option<Barrier>,
     #[collect(require_static)] pub reply_key: Option<InternReplyKey>,
-    #[collect(require_static)] pub local_message: Option<String>,
+    #[collect(require_static)] pub local_message: Option<CompactString>,
 }
 
 #[derive(Collect)]
@@ -182,7 +184,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
         let mut project = Self::new(Gc::new(mc, RefLock::new(global_context)));
 
         for entity_info in init_info.entities.iter() {
-            let entity = project.state.global_context.borrow().entities.iter().find(|&x| x.0 == entity_info.name).unwrap().1;
+            let entity = *project.state.global_context.borrow().entities.get(&entity_info.name).unwrap();
             for (event, pos) in entity_info.scripts.iter() {
                 project.add_script(*pos, entity, event.clone());
             }
@@ -361,7 +363,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                 ProcessStep::Broadcast { msg_type, barrier, targets } => {
                     for i in 0..self.scripts.len() {
                         if let Event::LocalMessage { msg_type: recv_type } = &self.scripts[i].event.0 {
-                            if recv_type.as_ref().map(|x| *x == *msg_type).unwrap_or(true) {
+                            if recv_type.as_ref().map(|x| *x == msg_type).unwrap_or(true) {
                                 if let Some(targets) = &targets {
                                     if !targets.iter().any(|&target| Gc::ptr_eq(self.scripts[i].entity, target)) {
                                         continue

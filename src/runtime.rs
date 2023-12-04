@@ -1,6 +1,6 @@
 //! Miscellaneous types representing runtime state.
 
-use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
+use alloc::collections::{BTreeSet, VecDeque};
 use alloc::rc::{Rc, Weak};
 use alloc::borrow::ToOwned;
 use alloc::vec::Vec;
@@ -12,7 +12,7 @@ use core::cell::Ref;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
 use checked_float::{FloatChecker, CheckedFloat};
-use compact_str::CompactString;
+use compact_str::{CompactString, format_compact};
 
 #[cfg(feature = "serde")]
 use serde::{Serialize, Deserialize};
@@ -23,6 +23,7 @@ use crate::json::*;
 use crate::real_time::*;
 use crate::bytecode::*;
 use crate::process::*;
+use crate::vecmap::VecMap;
 
 /// Error type used by [`NumberChecker`].
 #[derive(Debug)]
@@ -416,7 +417,7 @@ impl Properties {
                 f(self, x);
                 key.complete(Ok(()));
             }
-            Err(e) => key.complete(Err(format!("{e:?}").into())),
+            Err(e) => key.complete(Err(format_compact!("{e:?}"))),
         }
     }
 
@@ -872,7 +873,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GetType for Value<'gc, C, S> {
     }
 }
 
-enum CompactCow<'a> {
+pub enum CompactCow<'a> {
     Borrowed(&'a str),
     Owned(CompactString),
 }
@@ -882,6 +883,19 @@ impl Deref for CompactCow<'_> {
         match self {
             Self::Borrowed(x) => x,
             Self::Owned(x) => &x,
+        }
+    }
+}
+impl AsRef<str> for CompactCow<'_> {
+    fn as_ref(&self) -> &str {
+        &**self
+    }
+}
+impl CompactCow<'_> {
+    pub fn into_owned(self) -> CompactString {
+        match self {
+            Self::Borrowed(x) => CompactString::new(x),
+            Self::Owned(x) => x,
         }
     }
 }
@@ -1011,7 +1025,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
     }
     pub(crate) fn stringify_number(v: Number) -> CompactString {
         debug_assert!(v.get().is_finite());
-        let res = ryu::Buffer::new().format_finite(v.get());
+        let mut buf = ryu::Buffer::new();
+        let res = buf.format_finite(v.get());
         CompactString::new(res.strip_suffix(".0").unwrap_or(res))
     }
 
@@ -1108,8 +1123,8 @@ pub struct ProcessKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
 #[collect(no_drop, bound = "")]
 pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub name: Rc<CompactString>,
-    #[collect(require_static)] pub sound_list: Rc<Vec<(CompactString, Rc<Audio>)>>,
-    #[collect(require_static)] pub costume_list: Rc<Vec<(CompactString, Rc<Image>)>>,
+    #[collect(require_static)] pub sound_list: Rc<VecMap<CompactString, Rc<Audio>, false>>,
+    #[collect(require_static)] pub costume_list: Rc<VecMap<CompactString, Rc<Image>, false>>,
     #[collect(require_static)] pub costume: Option<Rc<Image>>,
     #[collect(require_static)] pub state: C::EntityState,
                                pub original: Option<Gc<'gc, RefLock<Entity<'gc, C, S>>>>,
@@ -1211,7 +1226,7 @@ impl<'a, T> Deref for SharedRef<'a, T> {
 #[derive(Collect, Educe)]
 #[collect(no_drop, bound = "")]
 #[educe(Default, Debug)]
-pub struct SymbolTable<'gc, C: CustomTypes<S>, S: System<C>>(BTreeMap<StaticCollect<CompactString>, Shared<'gc, Value<'gc, C, S>>>);
+pub struct SymbolTable<'gc, C: CustomTypes<S>, S: System<C>>(VecMap<CompactString, Shared<'gc, Value<'gc, C, S>>, true>);
 impl<'gc, C: CustomTypes<S>, S: System<C>> Clone for SymbolTable<'gc, C, S> {
     /// Creates a shallow (non-aliasing) copy of all variables currently stored in this symbol table.
     fn clone(&self) -> Self {
@@ -1226,7 +1241,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> SymbolTable<'gc, C, S> {
     /// Defines or redefines a value in the symbol table to a new instance of [`Shared<Value>`].
     /// If a variable named `var` already existed and was [`Shared::Aliased`], its value is not modified.
     pub fn define_or_redefine(&mut self, var: &str, value: Shared<'gc, Value<'gc, C, S>>) {
-        self.0.insert(StaticCollect(CompactString::new(var)), value);
+        self.0.insert(CompactString::new(var), value);
     }
     /// Looks up the given variable in the symbol table.
     /// If a variable with the given name does not exist, returns [`None`].
@@ -1246,38 +1261,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> SymbolTable<'gc, C, S> {
         self.0.is_empty()
     }
     /// Iterates over the key value pairs stored in the symbol table.
-    pub fn iter(&self) -> symbol_table::Iter<'gc, '_, C, S> {
-        symbol_table::Iter(self.0.iter())
+    pub fn iter(&self) -> crate::vecmap::Iter<CompactString, Shared<'gc, Value<'gc, C, S>>> {
+        self.0.iter()
     }
     /// Iterates over the key value pairs stored in the symbol table.
-    pub fn iter_mut(&mut self) -> symbol_table::IterMut<'gc, '_, C, S> {
-        symbol_table::IterMut(self.0.iter_mut())
+    pub fn iter_mut(&mut self) -> crate::vecmap::IterMut<CompactString, Shared<'gc, Value<'gc, C, S>>> {
+        self.0.iter_mut()
     }
-}
-impl<'gc, C: CustomTypes<S>, S: System<C>> IntoIterator for SymbolTable<'gc, C, S> {
-    type Item = (CompactString, Shared<'gc, Value<'gc, C, S>>);
-    type IntoIter = symbol_table::IntoIter<'gc, C, S>;
-    fn into_iter(self) -> Self::IntoIter { symbol_table::IntoIter(self.0.into_iter()) }
-}
-impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> IntoIterator for &'a SymbolTable<'gc, C, S> {
-    type Item = <symbol_table::Iter<'gc, 'a, C, S> as Iterator>::Item;
-    type IntoIter = symbol_table::Iter<'gc, 'a, C, S>;
-    fn into_iter(self) -> Self::IntoIter { self.iter() }
-}
-impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> IntoIterator for &'a mut SymbolTable<'gc, C, S> {
-    type Item = <symbol_table::IterMut<'gc, 'a, C, S> as Iterator>::Item;
-    type IntoIter = symbol_table::IterMut<'gc, 'a, C, S>;
-    fn into_iter(self) -> Self::IntoIter { self.iter_mut() }
-}
-pub mod symbol_table {
-    //! Special types for working with a [`SymbolTable`].
-    use super::*;
-    pub struct IntoIter<'gc, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::IntoIter<CompactString, Shared<'gc, Value<'gc, C, S>>>);
-    pub struct Iter<'gc, 'a, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::Iter<'a, CompactString, Shared<'gc, Value<'gc, C, S>>>);
-    pub struct IterMut<'gc, 'a, C: CustomTypes<S>, S: System<C>>(pub(crate) alloc::collections::btree_map::IterMut<'a, CompactString, Shared<'gc, Value<'gc, C, S>>>);
-    impl<'gc, C: CustomTypes<S>, S: System<C>> Iterator for IntoIter<'gc, C, S> { type Item = (CompactString, Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
-    impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> Iterator for Iter<'gc, 'a, C, S> { type Item = (&'a CompactString, &'a Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
-    impl<'gc, 'a, C: CustomTypes<S>, S: System<C>> Iterator for IterMut<'gc, 'a, C, S> { type Item = (&'a CompactString, &'a mut Shared<'gc, Value<'gc, C, S>>); fn next(&mut self) -> Option<Self::Item> { self.0.next() } }
 }
 
 /// A collection of symbol tables with hierarchical context searching.
@@ -1352,7 +1342,7 @@ pub struct GlobalContext<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub timer_start: u64,
     #[collect(require_static)] pub proj_name: CompactString,
                                pub globals: SymbolTable<'gc, C, S>,
-                               pub entities: Vec<(CompactString, Gc<'gc, RefLock<Entity<'gc, C, S>>>)>,
+                               pub entities: VecMap<CompactString, Gc<'gc, RefLock<Entity<'gc, C, S>>>, false>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
     pub fn from_init(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
@@ -1392,7 +1382,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             globals.define_or_redefine(global, Shared::Unique(get_value(value, &allocated_refs)));
         }
 
-        let mut entities = Vec::with_capacity(init_info.entities.len());
+        let mut entities = VecMap::with_capacity(init_info.entities.len());
         for (i, entity_info) in init_info.entities.iter().enumerate() {
             let mut fields = SymbolTable::default();
             for (field, value) in entity_info.fields.iter() {
@@ -1400,30 +1390,30 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             }
 
             let sound_list = {
-                let mut res = Vec::with_capacity(entity_info.sounds.len());
+                let mut res = VecMap::with_capacity(entity_info.sounds.len());
                 for (name, value) in entity_info.sounds.iter() {
                     let sound = match get_value(value, &allocated_refs) {
                         Value::Audio(x) => x.clone(),
                         _ => unreachable!(),
                     };
-                    res.push((name.clone(), sound));
+                    res.insert(name.clone(), sound);
                 }
                 Rc::new(res)
             };
 
             let costume_list = {
-                let mut res = Vec::with_capacity(entity_info.costumes.len());
+                let mut res = VecMap::with_capacity(entity_info.costumes.len());
                 for (name, value) in entity_info.costumes.iter() {
                     let image = match get_value(value, &allocated_refs) {
                         Value::Image(x) => x.clone(),
                         _ => unreachable!(),
                     };
-                    res.push((name.clone(), image));
+                    res.insert(name.clone(), image);
                 }
                 Rc::new(res)
             };
 
-            let costume = entity_info.active_costume.and_then(|x| costume_list.get(x)).map(|x| x.1.clone());
+            let costume = entity_info.active_costume.and_then(|x| costume_list.as_slice().get(x)).map(|x| x.value.clone());
 
             let mut props = Properties::default();
             props.visible = entity_info.visible;
@@ -1441,7 +1431,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             let state = C::EntityState::from(if i == 0 { EntityKind::Stage { props } } else { EntityKind::Sprite { props } });
             let name = Rc::new(entity_info.name.clone());
 
-            entities.push(((*name).clone(), Gc::new(mc, RefLock::new(Entity { original: None, name, fields, sound_list, costume_list, costume, state }))));
+            entities.insert((*name).clone(), Gc::new(mc, RefLock::new(Entity { original: None, name, fields, sound_list, costume_list, costume, state })));
         }
 
         let proj_name = init_info.proj_name.clone();
@@ -1454,12 +1444,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
 pub enum OutgoingMessage {
     Normal {
         msg_type: CompactString,
-        values: Vec<(CompactString, Json)>,
+        values: VecMap<CompactString, Json, false>,
         targets: Vec<CompactString>,
     },
     Blocking {
         msg_type: CompactString,
-        values: Vec<(CompactString, Json)>,
+        values: VecMap<CompactString, Json, false>,
         targets: Vec<CompactString>,
         reply_key: ExternReplyKey,
     },
@@ -1470,7 +1460,7 @@ pub enum OutgoingMessage {
 }
 pub struct IncomingMessage {
     pub msg_type: CompactString,
-    pub values: Vec<(CompactString, SimpleValue)>,
+    pub values: VecMap<CompactString, SimpleValue, false>,
     pub reply_key: Option<InternReplyKey>,
 }
 
@@ -1591,7 +1581,7 @@ pub enum Request<'gc, C: CustomTypes<S>, S: System<C>> {
     /// Performs a system call on the local hardware to access device resources.
     Syscall { name: CompactString, args: Vec<Value<'gc, C, S>> },
     /// Requests the system to execute the given RPC.
-    Rpc { service: CompactString, rpc: CompactString, args: Vec<(CompactString, Value<'gc, C, S>)> },
+    Rpc { service: CompactString, rpc: CompactString, args: VecMap<CompactString, Value<'gc, C, S>, false> },
     /// Request to get the current value of an entity property.
     Property { prop: Property },
     /// Request to run a block which was not known by the ast parser or bytecode compiler.
@@ -1842,7 +1832,7 @@ pub trait System<C: CustomTypes<Self>>: 'static + Sized {
     /// Sends a message containing a set of named `values` to each of the specified `targets`.
     /// The `expect_reply` value controls whether or not to use a reply mechanism to asynchronously receive a response from the target(s).
     /// In the case that there are multiple targets, only the first reply (if any) should be used.
-    fn send_message(&self, msg_type: CompactString, values: Vec<(CompactString, Json)>, targets: Vec<CompactString>, expect_reply: bool) -> Result<Option<ExternReplyKey>, ErrorCause<C, Self>>;
+    fn send_message(&self, msg_type: CompactString, values: VecMap<CompactString, Json, false>, targets: Vec<CompactString>, expect_reply: bool) -> Result<Option<ExternReplyKey>, ErrorCause<C, Self>>;
     /// Polls for a response from a client initiated by [`System::send_message`].
     /// If the client responds, a value of [`Some(x)`] is returned.
     /// The system may elect to impose a timeout for reply results, in which case [`None`] is returned instead.

@@ -22,6 +22,7 @@ use crate::*;
 use crate::meta::*;
 use crate::runtime::{Color, Number, NumberError, Event, KeyCode, Property, PrintStyle, Type, CustomTypes, System};
 use crate::util::LosslessJoin;
+use crate::vecmap::VecMap;
 
 /// Number of bytes to display on each line of a hex dump
 #[cfg(feature = "std")]
@@ -1085,9 +1086,9 @@ pub(crate) enum RefValue {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct EntityInitInfo {
     pub(crate) name: CompactString,
-    pub(crate) fields: Vec<(CompactString, InitValue)>,
-    pub(crate) costumes: Vec<(CompactString, InitValue)>,
-    pub(crate) sounds: Vec<(CompactString, InitValue)>,
+    pub(crate) fields: VecMap<CompactString, InitValue, false>,
+    pub(crate) costumes: VecMap<CompactString, InitValue, false>,
+    pub(crate) sounds: VecMap<CompactString, InitValue, false>,
     pub(crate) scripts: Vec<(Event, usize)>,
 
     pub(crate) visible: bool,
@@ -1111,7 +1112,7 @@ pub struct InitInfo {
 
     pub(crate) proj_name: CompactString,
     pub(crate) ref_values: Vec<RefValue>,
-    pub(crate) globals: Vec<(CompactString, InitValue)>,
+    pub(crate) globals: VecMap<CompactString, InitValue, false>,
     pub(crate) entities: Vec<EntityInitInfo>,
 }
 
@@ -2503,19 +2504,19 @@ impl ByteCode {
         // -------------------------------------------------------------------
 
         let proj_name = role.name.clone();
-        let mut globals = vec![];
+        let mut globals = VecMap::new();
         let mut entities = vec![];
 
         for global in role.globals.iter() {
-            globals.push((global.def.name.clone(), get_value(&global.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?));
+            globals.insert(global.def.name.clone(), get_value(&global.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?);
         }
 
         for (entity, entity_info) in script_info.entities.iter() {
             let name = entity.name.clone();
-            let mut fields = vec![];
+            let mut fields = VecMap::new();
+            let mut costumes = VecMap::new();
+            let mut sounds = VecMap::new();
             let mut scripts = vec![];
-            let mut costumes = vec![];
-            let mut sounds = vec![];
 
             let visible = entity.visible;
             let active_costume = entity.active_costume;
@@ -2525,13 +2526,13 @@ impl ByteCode {
             let heading = Number::new(util::modulus(entity.heading, 360.0))?;
 
             for field in entity.fields.iter() {
-                fields.push((field.def.name.clone(), get_value(&field.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?));
+                fields.insert(field.def.name.clone(), get_value(&field.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?);
             }
             for costume in entity.costumes.iter() {
-                costumes.push((costume.def.name.clone(), get_value(&costume.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?));
+                costumes.insert(costume.def.name.clone(), get_value(&costume.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?);
             }
             for sound in entity.sounds.iter() {
-                sounds.push((sound.def.name.clone(), get_value(&sound.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?));
+                sounds.insert(sound.def.name.clone(), get_value(&sound.init, &mut ref_values, &refs, &mut string_refs, &mut image_refs, &mut audio_refs)?);
             }
 
             for (script, pos) in entity_info.scripts.iter().copied() {

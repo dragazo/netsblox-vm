@@ -32,8 +32,12 @@ pub mod real_time {
 /// The re-exported version of the `netsblox-ast` crate.
 pub use netsblox_ast as ast;
 
+/// The re-exported version of the `compact-str` crate.
+pub use compact_str;
+
 pub mod bytecode;
 pub mod slotmap;
+pub mod vecmap;
 pub mod runtime;
 pub mod process;
 pub mod project;

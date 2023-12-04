@@ -53,6 +53,7 @@
         "upvar",
         "upvars",
         "varargs",
+        "vecmap",
         "xmlparser"
     ]
 }
