@@ -16,13 +16,13 @@ use serde::{Serialize, Deserialize};
 use monostate::MustBeU128;
 use num_traits::FromPrimitive;
 use bin_pool::BinPool;
-use compact_str::CompactString;
 
 use crate::*;
 use crate::meta::*;
 use crate::runtime::{Color, Number, NumberError, Event, KeyCode, Property, PrintStyle, Type, CustomTypes, System};
 use crate::util::LosslessJoin;
 use crate::vecmap::VecMap;
+use crate::compact_str::CompactString;
 
 /// Number of bytes to display on each line of a hex dump
 #[cfg(feature = "std")]

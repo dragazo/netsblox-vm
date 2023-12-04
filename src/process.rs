@@ -14,8 +14,6 @@ use alloc::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDeq
 use core::iter::{self, Cycle};
 use core::cmp::Ordering;
 
-use compact_str::{CompactString, format_compact, ToCompactString};
-
 use unicase::UniCase;
 
 #[cfg(feature = "serde")]
@@ -27,6 +25,7 @@ use crate::json::*;
 use crate::runtime::*;
 use crate::bytecode::*;
 use crate::util::*;
+use crate::compact_str::*;
 
 fn empty_string() -> Rc<CompactString> {
     #[cfg(feature = "std")]
@@ -1872,17 +1871,17 @@ mod ops {
             (Value::Bool(_), _) | (_, Value::Bool(_)) => None,
 
             (Value::Number(a), Value::Number(b)) => a.cmp(b).into(),
-            (Value::String(a), Value::String(b)) => match Value::<C, S>::parse_number(a).and_then(|a| Value::<C, S>::parse_number(b).map(|b| (a, b))) {
+            (Value::String(a), Value::String(b)) => match SimpleValue::parse_number(a).and_then(|a| SimpleValue::parse_number(b).map(|b| (a, b))) {
                 Some((a, b)) => a.cmp(&b).into(),
                 None => UniCase::new(a.as_str()).cmp(&UniCase::new(b.as_str())).into(),
             }
-            (Value::Number(a), Value::String(b)) => match Value::<C, S>::parse_number(b) {
+            (Value::Number(a), Value::String(b)) => match SimpleValue::parse_number(b) {
                 Some(b) => a.cmp(&b).into(),
-                None => UniCase::new(Value::<C, S>::stringify_number(*a).as_str()).cmp(&UniCase::new(b.as_str())).into(),
+                None => UniCase::new(SimpleValue::stringify_number(*a).as_str()).cmp(&UniCase::new(b.as_str())).into(),
             }
-            (Value::String(a), Value::Number(b)) => match Value::<C, S>::parse_number(a) {
+            (Value::String(a), Value::Number(b)) => match SimpleValue::parse_number(a) {
                 Some(a) => a.cmp(b).into(),
-                None => UniCase::new(a.as_str()).cmp(&UniCase::new(&Value::<C, S>::stringify_number(*b).as_str())).into(),
+                None => UniCase::new(a.as_str()).cmp(&UniCase::new(&SimpleValue::stringify_number(*b).as_str())).into(),
             }
             (Value::Number(_), _) | (_, Value::Number(_)) => None,
             (Value::String(_), _) | (_, Value::String(_)) => None,

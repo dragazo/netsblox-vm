@@ -7,10 +7,9 @@ use std::sync::{Arc, Mutex};
 use crate::real_time::*;
 use crate::runtime::*;
 use crate::json::*;
-use crate::vecmap::VecMap;
+use crate::vecmap::*;
+use crate::compact_str::*;
 use crate::*;
-
-use compact_str::CompactString;
 
 pub struct NetsBloxContext {
     pub base_url: CompactString,

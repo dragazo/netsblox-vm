@@ -29,11 +29,13 @@ pub mod real_time {
     pub use time::{self, OffsetDateTime, UtcOffset};
 }
 
+/// The re-exported version of the `compact-str` crate.
+pub mod compact_str {
+    pub use ::compact_str::{self, CompactString, ToCompactString, CompactStringExt, format_compact};
+}
+
 /// The re-exported version of the `netsblox-ast` crate.
 pub use netsblox_ast as ast;
-
-/// The re-exported version of the `compact-str` crate.
-pub use compact_str;
 
 pub mod bytecode;
 pub mod slotmap;

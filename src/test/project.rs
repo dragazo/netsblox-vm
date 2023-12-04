@@ -1,5 +1,4 @@
 use alloc::collections::BTreeSet;
-use alloc::borrow::ToOwned;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 
@@ -945,10 +944,10 @@ fn test_proj_custom_events() {
         proj.input(mc, Input::CustomEvent { name: "receiveTest1".into(), args: Default::default(), interrupt: false, max_queue: usize::MAX });
         proj.input(mc, Input::CustomEvent { name: "receiveTest1".into(), args: Default::default(), interrupt: false, max_queue: usize::MAX });
         proj.input(mc, Input::CustomEvent { name: "receiveTest1".into(), args: Default::default(), interrupt: false, max_queue: usize::MAX });
-        proj.input(mc, Input::CustomEvent { name: "receiveTest3".into(), args: vec![("val".to_owned(), Number::new(34.0).unwrap().into()), ("derp".to_owned(), Number::new(12.0).unwrap().into())].into_iter().collect(), interrupt: false, max_queue: 0 });
-        proj.input(mc, Input::CustomEvent { name: "receiveTest3".into(), args: vec![("val".to_owned(), Number::new(420.0).unwrap().into()), ("derp".to_owned(), Number::new(69.0).unwrap().into())].into_iter().collect(), interrupt: false, max_queue: 0 });
-        proj.input(mc, Input::CustomEvent { name: "receiveTest2".into(), args: vec![("merp".to_owned(), "hello world".to_owned().into())].into_iter().collect(), interrupt: true, max_queue: 0 });
-        proj.input(mc, Input::CustomEvent { name: "receiveTest2".into(), args: vec![("merp".to_owned(), "goodbye world".to_owned().into())].into_iter().collect(), interrupt: true, max_queue: 0 });
+        proj.input(mc, Input::CustomEvent { name: "receiveTest3".into(), args: vec![(CompactString::new("val"), Number::new(34.0).unwrap().into()), (CompactString::new("derp"), Number::new(12.0).unwrap().into())].into_iter().collect(), interrupt: false, max_queue: 0 });
+        proj.input(mc, Input::CustomEvent { name: "receiveTest3".into(), args: vec![(CompactString::new("val"), Number::new(420.0).unwrap().into()), (CompactString::new("derp"), Number::new(69.0).unwrap().into())].into_iter().collect(), interrupt: false, max_queue: 0 });
+        proj.input(mc, Input::CustomEvent { name: "receiveTest2".into(), args: vec![(CompactString::new("merp"), CompactString::new("hello world").into())].into_iter().collect(), interrupt: true, max_queue: 0 });
+        proj.input(mc, Input::CustomEvent { name: "receiveTest2".into(), args: vec![(CompactString::new("merp"), CompactString::new("goodbye world").into())].into_iter().collect(), interrupt: true, max_queue: 0 });
         run_till_term(mc, &mut *proj).unwrap();
         let global_context = proj.get_global_context();
         let global_context = global_context.borrow();

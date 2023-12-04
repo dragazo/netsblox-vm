@@ -9,9 +9,8 @@ use crate::slotmap::*;
 use crate::runtime::*;
 use crate::bytecode::*;
 use crate::process::*;
-use crate::vecmap::VecMap;
-
-use compact_str::CompactString;
+use crate::compact_str::*;
+use crate::vecmap::*;
 
 new_key! {
     struct ProcessKey;

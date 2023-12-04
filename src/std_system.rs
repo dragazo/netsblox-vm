@@ -18,7 +18,6 @@ use rand_chacha::ChaChaRng;
 use rand::{Rng, SeedableRng};
 use tokio_tungstenite::tungstenite::Message;
 use futures::{StreamExt, SinkExt};
-use compact_str::{CompactString, format_compact};
 use uuid::Uuid;
 
 use crate::runtime::*;
@@ -26,7 +25,8 @@ use crate::process::*;
 use crate::json::*;
 use crate::gc::*;
 use crate::std_util::*;
-use crate::vecmap::VecMap;
+use crate::vecmap::*;
+use crate::compact_str::*;
 use crate::*;
 
 const MESSAGE_REPLY_TIMEOUT: Duration = Duration::from_millis(1500);

@@ -7,6 +7,7 @@ use netsblox_vm::runtime::*;
 use netsblox_vm::project::*;
 use netsblox_vm::gc::*;
 use netsblox_vm::ast;
+use netsblox_vm::compact_str::CompactString;
 
 use std::io::Read;
 use std::time::Duration;
@@ -123,7 +124,7 @@ fn main() {
     };
 
     // initialize our system with all the info we've put together
-    let system = Rc::new(StdSystem::new_sync(BASE_URL.to_owned(), None, config, clock.clone()));
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, config, clock.clone()));
     let mut env = get_running_project(&xml, system);
 
     // begin running the code - these are some helpers to make things more efficient in terms of memory and cpu resources

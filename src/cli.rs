@@ -35,8 +35,6 @@ use crossterm::event::{self, Event, KeyCode as RawKeyCode, KeyModifiers as RawKe
 use crossterm::terminal::{self, ClearType};
 use crossterm::style::{ResetColor, SetForegroundColor, Color, Print};
 
-use compact_str::{CompactString, format_compact};
-
 use crate::*;
 use crate::gc::*;
 use crate::json::*;
@@ -48,6 +46,7 @@ use crate::runtime::*;
 use crate::process::*;
 use crate::project::*;
 use crate::template::*;
+use crate::compact_str::*;
 
 const DEFAULT_BASE_URL: &str = "https://cloud.netsblox.org";
 const DEFAULT_EDITOR_URL: &str = "https://editor.netsblox.org";

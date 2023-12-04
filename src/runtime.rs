@@ -12,7 +12,6 @@ use core::cell::Ref;
 
 use rand::distributions::uniform::{SampleUniform, SampleRange};
 use checked_float::{FloatChecker, CheckedFloat};
-use compact_str::{CompactString, format_compact};
 
 #[cfg(feature = "serde")]
 use serde::{Serialize, Deserialize};
@@ -23,7 +22,8 @@ use crate::json::*;
 use crate::real_time::*;
 use crate::bytecode::*;
 use crate::process::*;
-use crate::vecmap::VecMap;
+use crate::compact_str::*;
+use crate::vecmap::*;
 
 /// Error type used by [`NumberChecker`].
 #[derive(Debug)]
@@ -803,6 +803,25 @@ impl SimpleValue {
             }
         })
     }
+
+    /// Parses a string into a number just as the runtime would do natively.
+    pub fn parse_number(s: &str) -> Option<Number> {
+        let s = s.trim();
+        let parsed = match s.get(..2) {
+            Some("0x" | "0X") => i64::from_str_radix(&s[2..], 16).ok().map(|x| x as f64),
+            Some("0o" | "0O") => i64::from_str_radix(&s[2..], 8).ok().map(|x| x as f64),
+            Some("0b" | "0B") => i64::from_str_radix(&s[2..], 2).ok().map(|x| x as f64),
+            _ => s.parse::<f64>().ok(),
+        };
+        parsed.and_then(|x| Number::new(x).ok())
+    }
+    /// Stringifies a number just as the runtime would do natively.
+    pub fn stringify_number(v: Number) -> CompactString {
+        debug_assert!(v.get().is_finite());
+        let mut buf = ryu::Buffer::new();
+        let res = buf.format_finite(v.get());
+        CompactString::new(res.strip_suffix(".0").unwrap_or(res))
+    }
 }
 
 #[test]
@@ -873,6 +892,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GetType for Value<'gc, C, S> {
     }
 }
 
+#[derive(Clone)]
 pub enum CompactCow<'a> {
     Borrowed(&'a str),
     Owned(CompactString),
@@ -1013,23 +1033,6 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         }
     }
 
-    pub(crate) fn parse_number(s: &str) -> Option<Number> {
-        let s = s.trim();
-        let parsed = match s.get(..2) {
-            Some("0x" | "0X") => i64::from_str_radix(&s[2..], 16).ok().map(|x| x as f64),
-            Some("0o" | "0O") => i64::from_str_radix(&s[2..], 8).ok().map(|x| x as f64),
-            Some("0b" | "0B") => i64::from_str_radix(&s[2..], 2).ok().map(|x| x as f64),
-            _ => s.parse::<f64>().ok(),
-        };
-        parsed.and_then(|x| Number::new(x).ok())
-    }
-    pub(crate) fn stringify_number(v: Number) -> CompactString {
-        debug_assert!(v.get().is_finite());
-        let mut buf = ryu::Buffer::new();
-        let res = buf.format_finite(v.get());
-        CompactString::new(res.strip_suffix(".0").unwrap_or(res))
-    }
-
     /// Attempts to interpret this value as a bool.
     pub fn as_bool(&self) -> Result<bool, ConversionError<C, S>> {
         Ok(match self {
@@ -1041,7 +1044,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
     pub fn as_number(&self) -> Result<Number, ConversionError<C, S>> {
         match self {
             Value::Number(x) => Ok(*x),
-            Value::String(x) => Self::parse_number(x).ok_or(ConversionError { got: Type::String, expected: Type::Number }),
+            Value::String(x) => SimpleValue::parse_number(x).ok_or(ConversionError { got: Type::String, expected: Type::Number }),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Number }),
         }
     }
@@ -1049,7 +1052,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
     pub fn as_string(&self) -> Result<CompactCow, ConversionError<C, S>> {
         Ok(match self {
             Value::String(x) => CompactCow::Borrowed(&**x),
-            Value::Number(x) => CompactCow::Owned(Self::stringify_number(*x)),
+            Value::Number(x) => CompactCow::Owned(SimpleValue::stringify_number(*x)),
             x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
         })
     }
