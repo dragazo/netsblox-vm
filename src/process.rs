@@ -33,11 +33,11 @@ fn empty_string() -> Rc<CompactString> {
         std::thread_local! {
             static VALUE: Rc<CompactString> = Rc::new(CompactString::default());
         }
-        VALUE.with(|x| x.clone())
+        VALUE.with(Clone::clone)
     }
     #[cfg(not(feature = "std"))]
     {
-        Rc::new(String::new())
+        Rc::new(CompactString::default())
     }
 }
 
