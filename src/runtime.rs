@@ -825,6 +825,21 @@ impl SimpleValue {
 }
 
 #[test]
+fn test_number_to_string() {
+    assert_eq!(SimpleValue::stringify_number(Number::new(0.0).unwrap()), "0");
+    assert_eq!(SimpleValue::stringify_number(Number::new(-0.0).unwrap()), "0");
+    assert_eq!(SimpleValue::stringify_number(Number::new(1.0).unwrap()), "1");
+    assert_eq!(SimpleValue::stringify_number(Number::new(7.0).unwrap()), "7");
+    assert_eq!(SimpleValue::stringify_number(Number::new(-1.0).unwrap()), "-1");
+    assert_eq!(SimpleValue::stringify_number(Number::new(-13.0).unwrap()), "-13");
+    assert_eq!(SimpleValue::stringify_number(Number::new(123456789.0).unwrap()), "123456789");
+    assert_eq!(SimpleValue::stringify_number(Number::new(5.67e50).unwrap()), "5.67e50");
+    assert_eq!(SimpleValue::stringify_number(Number::new(-8.35e30).unwrap()), "-8.35e30");
+    assert_eq!(SimpleValue::stringify_number(Number::new(6e-24).unwrap()), "6e-24");
+    assert_eq!(SimpleValue::stringify_number(Number::new(1e24).unwrap()), "1e24");
+}
+
+#[test]
 fn test_netsblox_json() {
     let val = SimpleValue::List(vec![
         SimpleValue::Bool(false),

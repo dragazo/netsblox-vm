@@ -22,7 +22,10 @@ pub struct Entry<K: Ord + 'static, V> {
     #[collect(require_static)] pub key: K,
                                pub value: V,
 }
-/// A map type implemented as a sorted list of key/value pairs
+/// A map type implemented as a list of key/value pairs.
+/// 
+/// If the const generic `SORTED` is set to `true`, keys will be sorted in ascending order, lookups are `O(log(n))`, and insertions are `O(n)`.
+/// If `SORTED` is set to `false`, keys will be sorted in insertion order, lookups are `O(n)`, and insertions are `O(1)`.
 #[derive(Collect, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[collect(no_drop, bound = "where V: Collect")]
@@ -140,4 +143,144 @@ impl<K: Ord + 'static, V, const SORTED: bool> FromIterator<(K, V)> for VecMap<K,
         }
         res
     }
+}
+
+#[test]
+fn test_vecmap_sorted() {
+    let mut v = VecMap::<usize, usize, true>::new();
+    assert_eq!(v.len(), 0);
+    assert_eq!(v.as_slice().len(), 0);
+    assert_eq!(v.is_empty(), true);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), []);
+
+    assert_eq!(v.insert(45, 12), None);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v.as_slice().len(), 1);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 12)]);
+
+    assert_eq!(v.insert(56, 6), None);
+    assert_eq!(v.len(), 2);
+    assert_eq!(v.as_slice().len(), 2);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 12), (56, 6)]);
+
+    assert_eq!(v.insert(80, 3), None);
+    assert_eq!(v.len(), 3);
+    assert_eq!(v.as_slice().len(), 3);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 12), (56, 6), (80, 3)]);
+
+    assert_eq!(v.insert(2, 654), None);
+    assert_eq!(v.len(), 4);
+    assert_eq!(v.as_slice().len(), 4);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(2, 654), (45, 12), (56, 6), (80, 3)]);
+
+    assert_eq!(v.insert(56, 98), Some(6));
+    assert_eq!(v.len(), 4);
+    assert_eq!(v.as_slice().len(), 4);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(2, 654), (45, 12), (56, 98), (80, 3)]);
+
+    *v.get_mut(&80).unwrap() = 13;
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(2, 654), (45, 12), (56, 98), (80, 13)]);
+    *v.get_mut(&45).unwrap() = 444;
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(2, 654), (45, 444), (56, 98), (80, 13)]);
+
+    assert_eq!(v.get_mut(&2).map(|x| *x), Some(654));
+    assert_eq!(v.get_mut(&45).map(|x| *x), Some(444));
+    assert_eq!(v.get_mut(&56).map(|x| *x), Some(98));
+    assert_eq!(v.get_mut(&80).map(|x| *x), Some(13));
+    assert_eq!(v.get_mut(&81).map(|x| *x), None);
+    assert_eq!(v.get_mut(&69).map(|x| *x), None);
+    assert_eq!(v.get_mut(&0).map(|x| *x), None);
+    assert_eq!(v.get_mut(&21).map(|x| *x), None);
+    assert_eq!(v.get_mut(&50).map(|x| *x), None);
+
+    assert_eq!(v.get(&2).map(|x| *x), Some(654));
+    assert_eq!(v.get(&45).map(|x| *x), Some(444));
+    assert_eq!(v.get(&56).map(|x| *x), Some(98));
+    assert_eq!(v.get(&80).map(|x| *x), Some(13));
+    assert_eq!(v.get(&81).map(|x| *x), None);
+    assert_eq!(v.get(&69).map(|x| *x), None);
+    assert_eq!(v.get(&0).map(|x| *x), None);
+    assert_eq!(v.get(&21).map(|x| *x), None);
+    assert_eq!(v.get(&50).map(|x| *x), None);
+
+    assert_eq!(v.insert(50, 3), None);
+    assert_eq!(v.len(), 5);
+    assert_eq!(v.as_slice().len(), 5);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(2, 654), (45, 444), (50, 3), (56, 98), (80, 13)]);
+}
+
+#[test]
+fn test_vecmap_unsorted() {
+    let mut v = VecMap::<usize, usize, false>::new();
+    assert_eq!(v.len(), 0);
+    assert_eq!(v.as_slice().len(), 0);
+    assert_eq!(v.is_empty(), true);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), []);
+
+    assert_eq!(v.insert(45, 12), None);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v.as_slice().len(), 1);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 12)]);
+
+    assert_eq!(v.insert(56, 6), None);
+    assert_eq!(v.len(), 2);
+    assert_eq!(v.as_slice().len(), 2);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 12), (56, 6)]);
+
+    assert_eq!(v.insert(80, 3), None);
+    assert_eq!(v.len(), 3);
+    assert_eq!(v.as_slice().len(), 3);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 12), (56, 6), (80, 3)]);
+
+    assert_eq!(v.insert(2, 654), None);
+    assert_eq!(v.len(), 4);
+    assert_eq!(v.as_slice().len(), 4);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 12), (56, 6), (80, 3), (2, 654)]);
+
+    assert_eq!(v.insert(56, 98), Some(6));
+    assert_eq!(v.len(), 4);
+    assert_eq!(v.as_slice().len(), 4);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 12), (56, 98), (80, 3), (2, 654)]);
+
+    *v.get_mut(&80).unwrap() = 13;
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 12), (56, 98), (80, 13), (2, 654)]);
+    *v.get_mut(&45).unwrap() = 444;
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 444), (56, 98), (80, 13), (2, 654)]);
+
+    assert_eq!(v.get_mut(&2).map(|x| *x), Some(654));
+    assert_eq!(v.get_mut(&45).map(|x| *x), Some(444));
+    assert_eq!(v.get_mut(&56).map(|x| *x), Some(98));
+    assert_eq!(v.get_mut(&80).map(|x| *x), Some(13));
+    assert_eq!(v.get_mut(&81).map(|x| *x), None);
+    assert_eq!(v.get_mut(&69).map(|x| *x), None);
+    assert_eq!(v.get_mut(&0).map(|x| *x), None);
+    assert_eq!(v.get_mut(&21).map(|x| *x), None);
+    assert_eq!(v.get_mut(&50).map(|x| *x), None);
+
+    assert_eq!(v.get(&2).map(|x| *x), Some(654));
+    assert_eq!(v.get(&45).map(|x| *x), Some(444));
+    assert_eq!(v.get(&56).map(|x| *x), Some(98));
+    assert_eq!(v.get(&80).map(|x| *x), Some(13));
+    assert_eq!(v.get(&81).map(|x| *x), None);
+    assert_eq!(v.get(&69).map(|x| *x), None);
+    assert_eq!(v.get(&0).map(|x| *x), None);
+    assert_eq!(v.get(&21).map(|x| *x), None);
+    assert_eq!(v.get(&50).map(|x| *x), None);
+
+    assert_eq!(v.insert(50, 3), None);
+    assert_eq!(v.len(), 5);
+    assert_eq!(v.as_slice().len(), 5);
+    assert_eq!(v.is_empty(), false);
+    assert_eq!(v.iter().map(|x| (*x.0, *x.1)).collect::<Vec<_>>(), [(45, 444), (56, 98), (80, 13), (2, 654), (50, 3)]);
 }
