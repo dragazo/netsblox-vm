@@ -459,6 +459,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(Number::new(value as f64)?.into());
                 self.pos = aft_pos;
             }
+            Instruction::PushIntString { value } => {
+                self.value_stack.push(Rc::new(value.to_compact_string()).into());
+                self.pos = aft_pos;
+            }
             Instruction::PushNumber { value } => {
                 self.value_stack.push(Number::new(value)?.into());
                 self.pos = aft_pos;
