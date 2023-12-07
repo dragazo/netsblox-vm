@@ -1037,3 +1037,53 @@ fn test_proj_nested_lists_consts() {
         assert_values_eq(&global_context.globals.lookup("abc").unwrap().get(), &expected, 1e-20, "nested lists consts");
     });
 }
+
+#[test]
+fn test_proj_sizes() {
+    fn bytecode_size(xml: &str) -> usize {
+        let role = &ast::Parser::default().parse(xml).unwrap().roles[0];
+        ByteCode::compile(role).unwrap().0.total_size()
+    }
+
+    let mut good = true;
+    macro_rules! check_bytecode_size {
+        ($path:literal, $expected:literal) => {{
+            let got = bytecode_size(include_str!($path));
+            let expected = $expected;
+            if got != expected {
+                println!("{} got {} expected {}", $path, got, expected);
+                good = false;
+            }
+        }}
+    }
+
+    check_bytecode_size!("projects/any-msg.xml", 390);
+    check_bytecode_size!("projects/broadcast-to.xml", 379);
+    check_bytecode_size!("projects/broadcast.xml", 253);
+    check_bytecode_size!("projects/cloning.xml", 91);
+    check_bytecode_size!("projects/costumes.xml", 278);
+    check_bytecode_size!("projects/counting.xml", 107);
+    check_bytecode_size!("projects/custom-events.xml", 182);
+    check_bytecode_size!("projects/delayed-capture-upvar.xml", 841);
+    check_bytecode_size!("projects/delete-clone.xml", 459);
+    check_bytecode_size!("projects/effects.xml", 319);
+    check_bytecode_size!("projects/launch.xml", 154);
+    check_bytecode_size!("projects/loop-yields.xml", 240);
+    check_bytecode_size!("projects/messaging.xml", 423);
+    check_bytecode_size!("projects/motion.xml", 296);
+    check_bytecode_size!("projects/nested-lists-consts.xml", 0);
+    check_bytecode_size!("projects/parallel-rpcs.xml", 435);
+    check_bytecode_size!("projects/pause.xml", 20);
+    check_bytecode_size!("projects/pen-basic.xml", 417);
+    check_bytecode_size!("projects/run-call-ask-tell.xml", 363);
+    check_bytecode_size!("projects/size-visible.xml", 117);
+    check_bytecode_size!("projects/stop-all.xml", 729);
+    check_bytecode_size!("projects/stop-current.xml", 372);
+    check_bytecode_size!("projects/stop-my-others-context.xml", 394);
+    check_bytecode_size!("projects/stop-my-others.xml", 731);
+    check_bytecode_size!("projects/stop-others.xml", 729);
+    check_bytecode_size!("projects/wait-until.xml", 83);
+    check_bytecode_size!("projects/watchers.xml", 58);
+
+    assert!(good);
+}
