@@ -1,6 +1,7 @@
 use alloc::collections::BTreeSet;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
+use core::cell::RefCell;
 
 use crate::*;
 use crate::gc::*;
@@ -480,6 +481,84 @@ fn test_proj_delete_clone() {
         ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("log").unwrap().get(), &expected, 1e-10, "log");
     });
+}
+
+#[test]
+fn test_proj_sounds() {
+    let sound_events = Rc::new(RefCell::new(vec![]));
+    let sound_events_clone = sound_events.clone();
+    let config = Config::<C, StdSystem<C>> {
+        request: None,
+        command: Some(Rc::new(move |_, key, command, _| match command {
+            Command::PlaySound { sound, blocking } => {
+                sound_events_clone.borrow_mut().push((sound, blocking));
+                key.complete(Ok(()));
+                CommandStatus::Handled
+            }
+            _ => CommandStatus::UseDefault { key, command },
+        })),
+    };
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let proj = get_running_project(include_str!("projects/sounds.xml"), system);
+
+    let expect_prefixes = [
+        [82, 73, 70, 70, 212, 28, 0, 0].as_slice(),
+        [73, 68, 51, 3, 0, 0, 0, 0].as_slice(),
+        [82, 73, 70, 70, 40, 2, 0, 0].as_slice(),
+    ];
+
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
+
+        let res = global_context.globals.lookup("res").unwrap().get().clone();
+        match &res {
+            Value::List(x) => {
+                let x = &*x.borrow();
+                assert_eq!(x.len(), 3);
+                for (i, v) in x.iter().enumerate() {
+                    match v {
+                        Value::Audio(sound) => {
+                            if !sound.content.starts_with(expect_prefixes[i]) {
+                                panic!("{i}: {:?}", sound.content);
+                            }
+                        }
+                        x => panic!("{x:?}"),
+                    }
+                }
+            }
+            x => panic!("{x:?}"),
+        }
+    });
+
+    let sound_events = &*sound_events.borrow();
+    assert_eq!(sound_events.len(), 18);
+
+    assert!(sound_events[0].0.content.starts_with(expect_prefixes[1]) && !sound_events[0].1);
+    assert!(sound_events[1].0.content.starts_with(expect_prefixes[0]) && !sound_events[1].1);
+    assert!(sound_events[2].0.content.starts_with(expect_prefixes[2]) && !sound_events[2].1);
+
+    assert!(sound_events[3].0.content.starts_with(expect_prefixes[0]) && sound_events[3].1);
+    assert!(sound_events[4].0.content.starts_with(expect_prefixes[1]) && sound_events[4].1);
+    assert!(sound_events[5].0.content.starts_with(expect_prefixes[2]) && sound_events[5].1);
+
+    assert!(sound_events[6].0.content.starts_with(expect_prefixes[0]) && !sound_events[6].1);
+    assert!(sound_events[7].0.content.starts_with(expect_prefixes[0]) && sound_events[7].1);
+
+    assert!(sound_events[8].0.content.starts_with(expect_prefixes[1]) && !sound_events[8].1);
+    assert!(sound_events[9].0.content.starts_with(expect_prefixes[1]) && sound_events[9].1);
+
+    assert!(sound_events[10].0.content.starts_with(expect_prefixes[2]) && !sound_events[10].1);
+    assert!(sound_events[11].0.content.starts_with(expect_prefixes[2]) && sound_events[11].1);
+
+    assert!(sound_events[12].0.content.starts_with(expect_prefixes[1]) && !sound_events[12].1);
+    assert!(sound_events[13].0.content.starts_with(expect_prefixes[0]) && !sound_events[13].1);
+    assert!(sound_events[14].0.content.starts_with(expect_prefixes[2]) && !sound_events[14].1);
+
+    assert!(sound_events[15].0.content.starts_with(expect_prefixes[1]) && sound_events[15].1);
+    assert!(sound_events[16].0.content.starts_with(expect_prefixes[0]) && sound_events[16].1);
+    assert!(sound_events[17].0.content.starts_with(expect_prefixes[2]) && sound_events[17].1);
 }
 
 #[test]

@@ -421,6 +421,13 @@ pub(crate) enum Instruction<'a> {
     /// If using dynamic costumes or no costume, does nothing.
     NextCostume,
 
+    /// Pushes a shallow copy of the entity's list of static sounds onto the value stack.
+    PushSoundList,
+    /// Consumes 1 value, `sound`, from the value stack and attempts to play it.
+    /// This can be an audio object or the name of a static sound on the entity.
+    /// Empty string can be used as a no-op.
+    PlaySound { blocking: bool },
+
     /// Pops one value, `target`, from the value stack and pushes a clone of entity `target` onto the value stack.
     Clone,
     /// Deletes the current active entity if it is a clone, and requests to abort all of its associated processes.
@@ -851,21 +858,25 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             122 => read_prefixed!(Instruction::SetCostume),
             123 => read_prefixed!(Instruction::NextCostume),
 
-            124 => read_prefixed!(Instruction::Clone),
-            125 => read_prefixed!(Instruction::DeleteClone),
+            124 => read_prefixed!(Instruction::PushSoundList),
+            125 => read_prefixed!(Instruction::PlaySound { blocking: true }),
+            126 => read_prefixed!(Instruction::PlaySound { blocking: false }),
 
-            126 => read_prefixed!(Instruction::ClearEffects),
-            127 => read_prefixed!(Instruction::ClearDrawings),
+            127 => read_prefixed!(Instruction::Clone),
+            128 => read_prefixed!(Instruction::DeleteClone),
 
-            128 => read_prefixed!(Instruction::GotoXY),
-            129 => read_prefixed!(Instruction::Goto),
+            129 => read_prefixed!(Instruction::ClearEffects),
+            130 => read_prefixed!(Instruction::ClearDrawings),
 
-            130 => read_prefixed!(Instruction::PointTowardsXY),
-            131 => read_prefixed!(Instruction::PointTowards),
+            131 => read_prefixed!(Instruction::GotoXY),
+            132 => read_prefixed!(Instruction::Goto),
 
-            132 => read_prefixed!(Instruction::Forward),
+            133 => read_prefixed!(Instruction::PointTowardsXY),
+            134 => read_prefixed!(Instruction::PointTowards),
 
-            133 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
+            135 => read_prefixed!(Instruction::Forward),
+
+            136 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
 
             _ => unreachable!(),
         }
@@ -1055,21 +1066,25 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::SetCostume => append_prefixed!(122),
             Instruction::NextCostume => append_prefixed!(123),
 
-            Instruction::Clone => append_prefixed!(124),
-            Instruction::DeleteClone => append_prefixed!(125),
+            Instruction::PushSoundList => append_prefixed!(124),
+            Instruction::PlaySound { blocking: true } => append_prefixed!(125),
+            Instruction::PlaySound { blocking: false } => append_prefixed!(126),
 
-            Instruction::ClearEffects => append_prefixed!(126),
-            Instruction::ClearDrawings => append_prefixed!(127),
+            Instruction::Clone => append_prefixed!(127),
+            Instruction::DeleteClone => append_prefixed!(128),
 
-            Instruction::GotoXY => append_prefixed!(128),
-            Instruction::Goto => append_prefixed!(129),
+            Instruction::ClearEffects => append_prefixed!(129),
+            Instruction::ClearDrawings => append_prefixed!(130),
 
-            Instruction::PointTowardsXY => append_prefixed!(130),
-            Instruction::PointTowards => append_prefixed!(131),
+            Instruction::GotoXY => append_prefixed!(131),
+            Instruction::Goto => append_prefixed!(132),
 
-            Instruction::Forward => append_prefixed!(132),
+            Instruction::PointTowardsXY => append_prefixed!(133),
+            Instruction::PointTowards => append_prefixed!(134),
 
-            Instruction::UnknownBlock { name, args } => append_prefixed!(133: move str name, args),
+            Instruction::Forward => append_prefixed!(135),
+
+            Instruction::UnknownBlock { name, args } => append_prefixed!(136: move str name, args),
         }
     }
 }
@@ -1526,6 +1541,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             ast::ExprKind::Costume => self.ins.push(Instruction::PushCostume.into()),
             ast::ExprKind::CostumeNumber => self.ins.push(Instruction::PushCostumeNumber.into()),
             ast::ExprKind::CostumeList => self.ins.push(Instruction::PushCostumeList.into()),
+            ast::ExprKind::SoundList => self.ins.push(Instruction::PushSoundList.into()),
             ast::ExprKind::Size => self.ins.push(Instruction::PushProperty { prop: Property::Size }.into()),
             ast::ExprKind::IsVisible => self.ins.push(Instruction::PushProperty { prop: Property::Visible }.into()),
             ast::ExprKind::Entity { trans_name, .. } => self.ins.push(Instruction::PushEntity { name: trans_name }.into()),
@@ -1872,16 +1888,11 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             ast::StmtKind::Stop { mode: ast::StopMode::All } => self.ins.push(Instruction::Abort { mode: AbortMode::All }.into()),
             ast::StmtKind::Stop { mode: ast::StopMode::AllButThisScript } => self.ins.push(Instruction::Abort { mode: AbortMode::Others }.into()),
             ast::StmtKind::Stop { mode: ast::StopMode::OtherScriptsInSprite } => self.ins.push(Instruction::Abort { mode: AbortMode::MyOthers }.into()),
+            ast::StmtKind::SetCostume { costume } => self.append_simple_ins(entity, &[costume], Instruction::SetCostume)?,
+            ast::StmtKind::PlaySound { sound, blocking } => self.append_simple_ins(entity, &[sound], Instruction::PlaySound { blocking: *blocking })?,
             ast::StmtKind::Stop { mode: ast::StopMode::ThisBlock } => {
                 self.ins.push(Instruction::PushString { value: "" }.into());
                 self.ins.push(Instruction::Return.into());
-            }
-            ast::StmtKind::SetCostume { costume } => match costume {
-                Some(x) => self.append_simple_ins(entity, &[x], Instruction::SetCostume)?,
-                None => {
-                    self.ins.push(Instruction::PushString { value: "" }.into());
-                    self.ins.push(Instruction::SetCostume.into());
-                }
             }
             ast::StmtKind::SetVisible { value } => {
                 self.ins.push(Instruction::PushBool { value: *value }.into());

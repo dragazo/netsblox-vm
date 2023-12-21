@@ -1234,8 +1234,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     Value::Image(x) => Some(x),
                     Value::String(x) => match x.as_str() {
                         "" => None,
-                        x => match entity.costume_list.iter().find(|&c| c.0.as_str() == x) {
-                            Some(c) => Some(c.1.clone()),
+                        x => match entity.costume_list.get(x) {
+                            Some(c) => Some(c.clone()),
                             None => return Err(ErrorCause::UndefinedCostume { name: x.into() }),
                         }
                     }
@@ -1277,6 +1277,38 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                         }
                     }
                     None => self.pos = aft_pos,
+                }
+            }
+            Instruction::PushSoundList => {
+                let entity = self.call_stack.last().unwrap().entity.borrow();
+                self.value_stack.push(Value::List(Gc::new(mc, RefLock::new(entity.sound_list.iter().map(|x| Value::Audio(x.1.clone())).collect()))));
+                self.pos = aft_pos;
+            }
+            Instruction::PlaySound { blocking } => {
+                let entity_raw = self.call_stack.last().unwrap().entity.borrow();
+                let entity = &*entity_raw;
+
+                let sound = match self.value_stack.pop().unwrap() {
+                    Value::Audio(x) => Some(x),
+                    Value::String(x) => match x.as_str() {
+                        "" => None,
+                        x => match entity.sound_list.get(x) {
+                            Some(x) => Some(x.clone()),
+                            None => return Err(ErrorCause::UndefinedSound { name: x.into() }),
+                        }
+                    }
+                    x => return Err(ErrorCause::ConversionError { got: x.get_type(), expected: Type::Audio }),
+                };
+
+                if let Some(sound) = sound {
+                    drop(entity_raw);
+                    drop(global_context_raw);
+                    self.defer = Some(Defer::Command {
+                        key: system.perform_command(mc, Command::PlaySound { sound, blocking }, self)?,
+                        aft_pos,
+                    });
+                } else {
+                    self.pos = aft_pos;
                 }
             }
             Instruction::Clone => {

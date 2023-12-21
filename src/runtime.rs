@@ -79,6 +79,8 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     UndefinedVariable { name: CompactString },
     /// A name-based costume lookup operation failed.
     UndefinedCostume { name: CompactString },
+    /// A name-based sound lookup operation failed.
+    UndefinedSound { name: CompactString },
     /// A name-based entity lookup operation failed.
     UndefinedEntity { name: CompactString },
     /// An upvar was created at the root scope, which is not allowed (it has nothing to refer up to).
@@ -1569,6 +1571,8 @@ pub enum Feature {
 
     /// The ability of an entity to change the current costume.
     SetCostume,
+    /// The ability of an entity to play a sound, optionally blocking until completion.
+    PlaySound { blocking: bool },
 
     /// The ability to clear all graphic effects on an entity. This is equivalent to setting all the graphic effect properties to zero.
     ClearEffects,
@@ -1639,6 +1643,10 @@ pub enum Command<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     /// so this is just a hook for any custom update code that is needed for external purposes.
     SetCostume,
 
+    /// Plays a sound, optionally with a request to block until the sound is finished playing.
+    /// It is up to the receiver to actually satisfy this blocking aspect, if desired.
+    PlaySound { sound: Rc<Audio>, blocking: bool },
+
     /// Moves the entity to a specific location.
     GotoXY { x: Number, y: Number },
     /// Moves the current entity to the same position as the target entity.
@@ -1659,8 +1667,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Command<'gc, '_, C, S> {
             Command::Print { .. } => Feature::Print,
             Command::SetProperty { prop, .. } => Feature::SetProperty { prop: *prop },
             Command::ChangeProperty { prop, .. } => Feature::ChangeProperty { prop: *prop },
-            Command::SetCostume { .. } => Feature::SetCostume,
-            Command::ClearEffects { .. } => Feature::ClearEffects,
+            Command::SetCostume => Feature::SetCostume,
+            Command::PlaySound { blocking, .. } => Feature::PlaySound { blocking: *blocking },
+            Command::ClearEffects => Feature::ClearEffects,
             Command::ClearDrawings => Feature::ClearDrawings,
             Command::GotoXY { .. } => Feature::GotoXY,
             Command::GotoEntity { .. } => Feature::GotoEntity,
