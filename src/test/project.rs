@@ -490,8 +490,13 @@ fn test_proj_sounds() {
     let config = Config::<C, StdSystem<C>> {
         request: None,
         command: Some(Rc::new(move |_, key, command, _| match command {
+            Command::StopSounds => {
+                sound_events_clone.borrow_mut().push(None);
+                key.complete(Ok(()));
+                CommandStatus::Handled
+            }
             Command::PlaySound { sound, blocking } => {
-                sound_events_clone.borrow_mut().push((sound, blocking));
+                sound_events_clone.borrow_mut().push(Some((sound, blocking)));
                 key.complete(Ok(()));
                 CommandStatus::Handled
             }
@@ -533,32 +538,43 @@ fn test_proj_sounds() {
     });
 
     let sound_events = &*sound_events.borrow();
-    assert_eq!(sound_events.len(), 18);
+    assert_eq!(sound_events.len(), 27);
 
-    assert!(sound_events[0].0.content.starts_with(expect_prefixes[1]) && !sound_events[0].1);
-    assert!(sound_events[1].0.content.starts_with(expect_prefixes[0]) && !sound_events[1].1);
-    assert!(sound_events[2].0.content.starts_with(expect_prefixes[2]) && !sound_events[2].1);
+    assert!(sound_events[0].is_none());
 
-    assert!(sound_events[3].0.content.starts_with(expect_prefixes[0]) && sound_events[3].1);
-    assert!(sound_events[4].0.content.starts_with(expect_prefixes[1]) && sound_events[4].1);
-    assert!(sound_events[5].0.content.starts_with(expect_prefixes[2]) && sound_events[5].1);
+    assert!(sound_events[1].as_ref().unwrap().0.content.starts_with(expect_prefixes[1]) && !sound_events[1].as_ref().unwrap().1);
+    assert!(sound_events[2].as_ref().unwrap().0.content.starts_with(expect_prefixes[0]) && !sound_events[2].as_ref().unwrap().1);
+    assert!(sound_events[3].as_ref().unwrap().0.content.starts_with(expect_prefixes[2]) && !sound_events[3].as_ref().unwrap().1);
 
-    assert!(sound_events[6].0.content.starts_with(expect_prefixes[0]) && !sound_events[6].1);
-    assert!(sound_events[7].0.content.starts_with(expect_prefixes[0]) && sound_events[7].1);
+    assert!(sound_events[4].is_none());
 
-    assert!(sound_events[8].0.content.starts_with(expect_prefixes[1]) && !sound_events[8].1);
-    assert!(sound_events[9].0.content.starts_with(expect_prefixes[1]) && sound_events[9].1);
+    assert!(sound_events[5].as_ref().unwrap().0.content.starts_with(expect_prefixes[0]) && sound_events[5].as_ref().unwrap().1);
+    assert!(sound_events[6].as_ref().unwrap().0.content.starts_with(expect_prefixes[1]) && sound_events[6].as_ref().unwrap().1);
+    assert!(sound_events[7].is_none());
+    assert!(sound_events[8].as_ref().unwrap().0.content.starts_with(expect_prefixes[2]) && sound_events[8].as_ref().unwrap().1);
 
-    assert!(sound_events[10].0.content.starts_with(expect_prefixes[2]) && !sound_events[10].1);
-    assert!(sound_events[11].0.content.starts_with(expect_prefixes[2]) && sound_events[11].1);
+    assert!(sound_events[9].as_ref().unwrap().0.content.starts_with(expect_prefixes[0]) && !sound_events[9].as_ref().unwrap().1);
+    assert!(sound_events[10].is_none());
+    assert!(sound_events[11].as_ref().unwrap().0.content.starts_with(expect_prefixes[0]) && sound_events[11].as_ref().unwrap().1);
 
-    assert!(sound_events[12].0.content.starts_with(expect_prefixes[1]) && !sound_events[12].1);
-    assert!(sound_events[13].0.content.starts_with(expect_prefixes[0]) && !sound_events[13].1);
-    assert!(sound_events[14].0.content.starts_with(expect_prefixes[2]) && !sound_events[14].1);
+    assert!(sound_events[12].as_ref().unwrap().0.content.starts_with(expect_prefixes[1]) && !sound_events[12].as_ref().unwrap().1);
+    assert!(sound_events[13].is_none());
+    assert!(sound_events[14].as_ref().unwrap().0.content.starts_with(expect_prefixes[1]) && sound_events[14].as_ref().unwrap().1);
 
-    assert!(sound_events[15].0.content.starts_with(expect_prefixes[1]) && sound_events[15].1);
-    assert!(sound_events[16].0.content.starts_with(expect_prefixes[0]) && sound_events[16].1);
-    assert!(sound_events[17].0.content.starts_with(expect_prefixes[2]) && sound_events[17].1);
+    assert!(sound_events[15].as_ref().unwrap().0.content.starts_with(expect_prefixes[2]) && !sound_events[15].as_ref().unwrap().1);
+    assert!(sound_events[16].is_none());
+    assert!(sound_events[17].as_ref().unwrap().0.content.starts_with(expect_prefixes[2]) && sound_events[17].as_ref().unwrap().1);
+
+    assert!(sound_events[18].as_ref().unwrap().0.content.starts_with(expect_prefixes[1]) && !sound_events[18].as_ref().unwrap().1);
+    assert!(sound_events[19].is_none());
+    assert!(sound_events[20].is_none());
+    assert!(sound_events[21].as_ref().unwrap().0.content.starts_with(expect_prefixes[0]) && !sound_events[21].as_ref().unwrap().1);
+    assert!(sound_events[22].as_ref().unwrap().0.content.starts_with(expect_prefixes[2]) && !sound_events[22].as_ref().unwrap().1);
+
+    assert!(sound_events[23].as_ref().unwrap().0.content.starts_with(expect_prefixes[1]) && sound_events[26].as_ref().unwrap().1);
+    assert!(sound_events[24].as_ref().unwrap().0.content.starts_with(expect_prefixes[0]) && sound_events[24].as_ref().unwrap().1);
+    assert!(sound_events[25].is_none());
+    assert!(sound_events[26].as_ref().unwrap().0.content.starts_with(expect_prefixes[2]) && sound_events[26].as_ref().unwrap().1);
 }
 
 #[test]

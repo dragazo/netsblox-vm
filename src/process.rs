@@ -1311,6 +1311,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     self.pos = aft_pos;
                 }
             }
+            Instruction::StopSounds => {
+                drop(global_context_raw);
+                self.defer = Some(Defer::Command {
+                    key: system.perform_command(mc, Command::StopSounds, self)?,
+                    aft_pos,
+                });
+            }
             Instruction::Clone => {
                 let target_cell = self.value_stack.pop().unwrap().as_entity()?;
                 let target = target_cell.borrow();

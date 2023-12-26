@@ -1573,6 +1573,8 @@ pub enum Feature {
     SetCostume,
     /// The ability of an entity to play a sound, optionally blocking until completion.
     PlaySound { blocking: bool },
+    /// The ability of an entity to stop playback of currently-playing sounds.
+    StopSounds,
 
     /// The ability to clear all graphic effects on an entity. This is equivalent to setting all the graphic effect properties to zero.
     ClearEffects,
@@ -1646,6 +1648,8 @@ pub enum Command<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     /// Plays a sound, optionally with a request to block until the sound is finished playing.
     /// It is up to the receiver to actually satisfy this blocking aspect, if desired.
     PlaySound { sound: Rc<Audio>, blocking: bool },
+    /// Requests to stop playback of all currently-playing sounds.
+    StopSounds,
 
     /// Moves the entity to a specific location.
     GotoXY { x: Number, y: Number },
@@ -1669,6 +1673,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Command<'gc, '_, C, S> {
             Command::ChangeProperty { prop, .. } => Feature::ChangeProperty { prop: *prop },
             Command::SetCostume => Feature::SetCostume,
             Command::PlaySound { blocking, .. } => Feature::PlaySound { blocking: *blocking },
+            Command::StopSounds => Feature::StopSounds,
             Command::ClearEffects => Feature::ClearEffects,
             Command::ClearDrawings => Feature::ClearDrawings,
             Command::GotoXY { .. } => Feature::GotoXY,
