@@ -1813,6 +1813,74 @@ pub enum Precision {
     High,
 }
 
+const SHARP_NOTES: &'static str = "A A# B C C# D D# E F F# G G#";
+const FLAT_NOTES: &'static str = "A Bb B C Db D Eb E F Gb G Ab";
+
+/// A musical note represented as midi.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Note(u8);
+impl Note {
+    /// Attempts to construct a new note from a raw midi value, failing if the value is out of range.
+    pub fn from_midi(val: u8) -> Option<Self> {
+        if val < 128 { Some(Self(val)) } else { None }
+    }
+    /// Attempts to construct a new note from the name of a note, accepting a range of valid formats.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let mut c = name.trim().chars().peekable();
+
+        let note = c.next().unwrap_or('\0').to_ascii_uppercase();
+        let note = SHARP_NOTES.split(' ').enumerate().find(|x| x.1.len() == 1 && x.1.starts_with(note))?.0 as i32;
+
+        let mut octave = None;
+        let mut delta = 0;
+        loop {
+            match c.next() {
+                Some(ch) => match ch {
+                    '+' | '-' | '0'..='9' => {
+                        if octave.is_some() { return None }
+
+                        let mut v = CompactString::default();
+                        v.push(ch);
+                        loop {
+                            match c.peek() {
+                                Some('0'..='9') => v.push(c.next().unwrap()),
+                                _ => break,
+                            }
+                        }
+                        octave = Some(v.parse::<i32>().ok()?);
+                    }
+                    's' | '#' | '♯' => delta += 1,
+                    'b' | '♭' => delta -= 1,
+                    _ => return None,
+                }
+                None => break,
+            }
+        }
+        let mut octave = octave?;
+        if note >= 3 {
+            octave -= 1;
+        }
+
+        let value = 21 + note + 12 * octave + delta;
+        if value >= 0 { Self::from_midi(value as u8) } else { None }
+    }
+    /// Gets the stored midi value.
+    pub fn get_midi(self) -> u8 {
+        self.0
+    }
+    /// Computes the frequency of the note in Hz.
+    pub fn get_frequency(self) -> Number {
+        Number::new(440.0 * libm::exp2((self.0 as f64 - 69.0) / 12.0)).unwrap()
+    }
+    /// Gets the (English) name of the note.
+    pub fn get_name(self, prefer_sharps: bool) -> CompactString {
+        let octave = self.0 as i32 / 12 - 1;
+        let note = if prefer_sharps { SHARP_NOTES } else { FLAT_NOTES }.split(' ').nth((self.0 as usize + 3) % 12).unwrap();
+        format_compact!("{note}{octave}")
+    }
+}
+
 /// A key type used to await a reply message from an external source.
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
 pub struct ExternReplyKey {
