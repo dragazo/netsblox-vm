@@ -427,6 +427,9 @@ pub(crate) enum Instruction<'a> {
     /// This can be an audio object or the name of a static sound on the entity.
     /// Empty string can be used as a no-op.
     PlaySound { blocking: bool },
+    /// Consumes 2 values, `duration` and `notes`, from the value stack and plays them.
+    /// `notes` can be a single or list of notes in either MIDI value form or (extended) English names of notes.
+    PlayNotes { blocking: bool },
     /// Stops playback of all currently-playing sounds.
     StopSounds,
 
@@ -863,23 +866,25 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             124 => read_prefixed!(Instruction::PushSoundList),
             125 => read_prefixed!(Instruction::PlaySound { blocking: true }),
             126 => read_prefixed!(Instruction::PlaySound { blocking: false }),
-            127 => read_prefixed!(Instruction::StopSounds),
+            127 => read_prefixed!(Instruction::PlayNotes { blocking: true }),
+            128 => read_prefixed!(Instruction::PlayNotes { blocking: false }),
+            129 => read_prefixed!(Instruction::StopSounds),
 
-            128 => read_prefixed!(Instruction::Clone),
-            129 => read_prefixed!(Instruction::DeleteClone),
+            130 => read_prefixed!(Instruction::Clone),
+            131 => read_prefixed!(Instruction::DeleteClone),
 
-            130 => read_prefixed!(Instruction::ClearEffects),
-            131 => read_prefixed!(Instruction::ClearDrawings),
+            132 => read_prefixed!(Instruction::ClearEffects),
+            133 => read_prefixed!(Instruction::ClearDrawings),
 
-            132 => read_prefixed!(Instruction::GotoXY),
-            133 => read_prefixed!(Instruction::Goto),
+            134 => read_prefixed!(Instruction::GotoXY),
+            135 => read_prefixed!(Instruction::Goto),
 
-            134 => read_prefixed!(Instruction::PointTowardsXY),
-            135 => read_prefixed!(Instruction::PointTowards),
+            136 => read_prefixed!(Instruction::PointTowardsXY),
+            137 => read_prefixed!(Instruction::PointTowards),
 
-            136 => read_prefixed!(Instruction::Forward),
+            138 => read_prefixed!(Instruction::Forward),
 
-            137 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
+            139 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
 
             _ => unreachable!(),
         }
@@ -1072,23 +1077,25 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::PushSoundList => append_prefixed!(124),
             Instruction::PlaySound { blocking: true } => append_prefixed!(125),
             Instruction::PlaySound { blocking: false } => append_prefixed!(126),
-            Instruction::StopSounds => append_prefixed!(127),
+            Instruction::PlayNotes { blocking: true } => append_prefixed!(127),
+            Instruction::PlayNotes { blocking: false } => append_prefixed!(128),
+            Instruction::StopSounds => append_prefixed!(129),
 
-            Instruction::Clone => append_prefixed!(128),
-            Instruction::DeleteClone => append_prefixed!(129),
+            Instruction::Clone => append_prefixed!(130),
+            Instruction::DeleteClone => append_prefixed!(131),
 
-            Instruction::ClearEffects => append_prefixed!(130),
-            Instruction::ClearDrawings => append_prefixed!(131),
+            Instruction::ClearEffects => append_prefixed!(132),
+            Instruction::ClearDrawings => append_prefixed!(133),
 
-            Instruction::GotoXY => append_prefixed!(132),
-            Instruction::Goto => append_prefixed!(133),
+            Instruction::GotoXY => append_prefixed!(134),
+            Instruction::Goto => append_prefixed!(135),
 
-            Instruction::PointTowardsXY => append_prefixed!(134),
-            Instruction::PointTowards => append_prefixed!(135),
+            Instruction::PointTowardsXY => append_prefixed!(136),
+            Instruction::PointTowards => append_prefixed!(137),
 
-            Instruction::Forward => append_prefixed!(136),
+            Instruction::Forward => append_prefixed!(138),
 
-            Instruction::UnknownBlock { name, args } => append_prefixed!(137: move str name, args),
+            Instruction::UnknownBlock { name, args } => append_prefixed!(139: move str name, args),
         }
     }
 }
@@ -1894,6 +1901,12 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             ast::StmtKind::Stop { mode: ast::StopMode::OtherScriptsInSprite } => self.ins.push(Instruction::Abort { mode: AbortMode::MyOthers }.into()),
             ast::StmtKind::SetCostume { costume } => self.append_simple_ins(entity, &[costume], Instruction::SetCostume)?,
             ast::StmtKind::PlaySound { sound, blocking } => self.append_simple_ins(entity, &[sound], Instruction::PlaySound { blocking: *blocking })?,
+            ast::StmtKind::PlayNotes { notes, beats, blocking } => self.append_simple_ins(entity, &[notes, beats], Instruction::PlayNotes { blocking: *blocking })?,
+            ast::StmtKind::Rest { beats } => {
+                self.ins.push(Instruction::VariadicOp { op: VariadicOp::MakeList, len: VariadicLen::Fixed(0) }.into());
+                self.append_expr(beats, entity)?;
+                self.ins.push(Instruction::PlayNotes { blocking: true }.into());
+            }
             ast::StmtKind::StopSounds => self.ins.push(Instruction::StopSounds.into()),
             ast::StmtKind::Stop { mode: ast::StopMode::ThisBlock } => {
                 self.ins.push(Instruction::PushString { value: "" }.into());

@@ -1311,6 +1311,23 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     self.pos = aft_pos;
                 }
             }
+            Instruction::PlayNotes { blocking } => {
+                let beats = self.value_stack.pop().unwrap().as_number()?;
+                let notes = match self.value_stack.pop().unwrap() {
+                    Value::List(x) => x.borrow().iter().map(ops::prep_note).collect::<Result<_,_>>()?,
+                    x => vec![ops::prep_note(&x)?],
+                };
+
+                if beats.get() > 0.0 {
+                    drop(global_context_raw);
+                    self.defer = Some(Defer::Command {
+                        key: system.perform_command(mc, Command::PlayNotes { notes, beats, blocking }, self)?,
+                        aft_pos,
+                    });
+                } else {
+                    self.pos = aft_pos;
+                }
+            }
             Instruction::StopSounds => {
                 drop(global_context_raw);
                 self.defer = Some(Defer::Command {
@@ -1466,6 +1483,18 @@ mod ops {
             Some(first) => as_list(first).is_some(),
         };
         if good { Some(vals) } else { None }
+    }
+
+    pub(super) fn prep_note<C: CustomTypes<S>, S: System<C>>(value: &Value<'_, C, S>) -> Result<Note, ErrorCause<C, S>> {
+        if let Ok(v) = value.as_number().map(Number::get) {
+            let vv = v as i64;
+            if v != vv as f64 { return Err(ErrorCause::NoteNotInteger { note: v }); }
+            let res = Note::from_midi(vv as u8);
+            if vv < 0 || res.is_none() { return Err(ErrorCause::NoteNotMidi { note: vv.to_compact_string() }); }
+            return Ok(res.unwrap());
+        }
+        let s = value.as_string()?;
+        Note::from_name(&s).ok_or_else(|| ErrorCause::NoteNotMidi { note: s.into_owned() })
     }
 
     pub(super) fn prep_index<C: CustomTypes<S>, S: System<C>>(index: &Value<'_, C, S>, len: usize) -> Result<usize, ErrorCause<C, S>> {

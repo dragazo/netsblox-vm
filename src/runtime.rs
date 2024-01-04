@@ -99,6 +99,10 @@ pub enum ErrorCause<C: CustomTypes<S>, S: System<C>> {
     IndexOutOfBounds { index: i64, len: usize },
     /// Attempt to index a list with a non-integer numeric value, `index`.
     IndexNotInteger { index: f64 },
+    /// Attempt to create a MIDI note value which was not an integer.
+    NoteNotInteger { note: f64 },
+    /// Attempt to create a MIDI note with a value outside the allowed MIDI range.
+    NoteNotMidi { note: CompactString },
     /// Attempt to use a number which was not a valid size (must be convertible to [`usize`]).
     InvalidSize { value: f64 },
     /// Attempt to interpret an invalid unicode code point (number) as a character.
@@ -1571,8 +1575,11 @@ pub enum Feature {
 
     /// The ability of an entity to change the current costume.
     SetCostume,
+
     /// The ability of an entity to play a sound, optionally blocking until completion.
     PlaySound { blocking: bool },
+    /// The ability of an entity to play musical notes, optionally blocking until completion.
+    PlayNotes { blocking: bool },
     /// The ability of an entity to stop playback of currently-playing sounds.
     StopSounds,
 
@@ -1648,6 +1655,9 @@ pub enum Command<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     /// Plays a sound, optionally with a request to block until the sound is finished playing.
     /// It is up to the receiver to actually satisfy this blocking aspect, if desired.
     PlaySound { sound: Rc<Audio>, blocking: bool },
+    /// Plays zero or more notes, optionally with a request to block until the notes are finished playing.
+    /// It is up to the receiver to actually satisfy this blocking aspect, if desired.
+    PlayNotes { notes: Vec<Note>, beats: Number, blocking: bool },
     /// Requests to stop playback of all currently-playing sounds.
     StopSounds,
 
@@ -1673,6 +1683,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Command<'gc, '_, C, S> {
             Command::ChangeProperty { prop, .. } => Feature::ChangeProperty { prop: *prop },
             Command::SetCostume => Feature::SetCostume,
             Command::PlaySound { blocking, .. } => Feature::PlaySound { blocking: *blocking },
+            Command::PlayNotes { blocking, .. } => Feature::PlayNotes { blocking: *blocking },
             Command::StopSounds => Feature::StopSounds,
             Command::ClearEffects => Feature::ClearEffects,
             Command::ClearDrawings => Feature::ClearDrawings,

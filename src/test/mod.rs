@@ -575,14 +575,17 @@ fn test_note() {
 
     assert_eq!(Note::from_name("G#9"), None);
     assert_eq!(Note::from_name("G##9"), None);
+    assert_eq!(Note::from_name("g##9"), None);
     assert_eq!(Note::from_name("Cb-1"), None);
     assert_eq!(Note::from_name("G10bbbbbbbbbbbb").unwrap().get_midi(), 127);
-    assert_eq!(Note::from_name("G10bbbbbbbbbbbbb").unwrap().get_midi(), 126);
+    assert_eq!(Note::from_name("g10bbbbbbbbbbbbb").unwrap().get_midi(), 126);
     assert_eq!(Note::from_name("Gb10bbbbbbbbbbbbb").unwrap().get_midi(), 125);
-    assert_eq!(Note::from_name("Gbb10bb♭bbb♭♭♭bb♭b").unwrap().get_midi(), 124);
+    assert_eq!(Note::from_name("gbb10bb♭bbb♭♭♭bb♭b").unwrap().get_midi(), 124);
     assert_eq!(Note::from_name("G♭bb10bbbbbbbbbbbbb").unwrap().get_midi(), 123);
     assert_eq!(Note::from_name("Gbbb+10bbbbbbbbbbbbb").unwrap().get_midi(), 123);
     assert_eq!(Note::from_name("C######-2######").unwrap().get_midi(), 0);
-    assert_eq!(Note::from_name("C######-2#######").unwrap().get_midi(), 1);
+    assert_eq!(Note::from_name("c######-2#######").unwrap().get_midi(), 1);
     assert_eq!(Note::from_name("C#♯♯ss#-2#♯##♯#s#").unwrap().get_midi(), 2);
+    assert_eq!(Note::from_name(" C#♯♯ss#-2#♯##♯#s#").unwrap().get_midi(), 2);
+    assert_eq!(Note::from_name("  \t  C#♯♯ss#-2#♯##♯#s#    ").unwrap().get_midi(), 2);
 }

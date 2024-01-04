@@ -2542,3 +2542,49 @@ fn test_proc_extra_blocks() {
     ];
     assert_eq!(&*actions.borrow(), &expected);
 }
+
+#[test]
+fn test_proc_play_notes() {
+    let sound_events = Rc::new(RefCell::new(vec![]));
+    let sound_events_clone = sound_events.clone();
+    let config = Config::<C, StdSystem<C>> {
+        request: None,
+        command: Some(Rc::new(move |_, key, command, _| match command {
+            Command::PlayNotes { notes, beats, blocking } => {
+                sound_events_clone.borrow_mut().push((notes, beats, blocking));
+                key.complete(Ok(()));
+                CommandStatus::Handled
+            }
+            _ => CommandStatus::UseDefault { key, command },
+        })),
+    };
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/play-notes.xml"),
+        methods = "",
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!("done!")).unwrap());
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "play notes");
+    });
+
+    let sound_events = &*sound_events.borrow();
+    assert_eq!(sound_events.len(), 13);
+
+    assert!(sound_events[0].0 == [Note::from_midi(60).unwrap()] && (sound_events[0].1.get() - 0.5).abs() < 1e-10 && sound_events[0].2);
+    assert!(sound_events[1].0 == [Note::from_midi(51).unwrap()] && (sound_events[1].1.get() - 1.0).abs() < 1e-10 && sound_events[1].2);
+    assert!(sound_events[2].0 == [Note::from_midi(82).unwrap()] && (sound_events[2].1.get() - 2.333).abs() < 1e-10 && sound_events[2].2);
+    assert!(sound_events[3].0 == [Note::from_midi(86).unwrap()] && (sound_events[3].1.get() - 0.5).abs() < 1e-10 && sound_events[3].2);
+    assert!(sound_events[4].0 == [Note::from_midi(58).unwrap()] && (sound_events[4].1.get() - 4.0).abs() < 1e-10 && sound_events[4].2);
+    assert!(sound_events[5].0 == [Note::from_midi(76).unwrap()] && (sound_events[5].1.get() - 1.5).abs() < 1e-10 && sound_events[5].2);
+    assert!(sound_events[6].0 == [Note::from_midi(104).unwrap()] && (sound_events[6].1.get() - 0.5).abs() < 1e-10 && sound_events[6].2);
+    assert!(sound_events[7].0 == [Note::from_midi(45).unwrap(), Note::from_midi(58).unwrap()] && (sound_events[7].1.get() - 0.9).abs() < 1e-10 && sound_events[7].2);
+    assert!(sound_events[8].0 == [Note::from_midi(45).unwrap(), Note::from_midi(57).unwrap(), Note::from_midi(69).unwrap(), Note::from_midi(73).unwrap()] && (sound_events[8].1.get() - 0.1).abs() < 1e-10 && sound_events[8].2);
+    assert!(sound_events[9].0 == [] && (sound_events[9].1.get() - 0.2).abs() < 1e-10 && sound_events[9].2);
+    assert!(sound_events[10].0 == [] && (sound_events[10].1.get() - 1.75).abs() < 1e-10 && sound_events[10].2);
+    assert!(sound_events[11].0 == [] && (sound_events[11].1.get() - 2.4).abs() < 1e-10 && sound_events[11].2);
+    assert!(sound_events[12].0 == [] && (sound_events[12].1.get() - 4.0).abs() < 1e-10 && sound_events[12].2);
+}
