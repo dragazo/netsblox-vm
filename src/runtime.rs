@@ -1612,7 +1612,7 @@ pub enum Request<'gc, C: CustomTypes<S>, S: System<C>> {
     /// Performs a system call on the local hardware to access device resources.
     Syscall { name: CompactString, args: Vec<Value<'gc, C, S>> },
     /// Requests the system to execute the given RPC.
-    Rpc { service: CompactString, rpc: CompactString, args: VecMap<CompactString, Value<'gc, C, S>, false> },
+    Rpc { host: Option<CompactString>, service: CompactString, rpc: CompactString, args: VecMap<CompactString, Value<'gc, C, S>, false> },
     /// Request to get the current value of an entity property.
     Property { prop: Property },
     /// Request to run a block which was not known by the ast parser or bytecode compiler.

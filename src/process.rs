@@ -1023,6 +1023,10 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::CallRpc { tokens } => {
                 let mut tokens = lossless_split(tokens);
+                let host = match tokens.next().unwrap() {
+                    "" => None,
+                    x => Some(CompactString::new(x)),
+                };
                 let service = CompactString::new(tokens.next().unwrap());
                 let rpc = CompactString::new(tokens.next().unwrap());
 
@@ -1032,7 +1036,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 drop(global_context_raw);
                 self.defer = Some(Defer::Request {
-                    key: system.perform_request(mc, Request::Rpc { service, rpc, args }, self)?,
+                    key: system.perform_request(mc, Request::Rpc { host, service, rpc, args }, self)?,
                     action: RequestAction::Rpc,
                     aft_pos
                 });

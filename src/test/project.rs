@@ -1156,7 +1156,7 @@ fn test_proj_sizes() {
     check_bytecode_size!("projects/broadcast-to.xml", 379);
     check_bytecode_size!("projects/broadcast.xml", 239);
     check_bytecode_size!("projects/cloning.xml", 86);
-    check_bytecode_size!("projects/costumes.xml", 278);
+    check_bytecode_size!("projects/costumes.xml", 280);
     check_bytecode_size!("projects/counting.xml", 97);
     check_bytecode_size!("projects/custom-events.xml", 180);
     check_bytecode_size!("projects/delayed-capture-upvar.xml", 808);
@@ -1164,10 +1164,10 @@ fn test_proj_sizes() {
     check_bytecode_size!("projects/effects.xml", 236);
     check_bytecode_size!("projects/launch.xml", 150);
     check_bytecode_size!("projects/loop-yields.xml", 218);
-    check_bytecode_size!("projects/messaging.xml", 386);
+    check_bytecode_size!("projects/messaging.xml", 387);
     check_bytecode_size!("projects/motion.xml", 230);
     check_bytecode_size!("projects/nested-lists-consts.xml", 0);
-    check_bytecode_size!("projects/parallel-rpcs.xml", 419);
+    check_bytecode_size!("projects/parallel-rpcs.xml", 420);
     check_bytecode_size!("projects/pause.xml", 16);
     check_bytecode_size!("projects/pen-basic.xml", 336);
     check_bytecode_size!("projects/run-call-ask-tell.xml", 334);

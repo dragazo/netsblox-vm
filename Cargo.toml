@@ -1,6 +1,6 @@
 [package]
 name = "netsblox-vm"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Devin Jean <emailcruzjean@yahoo.com>"]
@@ -72,7 +72,7 @@ rustls-tls-webpki-roots = [
 # core deps
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 gc-arena = { version = "=0.4.0", default-features = false }
-netsblox-ast = { version = "=0.5.4", default-features = false }
+netsblox-ast = { version = "=0.5.5", default-features = false }
 # netsblox-ast = { path = "../netsblox-ast", default-features = false }
 num-traits = { version = "0.2.17", default-features = false }
 num-derive = { version = "0.4.1", default-features = false }

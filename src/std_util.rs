@@ -14,7 +14,7 @@ use crate::*;
 pub struct NetsBloxContext {
     pub base_url: CompactString,
     pub client_id: CompactString,
-    pub services_url: CompactString,
+    pub default_service_host: CompactString,
 
     pub project_name: CompactString,
     pub project_id: CompactString,
@@ -22,6 +22,7 @@ pub struct NetsBloxContext {
     pub role_id: CompactString,
 }
 pub struct RpcRequest<C: CustomTypes<S>, S: System<C>> {
+    pub host: Option<CompactString>,
     pub service: CompactString,
     pub rpc: CompactString,
     pub args: VecMap<CompactString, Json, false>,

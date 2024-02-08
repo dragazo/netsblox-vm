@@ -1677,8 +1677,9 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
                 }
                 self.ins.push(Instruction::CallClosure { new_entity: new_entity.is_some(), args: args.len() }.into());
             }
-            ast::ExprKind::CallRpc { service, rpc, args } => {
+            ast::ExprKind::CallRpc { host, service, rpc, args } => {
                 let mut tokens = LosslessJoin::new();
+                tokens.push(host.as_deref().unwrap_or(""));
                 tokens.push(service);
                 tokens.push(rpc);
                 for (arg_name, arg) in args {
@@ -2181,8 +2182,9 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
                 Some(target) => self.append_simple_ins(entity, &[msg_type, target], Instruction::SendLocalMessage { wait: *wait, target: true })?,
                 None => self.append_simple_ins(entity, &[msg_type], Instruction::SendLocalMessage { wait: *wait, target: false })?,
             }
-            ast::StmtKind::CallRpc { service, rpc, args } => {
+            ast::StmtKind::CallRpc { host, service, rpc, args } => {
                 let mut tokens = LosslessJoin::new();
+                tokens.push(host.as_deref().unwrap_or(""));
                 tokens.push(service);
                 tokens.push(rpc);
                 for (arg_name, arg) in args {

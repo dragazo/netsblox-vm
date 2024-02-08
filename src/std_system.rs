@@ -31,10 +31,10 @@ use crate::*;
 
 const MESSAGE_REPLY_TIMEOUT: Duration = Duration::from_millis(1500);
 
-async fn call_rpc_async<C: CustomTypes<S>, S: System<C>>(context: &NetsBloxContext, client: &reqwest::Client, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<SimpleValue, CompactString> {
+async fn call_rpc_async<C: CustomTypes<S>, S: System<C>>(context: &NetsBloxContext, client: &reqwest::Client, host: Option<&str>, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<SimpleValue, CompactString> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-    let url = format!("{services_url}/{service}/{rpc}?clientId={client_id}&t={time}",
-        services_url = context.services_url, client_id = context.client_id);
+    let url = format!("{service_host}/{service}/{rpc}?clientId={client_id}&t={time}",
+        service_host = host.unwrap_or(context.default_service_host.as_str()), client_id = context.client_id);
     let args = args.iter().copied().collect::<BTreeMap<_,_>>();
 
     let res = match client.post(url).json(&args).send().await {
@@ -96,7 +96,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
     /// Initializes a new instance of [`StdSystem`] targeting the given NetsBlox server base url, e.g., `https://cloud.netsblox.org`.
     pub async fn new_async(base_url: CompactString, project_name: Option<&str>, config: Config<C, Self>, clock: Arc<Clock>) -> Self {
         let client = reqwest::Client::builder().build().unwrap();
-        let services_url = {
+        let default_service_host = {
             let configuration = client.get(format!("{base_url}/configuration")).send().await.unwrap().json::<BTreeMap<CompactString, Json>>().await.unwrap();
             let services_hosts = configuration["servicesHosts"].as_array().unwrap();
             services_hosts[0].as_object().unwrap().get("url").unwrap().as_str().unwrap().into()
@@ -104,7 +104,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
 
         let mut context = NetsBloxContext {
             base_url,
-            services_url,
+            default_service_host,
             client_id: format_compact!("_vm-{}", names::Generator::default().next().unwrap()),
             project_name: project_name.unwrap_or("untitled").into(),
 
@@ -256,11 +256,11 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
 
             #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
             async fn handler<C: CustomTypes<StdSystem<C>>>(client: reqwest::Client, context: Arc<NetsBloxContext>, receiver: Receiver<RpcRequest<C, StdSystem<C>>>) {
-                while let Ok(request) = receiver.recv() {
+                while let Ok(RpcRequest { key, host, service, rpc, args }) = receiver.recv() {
                     let (client, context) = (client.clone(), context.clone());
                     tokio::spawn(async move {
-                        let res = call_rpc_async::<C, StdSystem<C>>(&context, &client, &request.service, &request.rpc, &request.args.iter().map(|x| (x.0.as_str(), x.1)).collect::<Vec<_>>()).await;
-                        request.key.complete(res.map(Into::into));
+                        let res = call_rpc_async::<C, StdSystem<C>>(&context, &client, host.as_deref(), &service, &rpc, &args.iter().map(|x| (x.0.as_str(), x.1)).collect::<Vec<_>>()).await;
+                        key.complete(res.map(Into::into));
                     });
                 }
             }
@@ -276,14 +276,14 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
         let config = config.fallback(&Config {
             request: Some(Rc::new(move |_, key, request, proc| {
                 match request {
-                    Request::Rpc { service, rpc, args } => match (service.as_str(), rpc.as_str(), args.as_slice()) {
-                        ("PublicRoles", "getPublicRoleId", []) => {
+                    Request::Rpc { host, service, rpc, args } => match (host.as_deref(), service.as_str(), rpc.as_str(), args.as_slice()) {
+                        (_, "PublicRoles", "getPublicRoleId", []) => {
                             key.complete(Ok(SimpleValue::String(format_compact!("{}@{}#vm", context_clone.project_name, context_clone.client_id)).into()));
                             RequestStatus::Handled
                         }
                         _ => {
                             match args.into_iter().map(|(k, v)| Ok((k, v.to_simple()?.into_netsblox_json()))).collect::<Result<_,ToSimpleError<_,_>>>() {
-                                Ok(args) => proc.global_context.borrow().system.rpc_request_pipe.send(RpcRequest { service, rpc, args, key }).unwrap(),
+                                Ok(args) => proc.global_context.borrow().system.rpc_request_pipe.send(RpcRequest { host, service, rpc, args, key }).unwrap(),
                                 Err(err) => key.complete(Err(format_compact!("failed to convert RPC args to json: {err:?}"))),
                             }
                             RequestStatus::Handled
@@ -305,8 +305,8 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
 
     /// Asynchronously calls an RPC and returns the result.
     /// This function directly makes requests to NetsBlox, bypassing any RPC hook defined by [`Config`].
-    pub async fn call_rpc_async(&self, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<SimpleValue, CompactString> {
-        call_rpc_async::<C, Self>(&self.context, &self.client, service, rpc, args).await
+    pub async fn call_rpc_async(&self, host: Option<&str>, service: &str, rpc: &str, args: &[(&str, &Json)]) -> Result<SimpleValue, CompactString> {
+        call_rpc_async::<C, Self>(&self.context, &self.client, host, service, rpc, args).await
     }
 
     /// Gets the public id of the running system that can be used to send messages to this client.
