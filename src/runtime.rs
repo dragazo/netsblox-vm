@@ -644,7 +644,9 @@ pub struct Image {
     pub content: Vec<u8>,
     /// The center `(x, y)` of the image as used for NetsBlox sprites.
     /// [`None`] is implied to represent `(w / 2, h / 2)` based on the true image size (size decoding cannot be done in no-std).
-    pub center: Option<(Number, Number)>
+    pub center: Option<(Number, Number)>,
+    /// The user-level name of the image
+    pub name: CompactString,
 }
 
 /// An audio clip type that can be used in the VM.
@@ -652,6 +654,8 @@ pub struct Image {
 pub struct Audio {
     /// The raw binary content of the audio clip
     pub content: Vec<u8>,
+    /// The user-level name of the audio clip
+    pub name: CompactString,
 }
 
 /// An error produced by [`Value::to_simple`]
@@ -739,7 +743,7 @@ impl SimpleValue {
             SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_netsblox_json).collect()),
             SimpleValue::Image(img) => {
                 let center_attrs = img.center.map(|(x, y)| format!(" center-x=\"{x}\" center-y=\"{y}\"")).unwrap_or_default();
-                Json::String(format!("<costume{center_attrs} image=\"data:image/png;base64,{}\" />", crate::util::base64_encode(&img.content)))
+                Json::String(format!("<costume name=\"{}\"{center_attrs} image=\"data:image/png;base64,{}\" />", ast::util::xml_escape(&img.name), crate::util::base64_encode(&img.content)))
             },
             SimpleValue::Audio(audio) => Json::String(format!("<sound sound=\"data:audio/mpeg;base64,{}\" />", crate::util::base64_encode(&audio.content))),
         }
@@ -762,11 +766,13 @@ impl SimpleValue {
                             let mut center_x = None;
                             let mut center_y = None;
                             let mut content = None;
+                            let mut name = "untitled".into();
                             loop {
                                 match tokenizer.next() {
                                     Some(Ok(xmlparser::Token::Attribute { local, value, .. })) => match local.as_str() {
                                         "center-x" => center_x = Some(value.as_str().parse().ok().and_then(|x| Number::new(x).ok()).ok_or(FromNetsBloxJsonError::BadImage)?),
                                         "center-y" => center_y = Some(value.as_str().parse().ok().and_then(|y| Number::new(y).ok()).ok_or(FromNetsBloxJsonError::BadImage)?),
+                                        "name" => name = value.as_str().into(),
                                         "image" => match value.as_str().split(";base64,").nth(1) {
                                             Some(raw) if value.as_str().starts_with("data:image/") => content = Some(crate::util::base64_decode(raw).map_err(|_| FromNetsBloxJsonError::BadImage)?),
                                             _ => return Err(FromNetsBloxJsonError::BadImage),
@@ -774,7 +780,7 @@ impl SimpleValue {
                                         _ => (),
                                     }
                                     Some(Ok(xmlparser::Token::ElementEnd { .. })) => match content {
-                                        Some(content) => return Ok(SimpleValue::Image(Image { content, center: center_x.zip(center_y) })),
+                                        Some(content) => return Ok(SimpleValue::Image(Image { content, center: center_x.zip(center_y), name })),
                                         None => return Ok(SimpleValue::String(x.into())),
                                     }
                                     Some(Ok(_)) => (),
@@ -784,9 +790,11 @@ impl SimpleValue {
                         }
                         "sound" => {
                             let mut content = None;
+                            let mut name = "untitled".into();
                             loop {
                                 match tokenizer.next() {
                                     Some(Ok(xmlparser::Token::Attribute { local, value, .. })) => match local.as_str() {
+                                        "name" => name = value.as_str().into(),
                                         "sound" => match value.as_str().split(";base64,").nth(1) {
                                             Some(raw) if value.as_str().starts_with("data:audio/") => content = Some(crate::util::base64_decode(raw).map_err(|_| FromNetsBloxJsonError::BadAudio)?),
                                             _ => return Err(FromNetsBloxJsonError::BadAudio),
@@ -794,7 +802,7 @@ impl SimpleValue {
                                         _ => (),
                                     }
                                     Some(Ok(xmlparser::Token::ElementEnd { .. })) => match content {
-                                        Some(content) => return Ok(SimpleValue::Audio(Audio { content })),
+                                        Some(content) => return Ok(SimpleValue::Audio(Audio { content, name })),
                                         None => return Ok(SimpleValue::String(x.into())),
                                     }
                                     Some(Ok(_)) => (),
@@ -861,10 +869,10 @@ fn test_netsblox_json() {
         SimpleValue::String("<costume>".into()),
         SimpleValue::String("<costume/>".into()),
         SimpleValue::String("<costume />".into()),
-        SimpleValue::Image(Image { content: vec![], center: None }),
-        SimpleValue::Image(Image { content: vec![], center: Some((Number::new(0.0).unwrap(), Number::new(4.5).unwrap())) }),
-        SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128], center: None }),
-        SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128, 6, 9], center: Some((Number::new(12.5).unwrap(), Number::new(-54.0).unwrap())) }),
+        SimpleValue::Image(Image { content: vec![], center: None, name: "test".into() }),
+        SimpleValue::Image(Image { content: vec![], center: Some((Number::new(0.0).unwrap(), Number::new(4.5).unwrap())), name: "another one".into() }),
+        SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128], center: None, name: "untitled".into() }),
+        SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128, 6, 9], center: Some((Number::new(12.5).unwrap(), Number::new(-54.0).unwrap())), name: "last one i swear".into() }),
     ]);
     let js = val.clone().into_netsblox_json();
     let back = SimpleValue::from_netsblox_json(js).unwrap();
@@ -1372,8 +1380,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
     pub fn from_init(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
         let allocated_refs = init_info.ref_values.iter().map(|ref_value| match ref_value {
             RefValue::String(value) => Value::String(Rc::new(value.clone())),
-            RefValue::Image(content, center) => Value::Image(Rc::new(Image {content: content.clone(), center: *center })),
-            RefValue::Audio(content) => Value::Audio(Rc::new(Audio { content: content.clone() })),
+            RefValue::Image(content, center, name) => Value::Image(Rc::new(Image {content: content.clone(), center: *center, name: name.clone() })),
+            RefValue::Audio(content, name) => Value::Audio(Rc::new(Audio { content: content.clone(), name: name.clone() })),
             RefValue::List(_) => Value::List(Gc::new(mc, Default::default())),
         }).collect::<Vec<_>>();
 
@@ -1387,7 +1395,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
 
         for (allocated_ref, ref_value) in iter::zip(&allocated_refs, &init_info.ref_values) {
             match ref_value {
-                RefValue::String(_) | RefValue::Image(_, _) | RefValue::Audio(_) => continue, // we already populated these values in the first pass
+                RefValue::String(_) | RefValue::Image(_, _, _) | RefValue::Audio(_, _) => continue, // we already populated these values in the first pass
                 RefValue::List(values) => {
                     let allocated_ref = match allocated_ref {
                         Value::List(x) => x,

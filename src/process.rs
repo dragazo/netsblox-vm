@@ -1230,6 +1230,15 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(Value::List(Gc::new(mc, RefLock::new(entity.costume_list.iter().map(|x| Value::Image(x.1.clone())).collect()))));
                 self.pos = aft_pos;
             }
+            Instruction::PushCostumeName => {
+                let costume = self.value_stack.pop().unwrap();
+                self.value_stack.push(match costume {
+                    Value::String(x) if x.is_empty() => empty_string().into(),
+                    Value::Image(x) => Rc::new(x.name.clone()).into(),
+                    x => return Err(ErrorCause::ConversionError { got: x.get_type(), expected: Type::Image }),
+                });
+                self.pos = aft_pos;
+            }
             Instruction::SetCostume => {
                 let mut entity_raw = self.call_stack.last().unwrap().entity.borrow_mut(mc);
                 let entity = &mut *entity_raw;

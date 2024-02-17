@@ -413,6 +413,9 @@ pub(crate) enum Instruction<'a> {
     PushCostumeNumber,
     /// Pushes a shallow copy of the entity's list of static costumes onto the value stack.
     PushCostumeList,
+    /// Consumes 1 value, `costume`, from the value stack and pushes its name onto the value stack.
+    PushCostumeName,
+
     /// Consumes 1 value, `costume`, from the value stack and assigns it as the current costume.
     /// This can be an image or the name of a static costume on the entity.
     /// Empty string can be used to remove the current costume.
@@ -860,31 +863,33 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             119 => read_prefixed!(Instruction::PushCostume),
             120 => read_prefixed!(Instruction::PushCostumeNumber),
             121 => read_prefixed!(Instruction::PushCostumeList),
-            122 => read_prefixed!(Instruction::SetCostume),
-            123 => read_prefixed!(Instruction::NextCostume),
+            122 => read_prefixed!(Instruction::PushCostumeName),
 
-            124 => read_prefixed!(Instruction::PushSoundList),
-            125 => read_prefixed!(Instruction::PlaySound { blocking: true }),
-            126 => read_prefixed!(Instruction::PlaySound { blocking: false }),
-            127 => read_prefixed!(Instruction::PlayNotes { blocking: true }),
-            128 => read_prefixed!(Instruction::PlayNotes { blocking: false }),
-            129 => read_prefixed!(Instruction::StopSounds),
+            123 => read_prefixed!(Instruction::SetCostume),
+            124 => read_prefixed!(Instruction::NextCostume),
 
-            130 => read_prefixed!(Instruction::Clone),
-            131 => read_prefixed!(Instruction::DeleteClone),
+            125 => read_prefixed!(Instruction::PushSoundList),
+            126 => read_prefixed!(Instruction::PlaySound { blocking: true }),
+            127 => read_prefixed!(Instruction::PlaySound { blocking: false }),
+            128 => read_prefixed!(Instruction::PlayNotes { blocking: true }),
+            129 => read_prefixed!(Instruction::PlayNotes { blocking: false }),
+            130 => read_prefixed!(Instruction::StopSounds),
 
-            132 => read_prefixed!(Instruction::ClearEffects),
-            133 => read_prefixed!(Instruction::ClearDrawings),
+            131 => read_prefixed!(Instruction::Clone),
+            132 => read_prefixed!(Instruction::DeleteClone),
 
-            134 => read_prefixed!(Instruction::GotoXY),
-            135 => read_prefixed!(Instruction::Goto),
+            133 => read_prefixed!(Instruction::ClearEffects),
+            134 => read_prefixed!(Instruction::ClearDrawings),
 
-            136 => read_prefixed!(Instruction::PointTowardsXY),
-            137 => read_prefixed!(Instruction::PointTowards),
+            135 => read_prefixed!(Instruction::GotoXY),
+            136 => read_prefixed!(Instruction::Goto),
 
-            138 => read_prefixed!(Instruction::Forward),
+            137 => read_prefixed!(Instruction::PointTowardsXY),
+            138 => read_prefixed!(Instruction::PointTowards),
 
-            139 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
+            139 => read_prefixed!(Instruction::Forward),
+
+            140 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
 
             _ => unreachable!(),
         }
@@ -1071,31 +1076,33 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::PushCostume => append_prefixed!(119),
             Instruction::PushCostumeNumber => append_prefixed!(120),
             Instruction::PushCostumeList => append_prefixed!(121),
-            Instruction::SetCostume => append_prefixed!(122),
-            Instruction::NextCostume => append_prefixed!(123),
+            Instruction::PushCostumeName => append_prefixed!(122),
 
-            Instruction::PushSoundList => append_prefixed!(124),
-            Instruction::PlaySound { blocking: true } => append_prefixed!(125),
-            Instruction::PlaySound { blocking: false } => append_prefixed!(126),
-            Instruction::PlayNotes { blocking: true } => append_prefixed!(127),
-            Instruction::PlayNotes { blocking: false } => append_prefixed!(128),
-            Instruction::StopSounds => append_prefixed!(129),
+            Instruction::SetCostume => append_prefixed!(123),
+            Instruction::NextCostume => append_prefixed!(124),
 
-            Instruction::Clone => append_prefixed!(130),
-            Instruction::DeleteClone => append_prefixed!(131),
+            Instruction::PushSoundList => append_prefixed!(125),
+            Instruction::PlaySound { blocking: true } => append_prefixed!(126),
+            Instruction::PlaySound { blocking: false } => append_prefixed!(127),
+            Instruction::PlayNotes { blocking: true } => append_prefixed!(128),
+            Instruction::PlayNotes { blocking: false } => append_prefixed!(129),
+            Instruction::StopSounds => append_prefixed!(130),
 
-            Instruction::ClearEffects => append_prefixed!(132),
-            Instruction::ClearDrawings => append_prefixed!(133),
+            Instruction::Clone => append_prefixed!(131),
+            Instruction::DeleteClone => append_prefixed!(132),
 
-            Instruction::GotoXY => append_prefixed!(134),
-            Instruction::Goto => append_prefixed!(135),
+            Instruction::ClearEffects => append_prefixed!(133),
+            Instruction::ClearDrawings => append_prefixed!(134),
 
-            Instruction::PointTowardsXY => append_prefixed!(136),
-            Instruction::PointTowards => append_prefixed!(137),
+            Instruction::GotoXY => append_prefixed!(135),
+            Instruction::Goto => append_prefixed!(136),
 
-            Instruction::Forward => append_prefixed!(138),
+            Instruction::PointTowardsXY => append_prefixed!(137),
+            Instruction::PointTowards => append_prefixed!(138),
 
-            Instruction::UnknownBlock { name, args } => append_prefixed!(139: move str name, args),
+            Instruction::Forward => append_prefixed!(139),
+
+            Instruction::UnknownBlock { name, args } => append_prefixed!(140: move str name, args),
         }
     }
 }
@@ -1127,8 +1134,8 @@ pub(crate) enum InitValue {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) enum RefValue {
     List(Vec<InitValue>),
-    Image(Vec<u8>, Option<(Number, Number)>),
-    Audio(Vec<u8>),
+    Image(Vec<u8>, Option<(Number, Number)>, CompactString),
+    Audio(Vec<u8>, CompactString),
     String(CompactString),
 }
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -1552,6 +1559,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             ast::ExprKind::Costume => self.ins.push(Instruction::PushCostume.into()),
             ast::ExprKind::CostumeNumber => self.ins.push(Instruction::PushCostumeNumber.into()),
             ast::ExprKind::CostumeList => self.ins.push(Instruction::PushCostumeList.into()),
+            ast::ExprKind::CostumeName { costume } => self.append_simple_ins(entity, &[costume], Instruction::PushCostumeName)?,
             ast::ExprKind::SoundList => self.ins.push(Instruction::PushSoundList.into()),
             ast::ExprKind::Size => self.ins.push(Instruction::PushProperty { prop: Property::Size }.into()),
             ast::ExprKind::IsVisible => self.ins.push(Instruction::PushProperty { prop: Property::Visible }.into()),
@@ -2532,7 +2540,7 @@ impl ByteCode {
             }
         }
 
-        fn get_value<'a>(value: &'a ast::Value, ref_values: &mut Vec<(Option<RefValue>, &'a ast::Value)>, refs: &BTreeMap<usize, usize>, string_refs: &mut BTreeMap<&'a str, usize>, image_refs: &mut BTreeMap<*const (Vec<u8>, Option<(f64, f64)>), usize>, audio_refs: &mut BTreeMap<*const Vec<u8>, usize>) -> Result<InitValue, CompileError<'a>> {
+        fn get_value<'a>(value: &'a ast::Value, ref_values: &mut Vec<(Option<RefValue>, &'a ast::Value)>, refs: &BTreeMap<usize, usize>, string_refs: &mut BTreeMap<&'a str, usize>, image_refs: &mut BTreeMap<*const (Vec<u8>, Option<(f64, f64)>, CompactString), usize>, audio_refs: &mut BTreeMap<*const (Vec<u8>, CompactString), usize>) -> Result<InitValue, CompileError<'a>> {
             Ok(match value {
                 ast::Value::Bool(x) => InitValue::Bool(*x),
                 ast::Value::Number(x) => InitValue::Number(Number::new(*x)?),
@@ -2554,14 +2562,14 @@ impl ByteCode {
                 ast::Value::Image(x) => {
                     let center = x.1.map(|(x, y)| Ok::<_,NumberError>((Number::new(x)?, Number::new(y)?))).transpose()?;
                     let idx = *image_refs.entry(Rc::as_ptr(x)).or_insert_with(|| {
-                        ref_values.push((Some(RefValue::Image(x.0.clone(), center)), value));
+                        ref_values.push((Some(RefValue::Image(x.0.clone(), center, x.2.clone())), value));
                         ref_values.len() - 1
                     });
                     InitValue::Ref(idx)
                 }
                 ast::Value::Audio(x) => {
                     let idx = *audio_refs.entry(Rc::as_ptr(x)).or_insert_with(|| {
-                        ref_values.push((Some(RefValue::Audio((**x).clone())), value));
+                        ref_values.push((Some(RefValue::Audio(x.0.clone(), x.1.clone())), value));
                         ref_values.len() - 1
                     });
                     InitValue::Ref(idx)

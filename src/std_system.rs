@@ -55,9 +55,9 @@ async fn call_rpc_async<C: CustomTypes<S>, S: System<C>>(context: &NetsBloxConte
     }
 
     if content_type.contains("image/") {
-        Ok(SimpleValue::Image(Image { content: res, center: None }))
+        Ok(SimpleValue::Image(Image { content: res, center: None, name: "untitled".into() }))
     } else if content_type.contains("audio/") {
-        Ok(SimpleValue::Audio(Audio { content: res }))
+        Ok(SimpleValue::Audio(Audio { content: res, name: "untitled".into() }))
     } else if let Some(x) = parse_json_slice::<Json>(&res).ok() {
         SimpleValue::from_netsblox_json(x).map_err(|e| format_compact!("Received ill-formed success value: {e:?}"))
     } else if let Ok(x) = CompactString::from_utf8(res) {
