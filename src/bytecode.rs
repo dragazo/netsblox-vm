@@ -426,6 +426,9 @@ pub(crate) enum Instruction<'a> {
 
     /// Pushes a shallow copy of the entity's list of static sounds onto the value stack.
     PushSoundList,
+    /// Consumes 1 value, `sound`, from the value stack and pushes its name onto the value stack.
+    PushSoundName,
+
     /// Consumes 1 value, `sound`, from the value stack and attempts to play it.
     /// This can be an audio object or the name of a static sound on the entity.
     /// Empty string can be used as a no-op.
@@ -869,27 +872,29 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             124 => read_prefixed!(Instruction::NextCostume),
 
             125 => read_prefixed!(Instruction::PushSoundList),
-            126 => read_prefixed!(Instruction::PlaySound { blocking: true }),
-            127 => read_prefixed!(Instruction::PlaySound { blocking: false }),
-            128 => read_prefixed!(Instruction::PlayNotes { blocking: true }),
-            129 => read_prefixed!(Instruction::PlayNotes { blocking: false }),
-            130 => read_prefixed!(Instruction::StopSounds),
+            126 => read_prefixed!(Instruction::PushSoundName),
 
-            131 => read_prefixed!(Instruction::Clone),
-            132 => read_prefixed!(Instruction::DeleteClone),
+            127 => read_prefixed!(Instruction::PlaySound { blocking: true }),
+            128 => read_prefixed!(Instruction::PlaySound { blocking: false }),
+            129 => read_prefixed!(Instruction::PlayNotes { blocking: true }),
+            130 => read_prefixed!(Instruction::PlayNotes { blocking: false }),
+            131 => read_prefixed!(Instruction::StopSounds),
 
-            133 => read_prefixed!(Instruction::ClearEffects),
-            134 => read_prefixed!(Instruction::ClearDrawings),
+            132 => read_prefixed!(Instruction::Clone),
+            133 => read_prefixed!(Instruction::DeleteClone),
 
-            135 => read_prefixed!(Instruction::GotoXY),
-            136 => read_prefixed!(Instruction::Goto),
+            134 => read_prefixed!(Instruction::ClearEffects),
+            135 => read_prefixed!(Instruction::ClearDrawings),
 
-            137 => read_prefixed!(Instruction::PointTowardsXY),
-            138 => read_prefixed!(Instruction::PointTowards),
+            136 => read_prefixed!(Instruction::GotoXY),
+            137 => read_prefixed!(Instruction::Goto),
 
-            139 => read_prefixed!(Instruction::Forward),
+            138 => read_prefixed!(Instruction::PointTowardsXY),
+            139 => read_prefixed!(Instruction::PointTowards),
 
-            140 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
+            140 => read_prefixed!(Instruction::Forward),
+
+            141 => read_prefixed!(Instruction::UnknownBlock {} : name, args),
 
             _ => unreachable!(),
         }
@@ -1082,27 +1087,29 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::NextCostume => append_prefixed!(124),
 
             Instruction::PushSoundList => append_prefixed!(125),
-            Instruction::PlaySound { blocking: true } => append_prefixed!(126),
-            Instruction::PlaySound { blocking: false } => append_prefixed!(127),
-            Instruction::PlayNotes { blocking: true } => append_prefixed!(128),
-            Instruction::PlayNotes { blocking: false } => append_prefixed!(129),
-            Instruction::StopSounds => append_prefixed!(130),
+            Instruction::PushSoundName => append_prefixed!(126),
 
-            Instruction::Clone => append_prefixed!(131),
-            Instruction::DeleteClone => append_prefixed!(132),
+            Instruction::PlaySound { blocking: true } => append_prefixed!(127),
+            Instruction::PlaySound { blocking: false } => append_prefixed!(128),
+            Instruction::PlayNotes { blocking: true } => append_prefixed!(129),
+            Instruction::PlayNotes { blocking: false } => append_prefixed!(130),
+            Instruction::StopSounds => append_prefixed!(131),
 
-            Instruction::ClearEffects => append_prefixed!(133),
-            Instruction::ClearDrawings => append_prefixed!(134),
+            Instruction::Clone => append_prefixed!(132),
+            Instruction::DeleteClone => append_prefixed!(133),
 
-            Instruction::GotoXY => append_prefixed!(135),
-            Instruction::Goto => append_prefixed!(136),
+            Instruction::ClearEffects => append_prefixed!(134),
+            Instruction::ClearDrawings => append_prefixed!(135),
 
-            Instruction::PointTowardsXY => append_prefixed!(137),
-            Instruction::PointTowards => append_prefixed!(138),
+            Instruction::GotoXY => append_prefixed!(136),
+            Instruction::Goto => append_prefixed!(137),
 
-            Instruction::Forward => append_prefixed!(139),
+            Instruction::PointTowardsXY => append_prefixed!(138),
+            Instruction::PointTowards => append_prefixed!(139),
 
-            Instruction::UnknownBlock { name, args } => append_prefixed!(140: move str name, args),
+            Instruction::Forward => append_prefixed!(140),
+
+            Instruction::UnknownBlock { name, args } => append_prefixed!(141: move str name, args),
         }
     }
 }
@@ -1561,6 +1568,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             ast::ExprKind::CostumeList => self.ins.push(Instruction::PushCostumeList.into()),
             ast::ExprKind::CostumeName { costume } => self.append_simple_ins(entity, &[costume], Instruction::PushCostumeName)?,
             ast::ExprKind::SoundList => self.ins.push(Instruction::PushSoundList.into()),
+            ast::ExprKind::SoundName { sound } => self.append_simple_ins(entity, &[sound], Instruction::PushSoundName)?,
             ast::ExprKind::Size => self.ins.push(Instruction::PushProperty { prop: Property::Size }.into()),
             ast::ExprKind::IsVisible => self.ins.push(Instruction::PushProperty { prop: Property::Visible }.into()),
             ast::ExprKind::Entity { trans_name, .. } => self.ins.push(Instruction::PushEntity { name: trans_name }.into()),

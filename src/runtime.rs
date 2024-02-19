@@ -745,7 +745,7 @@ impl SimpleValue {
                 let center_attrs = img.center.map(|(x, y)| format!(" center-x=\"{x}\" center-y=\"{y}\"")).unwrap_or_default();
                 Json::String(format!("<costume name=\"{}\"{center_attrs} image=\"data:image/png;base64,{}\" />", ast::util::xml_escape(&img.name), crate::util::base64_encode(&img.content)))
             },
-            SimpleValue::Audio(audio) => Json::String(format!("<sound sound=\"data:audio/mpeg;base64,{}\" />", crate::util::base64_encode(&audio.content))),
+            SimpleValue::Audio(audio) => Json::String(format!("<sound name=\"{}\" sound=\"data:audio/mpeg;base64,{}\" />", ast::util::xml_escape(&audio.name), crate::util::base64_encode(&audio.content))),
         }
     }
     /// Converts a JSON object returned from NetsBlox into its equivalent [`SimpleValue`] form.
@@ -873,6 +873,9 @@ fn test_netsblox_json() {
         SimpleValue::Image(Image { content: vec![], center: Some((Number::new(0.0).unwrap(), Number::new(4.5).unwrap())), name: "another one".into() }),
         SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128], center: None, name: "untitled".into() }),
         SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128, 6, 9], center: Some((Number::new(12.5).unwrap(), Number::new(-54.0).unwrap())), name: "last one i swear".into() }),
+        SimpleValue::Audio(Audio { content: vec![], name: "something".into() }),
+        SimpleValue::Audio(Audio { content: vec![1, 2, 3], name: "killer move".into() }),
+        SimpleValue::Audio(Audio { content: vec![1, 2, 255, 43, 23, 254], name: "finish".into() }),
     ]);
     let js = val.clone().into_netsblox_json();
     let back = SimpleValue::from_netsblox_json(js).unwrap();

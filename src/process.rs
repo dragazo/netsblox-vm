@@ -1297,6 +1297,23 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(Value::List(Gc::new(mc, RefLock::new(entity.sound_list.iter().map(|x| Value::Audio(x.1.clone())).collect()))));
                 self.pos = aft_pos;
             }
+            Instruction::PushSoundName => {
+                let entity_raw = self.call_stack.last().unwrap().entity.borrow();
+                let entity = &*entity_raw;
+
+                let sound = match self.value_stack.pop().unwrap() {
+                    Value::Audio(x) => x,
+                    Value::String(x) => match entity.sound_list.get(x.as_str()) {
+                        Some(x) => x.clone(),
+                        None => return Err(ErrorCause::UndefinedSound { name: x.as_ref().clone() }),
+                    }
+                    x => return Err(ErrorCause::ConversionError { got: x.get_type(), expected: Type::Audio }),
+                };
+
+                self.value_stack.push(Rc::new(sound.name.clone()).into());
+
+                self.pos = aft_pos;
+            }
             Instruction::PlaySound { blocking } => {
                 let entity_raw = self.call_stack.last().unwrap().entity.borrow();
                 let entity = &*entity_raw;

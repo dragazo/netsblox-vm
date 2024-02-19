@@ -517,6 +517,24 @@ fn test_proj_costume_names() {
 }
 
 #[test]
+fn test_proj_sound_names() {
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let proj = get_running_project(include_str!("projects/sound-names.xml"), system);
+    proj.mutate(|mc, proj| {
+        run_till_term(mc, &mut *proj.proj.borrow_mut(mc)).unwrap();
+        let global_context = proj.proj.borrow().get_global_context();
+        let global_context = global_context.borrow();
+
+        let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
+            ["boop", "boop", "boop"],
+            ["bop", "bop", "bop"],
+            ["swoop", "swoop", "swoop"],
+        ])).unwrap());
+        assert_values_eq(&global_context.globals.lookup("gtf").unwrap().get(), &expected, 1e-10, "gtf");
+    });
+}
+
+#[test]
 fn test_proj_sounds() {
     let sound_events = Rc::new(RefCell::new(vec![]));
     let sound_events_clone = sound_events.clone();
