@@ -508,9 +508,9 @@ fn test_proj_costume_names() {
             "",
             "",
             "IndexOutOfBounds { index: 0, len: 3 }",
-            ["squiggle", "squiggle", "squiggle", "squiggle", "squiggle", 1],
-            ["zap", "zap", "zap", "zap", "zap", 3],
-            ["zip", "zip", "zip", "zip", "zip", 2],
+            ["squiggle", "squiggle", "squiggle", "squiggle", "squiggle", 1, "squiggle", "squiggle"],
+            ["zap", "zap", "zap", "zap", "zap", 3, "zap", "zap"],
+            ["zip", "zip", "zip", "zip", "zip", 2, "zip", "zip"],
         ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("res").unwrap().get(), &expected, 1e-10, "res");
     });
@@ -526,9 +526,9 @@ fn test_proj_sound_names() {
         let global_context = global_context.borrow();
 
         let expected = Value::from_simple(mc, SimpleValue::from_json(json!([
-            ["boop", "boop", "boop"],
-            ["bop", "bop", "bop"],
-            ["swoop", "swoop", "swoop"],
+            ["boop", "boop", "boop", "boop"],
+            ["bop", "bop", "bop", "bop"],
+            ["swoop", "swoop", "swoop", "swoop"],
         ])).unwrap());
         assert_values_eq(&global_context.globals.lookup("gtf").unwrap().get(), &expected, 1e-10, "gtf");
     });

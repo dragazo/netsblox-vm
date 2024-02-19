@@ -19,7 +19,7 @@ use bin_pool::BinPool;
 
 use crate::*;
 use crate::meta::*;
-use crate::runtime::{Color, Number, NumberError, Event, KeyCode, Property, PrintStyle, Type, CustomTypes, System};
+use crate::runtime::{Color, Number, NumberError, Event, KeyCode, Property, PrintStyle, Type, CustomTypes, System, ImageProperty, AudioProperty};
 use crate::util::LosslessJoin;
 use crate::vecmap::VecMap;
 use crate::compact_str::{CompactString, ToCompactString};
@@ -413,8 +413,8 @@ pub(crate) enum Instruction<'a> {
     PushCostumeNumber,
     /// Pushes a shallow copy of the entity's list of static costumes onto the value stack.
     PushCostumeList,
-    /// Consumes 1 value, `costume`, from the value stack and pushes its name onto the value stack.
-    PushCostumeName,
+    /// Consumes 1 value, `costume`, from the value stack and pushes one of its properties onto the value stack.
+    PushCostumeProperty { prop: ImageProperty },
 
     /// Consumes 1 value, `costume`, from the value stack and assigns it as the current costume.
     /// This can be an image or the name of a static costume on the entity.
@@ -426,8 +426,8 @@ pub(crate) enum Instruction<'a> {
 
     /// Pushes a shallow copy of the entity's list of static sounds onto the value stack.
     PushSoundList,
-    /// Consumes 1 value, `sound`, from the value stack and pushes its name onto the value stack.
-    PushSoundName,
+    /// Consumes 1 value, `sound`, from the value stack and pushes one of its properties onto the value stack.
+    PushSoundProperty { prop: AudioProperty },
 
     /// Consumes 1 value, `sound`, from the value stack and attempts to play it.
     /// This can be an audio object or the name of a static sound on the entity.
@@ -517,7 +517,7 @@ macro_rules! read_write_u8_type {
         }
     )*}
 }
-read_write_u8_type! { PrintStyle, Property, Relation, TimeQuery, BinaryOp, UnaryOp, VariadicOp, BasicType, AbortMode }
+read_write_u8_type! { PrintStyle, ImageProperty, AudioProperty, Property, Relation, TimeQuery, BinaryOp, UnaryOp, VariadicOp, BasicType, AbortMode }
 
 /// encodes values as a sequence of bytes of form [1: next][7: bits] in little-endian order.
 /// `bytes` can be used to force a specific size (too small will panic), otherwise calculates and uses the smallest possible size.
@@ -866,13 +866,13 @@ impl<'a> BinaryRead<'a> for Instruction<'a> {
             119 => read_prefixed!(Instruction::PushCostume),
             120 => read_prefixed!(Instruction::PushCostumeNumber),
             121 => read_prefixed!(Instruction::PushCostumeList),
-            122 => read_prefixed!(Instruction::PushCostumeName),
+            122 => read_prefixed!(Instruction::PushCostumeProperty {} : prop),
 
             123 => read_prefixed!(Instruction::SetCostume),
             124 => read_prefixed!(Instruction::NextCostume),
 
             125 => read_prefixed!(Instruction::PushSoundList),
-            126 => read_prefixed!(Instruction::PushSoundName),
+            126 => read_prefixed!(Instruction::PushSoundProperty {} : prop),
 
             127 => read_prefixed!(Instruction::PlaySound { blocking: true }),
             128 => read_prefixed!(Instruction::PlaySound { blocking: false }),
@@ -1081,13 +1081,13 @@ impl BinaryWrite for Instruction<'_> {
             Instruction::PushCostume => append_prefixed!(119),
             Instruction::PushCostumeNumber => append_prefixed!(120),
             Instruction::PushCostumeList => append_prefixed!(121),
-            Instruction::PushCostumeName => append_prefixed!(122),
+            Instruction::PushCostumeProperty { prop } => append_prefixed!(122: prop),
 
             Instruction::SetCostume => append_prefixed!(123),
             Instruction::NextCostume => append_prefixed!(124),
 
             Instruction::PushSoundList => append_prefixed!(125),
-            Instruction::PushSoundName => append_prefixed!(126),
+            Instruction::PushSoundProperty { prop } => append_prefixed!(126: prop),
 
             Instruction::PlaySound { blocking: true } => append_prefixed!(127),
             Instruction::PlaySound { blocking: false } => append_prefixed!(128),
@@ -1566,9 +1566,9 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
             ast::ExprKind::Costume => self.ins.push(Instruction::PushCostume.into()),
             ast::ExprKind::CostumeNumber => self.ins.push(Instruction::PushCostumeNumber.into()),
             ast::ExprKind::CostumeList => self.ins.push(Instruction::PushCostumeList.into()),
-            ast::ExprKind::CostumeName { costume } => self.append_simple_ins(entity, &[costume], Instruction::PushCostumeName)?,
+            ast::ExprKind::CostumeName { costume } => self.append_simple_ins(entity, &[costume], Instruction::PushCostumeProperty { prop: ImageProperty::Name })?,
             ast::ExprKind::SoundList => self.ins.push(Instruction::PushSoundList.into()),
-            ast::ExprKind::SoundName { sound } => self.append_simple_ins(entity, &[sound], Instruction::PushSoundName)?,
+            ast::ExprKind::SoundName { sound } => self.append_simple_ins(entity, &[sound], Instruction::PushSoundProperty { prop: AudioProperty::Name })?,
             ast::ExprKind::Size => self.ins.push(Instruction::PushProperty { prop: Property::Size }.into()),
             ast::ExprKind::IsVisible => self.ins.push(Instruction::PushProperty { prop: Property::Visible }.into()),
             ast::ExprKind::Entity { trans_name, .. } => self.ins.push(Instruction::PushEntity { name: trans_name }.into()),

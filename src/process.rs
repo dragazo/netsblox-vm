@@ -1230,12 +1230,23 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(Value::List(Gc::new(mc, RefLock::new(entity.costume_list.iter().map(|x| Value::Image(x.1.clone())).collect()))));
                 self.pos = aft_pos;
             }
-            Instruction::PushCostumeName => {
-                let costume = self.value_stack.pop().unwrap();
-                self.value_stack.push(match costume {
-                    Value::String(x) if x.is_empty() => empty_string().into(),
-                    Value::Image(x) => Rc::new(x.name.clone()).into(),
+            Instruction::PushCostumeProperty { prop } => {
+                let mut entity_raw = self.call_stack.last().unwrap().entity.borrow_mut(mc);
+                let entity = &mut *entity_raw;
+
+                let costume = match self.value_stack.pop().unwrap() {
+                    Value::String(x) => match x.as_str() {
+                        "" => None,
+                        x => match entity.costume_list.get(x) {
+                            Some(x) => Some(x.clone()),
+                            None => return Err(ErrorCause::UndefinedCostume { name: x.into() }),
+                        }
+                    }
+                    Value::Image(x) => Some(x),
                     x => return Err(ErrorCause::ConversionError { got: x.get_type(), expected: Type::Image }),
+                };
+                self.value_stack.push(match prop {
+                    ImageProperty::Name => costume.map(|x| Rc::new(x.name.clone())).unwrap_or_else(empty_string).into(),
                 });
                 self.pos = aft_pos;
             }
@@ -1297,7 +1308,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.value_stack.push(Value::List(Gc::new(mc, RefLock::new(entity.sound_list.iter().map(|x| Value::Audio(x.1.clone())).collect()))));
                 self.pos = aft_pos;
             }
-            Instruction::PushSoundName => {
+            Instruction::PushSoundProperty { prop } => {
                 let entity_raw = self.call_stack.last().unwrap().entity.borrow();
                 let entity = &*entity_raw;
 
@@ -1309,9 +1320,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     }
                     x => return Err(ErrorCause::ConversionError { got: x.get_type(), expected: Type::Audio }),
                 };
-
-                self.value_stack.push(Rc::new(sound.name.clone()).into());
-
+                self.value_stack.push(match prop {
+                    AudioProperty::Name => Rc::new(sound.name.clone()).into(),
+                });
                 self.pos = aft_pos;
             }
             Instruction::PlaySound { blocking } => {

@@ -295,6 +295,17 @@ fn test_color_rgb_to_hsv() {
 
 #[derive(Debug, Clone, Copy, FromPrimitive)]
 #[repr(u8)]
+pub enum ImageProperty {
+    Name,
+}
+#[derive(Debug, Clone, Copy, FromPrimitive)]
+#[repr(u8)]
+pub enum AudioProperty {
+    Name,
+}
+
+#[derive(Debug, Clone, Copy, FromPrimitive)]
+#[repr(u8)]
 pub enum Property {
     XPos, YPos, Heading,
 
