@@ -45,6 +45,13 @@ impl From<ProcessKind<'_, '_, C, StdSystem<C>>> for ProcessState {
     }
 }
 
+struct CallFrameState;
+impl From<CallFrameKind<'_, '_, C, StdSystem<C>>> for CallFrameState {
+    fn from(_: CallFrameKind<'_, '_, C, StdSystem<C>>) -> Self {
+        CallFrameState
+    }
+}
+
 fn default_properties_config() -> Config<C, StdSystem<C>> {
     Config {
         request: Some(Rc::new(|_, key, request, proc| {
@@ -76,6 +83,7 @@ impl CustomTypes<StdSystem<C>> for C {
 
     type EntityState = EntityState;
     type ProcessState = ProcessState;
+    type CallFrameState = CallFrameState;
 
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Value<'gc, C, StdSystem<C>> {
         Value::from_simple(mc, value)

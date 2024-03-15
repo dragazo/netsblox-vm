@@ -1150,18 +1150,26 @@ impl<C: CustomTypes<S>, S: System<C>> fmt::Debug for Closure<'_, C, S> {
     }
 }
 
-/// The kind of entity being represented.
+/// The kind of [`Entity`] being represented.
 pub enum EntityKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     Stage { props: Properties },
     Sprite { props: Properties },
     Clone { parent: &'a Entity<'gc, C, S> },
 }
-/// The kind of process being represented.
+/// The kind of [`Process`] being represented.
 pub struct ProcessKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     /// The entity associated with the new process.
     pub entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
     /// The existing process, if any, which triggered the creation of the new process.
     pub dispatcher: Option<&'a Process<'gc, C, S>>,
+}
+/// Type kind of [`CallFrame`] being represented.
+pub struct CallFrameKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
+    /// The entity that will be associated with the newly-constructed call frame.
+    /// Notably this may not be the same as the entity associated with the last call frame reported by [`Process::get_call_stack`].
+    pub entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
+    /// The process that will be associated with the newly-constructed call frame.
+    pub proc: &'a Process<'gc, C, S>,
 }
 
 /// Information about an entity (sprite or stage).
@@ -1803,6 +1811,11 @@ pub trait CustomTypes<S: System<Self>>: 'static + Sized {
     /// This should include any details outside of core process functionality (e.g., external script-locals).
     /// This type should be constructable from [`ProcessKind`], which is used to initialize a new process in the runtime.
     type ProcessState: 'static + for<'gc, 'a> From<ProcessKind<'gc, 'a, Self, S>>;
+
+    /// Type used to represent a call frame's system-specific state.
+    /// This should include any details outside of core call frame functionality (e.g., externally-managed scope-based objects).
+    /// This type should be constructible from [`CallFrameKind`], which is used to initialize the state of each new call frame.
+    type CallFrameState: 'static + for<'gc, 'a> From<CallFrameKind<'gc, 'a, Self, S>>;
 
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Value<'gc, Self, S>;

@@ -52,6 +52,13 @@ impl From<ProcessKind<'_, '_, C, StdSystem<C>>> for ProcessState {
     }
 }
 
+struct CallFrameState; // a type to hold custom call frame state - we don't have any, so just use a unit struct
+impl From<CallFrameKind<'_, '_, C, StdSystem<C>>> for CallFrameState {
+    fn from(_: CallFrameKind<'_, '_, C, StdSystem<C>>) -> Self {
+        CallFrameState
+    }
+}
+
 struct C; // a type to hold all of our custom type definitions for the vm to use
 impl CustomTypes<StdSystem<C>> for C {
     type NativeValue = NativeValue; // a type to hold any native rust values exposed to the vm
@@ -59,6 +66,7 @@ impl CustomTypes<StdSystem<C>> for C {
 
     type EntityState = EntityState; // a type to hold the custom state for an entity (sprite or stage)
     type ProcessState = ProcessState; // a type to hold the custom state for a process (script)
+    type CallFrameState = CallFrameState; // a type to hold the custom state for a call frame
 
     // a function to convert intermediate values into native vm values
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Value<'gc, C, StdSystem<C>> {
