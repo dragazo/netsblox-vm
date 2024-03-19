@@ -1163,14 +1163,6 @@ pub struct ProcessKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
     /// The existing process, if any, which triggered the creation of the new process.
     pub dispatcher: Option<&'a Process<'gc, C, S>>,
 }
-/// Type kind of [`CallFrame`] being represented.
-pub struct CallFrameKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
-    /// The entity that will be associated with the newly-constructed call frame.
-    /// Notably this may not be the same as the entity associated with the last call frame reported by [`Process::get_call_stack`].
-    pub entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
-    /// The process that will be associated with the newly-constructed call frame.
-    pub proc: &'a Process<'gc, C, S>,
-}
 
 /// Information about an entity (sprite or stage).
 #[derive(Collect)]
@@ -1788,6 +1780,17 @@ impl<C: CustomTypes<S>, S: System<C>> Config<C, S> {
     }
 }
 
+/// Represents a stack-like object that can unwind back to an arbitrary earlier point.
+pub trait Unwindable {
+    /// A type to hold any information necessary to unwind the [`Unwindable`] type to an arbitrary earlier point.
+    type UnwindPoint: 'static;
+
+    /// Gets a new unwind point that can later be used to unwind the [`Unwindable`] type to the current point.
+    fn get_unwind_point(&self) -> Self::UnwindPoint;
+    /// Unwinds the [`Unwindable`] type to the given earlier point.
+    fn unwind_to(&mut self, unwind_point: &Self::UnwindPoint);
+}
+
 /// A collection of static settings for using custom native types.
 pub trait CustomTypes<S: System<Self>>: 'static + Sized {
     /// A native type that can be exposed directly to the VM as a value of type [`Value::Native`].
@@ -1810,12 +1813,7 @@ pub trait CustomTypes<S: System<Self>>: 'static + Sized {
     /// Type used to represent a process's system-specific state.
     /// This should include any details outside of core process functionality (e.g., external script-locals).
     /// This type should be constructable from [`ProcessKind`], which is used to initialize a new process in the runtime.
-    type ProcessState: 'static + for<'gc, 'a> From<ProcessKind<'gc, 'a, Self, S>>;
-
-    /// Type used to represent a call frame's system-specific state.
-    /// This should include any details outside of core call frame functionality (e.g., externally-managed scope-based objects).
-    /// This type should be constructible from [`CallFrameKind`], which is used to initialize the state of each new call frame.
-    type CallFrameState: 'static + for<'gc, 'a> From<CallFrameKind<'gc, 'a, Self, S>>;
+    type ProcessState: 'static + Unwindable + for<'gc, 'a> From<ProcessKind<'gc, 'a, Self, S>>;
 
     /// Converts a [`Value`] into a [`CustomTypes::Intermediate`] for use outside of gc context.
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Value<'gc, Self, S>;

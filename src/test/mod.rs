@@ -8,6 +8,7 @@ use crate::process::*;
 use crate::std_system::*;
 use crate::std_util::*;
 use crate::gc::*;
+use compact_str::*;
 
 mod process;
 mod project;
@@ -38,17 +39,23 @@ impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
     }
 }
 
-struct ProcessState;
+struct ProcessState {
+    tokens: Vec<CompactString>,
+}
 impl From<ProcessKind<'_, '_, C, StdSystem<C>>> for ProcessState {
     fn from(_: ProcessKind<'_, '_, C, StdSystem<C>>) -> Self {
-        ProcessState
+        Self {
+            tokens: vec![],
+        }
     }
 }
-
-struct CallFrameState;
-impl From<CallFrameKind<'_, '_, C, StdSystem<C>>> for CallFrameState {
-    fn from(_: CallFrameKind<'_, '_, C, StdSystem<C>>) -> Self {
-        CallFrameState
+impl Unwindable for ProcessState {
+    type UnwindPoint = usize;
+    fn get_unwind_point(&self) -> Self::UnwindPoint {
+        self.tokens.len()
+    }
+    fn unwind_to(&mut self, unwind_point: &Self::UnwindPoint) {
+        self.tokens.drain(*unwind_point..);
     }
 }
 
@@ -83,7 +90,6 @@ impl CustomTypes<StdSystem<C>> for C {
 
     type EntityState = EntityState;
     type ProcessState = ProcessState;
-    type CallFrameState = CallFrameState;
 
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Value<'gc, C, StdSystem<C>> {
         Value::from_simple(mc, value)

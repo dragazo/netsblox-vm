@@ -7,7 +7,7 @@ use std::io::{BufRead, Write, BufReader, BufWriter};
 
 use netsblox_vm::cli::{run, Mode};
 use netsblox_vm::template::SyscallMenu;
-use netsblox_vm::runtime::{GetType, Value, Type, EntityKind, Request, RequestStatus, Config, CustomTypes, Key, SimpleValue, ProcessKind, CallFrameKind};
+use netsblox_vm::runtime::{GetType, Value, Type, EntityKind, Request, RequestStatus, Config, CustomTypes, Key, SimpleValue, ProcessKind, Unwindable};
 use netsblox_vm::std_system::StdSystem;
 use netsblox_vm::gc::Mutation;
 use netsblox_vm::compact_str::format_compact;
@@ -54,12 +54,10 @@ impl From<ProcessKind<'_, '_, C, StdSystem<C>>> for ProcessState {
         ProcessState
     }
 }
-
-struct CallFrameState;
-impl From<CallFrameKind<'_, '_, C, StdSystem<C>>> for CallFrameState {
-    fn from(_: CallFrameKind<'_, '_, C, StdSystem<C>>) -> Self {
-        CallFrameState
-    }
+impl Unwindable for ProcessState {
+    type UnwindPoint = ();
+    fn get_unwind_point(&self) -> Self::UnwindPoint { }
+    fn unwind_to(&mut self, _: &Self::UnwindPoint) { }
 }
 
 enum Intermediate {
@@ -79,7 +77,6 @@ impl CustomTypes<StdSystem<C>> for C {
 
     type EntityState = EntityState;
     type ProcessState = ProcessState;
-    type CallFrameState = CallFrameState;
 
     fn from_intermediate<'gc>(mc: &Mutation<'gc>, value: Self::Intermediate) -> Value<'gc, C, StdSystem<C>> {
         match value {

@@ -1,6 +1,7 @@
 use alloc::rc::Rc;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
+use alloc::boxed::Box;
 
 use core::cell::RefCell;
 use core::fmt::Write;
@@ -24,8 +25,7 @@ struct Env<'gc> {
 }
 type EnvArena = Arena<Rootable![Env<'_>]>;
 
-fn get_running_proc<'a, F>(xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>, locals: F) -> (EnvArena, Locations) where F: for<'gc> FnOnce(&Mutation<'gc>) -> SymbolTable<'gc, C, StdSystem<C>>{
-    let parser = ast::Parser::default();
+fn get_running_proc<'a, F>(parser: ast::Parser, xml: &'a str, settings: Settings, system: Rc<StdSystem<C>>, locals: F) -> (EnvArena, Locations) where F: for<'gc> FnOnce(&Mutation<'gc>) -> SymbolTable<'gc, C, StdSystem<C>>{
     let ast = parser.parse(xml).unwrap();
     assert_eq!(ast.roles.len(), 1);
 
@@ -94,7 +94,7 @@ fn run_till_term<F>(env: &mut EnvArena, and_then: F) where F: for<'gc> FnOnce(&M
 #[test]
 fn test_proc_ret() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/ret.xml"),
@@ -112,7 +112,7 @@ fn test_proc_sum_123n() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
 
     for (n, expect) in [(0, json!("0")), (1, json!(1)), (2, json!(3)), (3, json!(6)), (4, json!(10)), (5, json!(15)), (6, json!(21))] {
-        let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
             globals = "",
             fields = "",
             funcs = include_str!("blocks/sum-123n.xml"),
@@ -134,7 +134,7 @@ fn test_proc_recursive_factorial() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
 
     for (n, expect) in [(0, json!("1")), (1, json!("1")), (2, json!(2)), (3, json!(6)), (4, json!(24)), (5, json!(120)), (6, json!(720)), (7, json!(5040))] {
-        let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
             globals = "",
             fields = "",
             funcs = include_str!("blocks/recursive-factorial.xml"),
@@ -154,7 +154,7 @@ fn test_proc_recursive_factorial() {
 #[test]
 fn test_proc_loops_lists_basic() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/loops-lists-basic.xml"),
@@ -194,7 +194,7 @@ fn test_proc_loops_lists_basic() {
 #[test]
 fn test_proc_recursively_self_containing_lists() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/recursively-self-containing-lists.xml"),
@@ -240,7 +240,7 @@ fn test_proc_recursively_self_containing_lists() {
 fn test_proc_sieve_of_eratosthenes() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
 
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/sieve-of-eratosthenes.xml"),
@@ -260,7 +260,7 @@ fn test_proc_sieve_of_eratosthenes() {
 #[test]
 fn test_proc_early_return() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/early-return.xml"),
@@ -276,7 +276,7 @@ fn test_proc_early_return() {
 #[test]
 fn test_proc_short_circuit() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/short-circuit.xml"),
@@ -304,7 +304,7 @@ fn test_proc_short_circuit() {
 #[test]
 fn test_proc_all_arithmetic() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/all-arithmetic.xml"),
@@ -348,7 +348,7 @@ fn test_proc_all_arithmetic() {
 #[test]
 fn test_proc_lambda_local_shadow_capture() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/lambda-local-shadow-capture.xml"),
@@ -364,7 +364,7 @@ fn test_proc_lambda_local_shadow_capture() {
 #[test]
 fn test_proc_custom_script_vars() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/custom-script-vars.xml"),
@@ -387,7 +387,7 @@ fn test_proc_custom_script_vars() {
 #[test]
 fn test_proc_upvars() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/upvars.xml"),
@@ -482,7 +482,7 @@ fn test_proc_upvars() {
 #[test]
 fn test_proc_generators_nested() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/generators-nested.xml"),
@@ -498,7 +498,7 @@ fn test_proc_generators_nested() {
 #[test]
 fn test_proc_call_in_closure() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/call-in-closure.xml"),
@@ -519,7 +519,7 @@ fn test_proc_warp_yields() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
 
     for (mode, (expected_counter, expected_yields)) in [(12, 12), (13, 13), (17, 0), (18, 0), (16, 0), (17, 2), (14, 0), (27, 3), (30, 7), (131, 109), (68, 23), (51, 0), (63, 14)].into_iter().enumerate() {
-        let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
             globals = r#"<variable name="counter"><l>0</l></variable>"#,
             fields = "",
             funcs = include_str!("blocks/warp-yields.xml"),
@@ -543,7 +543,7 @@ fn test_proc_warp_yields() {
 #[test]
 fn test_proc_string_ops() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/string-ops.xml"),
@@ -604,7 +604,7 @@ fn test_proc_string_ops() {
 #[test]
 fn test_proc_str_cmp_case_insensitive() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/str-cmp-case-insensitive.xml"),
@@ -628,7 +628,7 @@ fn test_proc_rpc_call_basic() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
 
     for (lat, long, city) in [(36.1627, -86.7816, "Nashville"), (40.8136, -96.7026, "Lincoln"), (40.7608, -111.8910, "Salt Lake City")] {
-        let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+        let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
             globals = "",
             fields = "",
             funcs = include_str!("blocks/rpc-call-basic.xml"),
@@ -649,7 +649,7 @@ fn test_proc_rpc_call_basic() {
 #[test]
 fn test_proc_list_index_blocks() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-index-blocks.xml"),
@@ -682,7 +682,7 @@ fn test_proc_list_index_blocks() {
 #[test]
 fn test_proc_literal_types() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/literal-types.xml"),
@@ -711,7 +711,7 @@ fn test_proc_say() {
         })),
     };
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/say.xml"),
@@ -755,7 +755,7 @@ fn test_proc_syscall() {
         ..Default::default()
     };
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/syscall.xml"),
@@ -777,7 +777,7 @@ fn test_proc_syscall() {
 #[test]
 fn test_proc_timer_wait() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/timer-wait.xml"),
@@ -796,7 +796,7 @@ fn test_proc_timer_wait() {
 #[test]
 fn test_proc_cons_cdr() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/cons-cdr.xml"),
@@ -823,7 +823,7 @@ fn test_proc_cons_cdr() {
 #[test]
 fn test_proc_list_find_contains() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-find-contains.xml"),
@@ -851,7 +851,7 @@ fn test_proc_list_find_contains() {
 #[test]
 fn test_proc_append() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/append.xml"),
@@ -874,7 +874,7 @@ fn test_proc_append() {
 #[test]
 fn test_proc_foreach_mutate() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/foreach-mutate.xml"),
@@ -894,7 +894,7 @@ fn test_proc_foreach_mutate() {
 #[test]
 fn test_proc_map() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
         funcs = include_str!("blocks/map.xml"),
@@ -914,7 +914,7 @@ fn test_proc_map() {
 #[test]
 fn test_proc_keep_find() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
         funcs = include_str!("blocks/keep-find.xml"),
@@ -936,7 +936,7 @@ fn test_proc_keep_find() {
 #[test]
 fn test_proc_numeric_bases() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/numeric-bases.xml"),
@@ -958,7 +958,7 @@ fn test_proc_numeric_bases() {
 #[test]
 fn test_proc_combine() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
         funcs = include_str!("blocks/combine.xml"),
@@ -985,7 +985,7 @@ fn test_proc_combine() {
 #[test]
 fn test_proc_autofill_closure_params() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="foo"><l>0</l></variable>"#,
         fields = "",
         funcs = include_str!("blocks/autofill-closure-params.xml"),
@@ -1007,7 +1007,7 @@ fn test_proc_autofill_closure_params() {
 #[test]
 fn test_proc_pick_random() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/pick-random.xml"),
@@ -1068,7 +1068,7 @@ fn test_proc_pick_random() {
 #[test]
 fn test_proc_tensor_list_idx() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/tensor-list-idx.xml"),
@@ -1130,7 +1130,7 @@ fn test_proc_tensor_list_idx() {
 #[test]
 fn test_proc_rand_list_ops() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/rand-list-ops.xml"),
@@ -1184,7 +1184,7 @@ fn test_proc_rand_list_ops() {
 #[test]
 fn test_proc_variadic_sum_product() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/variadic-sum-product.xml"),
@@ -1211,7 +1211,7 @@ fn test_proc_variadic_sum_product() {
 #[test]
 fn test_proc_preserve_tensor_topology() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/preserve-tensor-topology.xml"),
@@ -1233,7 +1233,7 @@ fn test_proc_preserve_tensor_topology() {
 #[test]
 fn test_proc_variadic_min_max() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/variadic-min-max.xml"),
@@ -1249,7 +1249,7 @@ fn test_proc_variadic_min_max() {
 #[test]
 fn test_proc_atan2_new_cmp() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/atan2-new-cmp.xml"),
@@ -1274,7 +1274,7 @@ fn test_proc_atan2_new_cmp() {
 #[test]
 fn test_proc_list_columns() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-columns.xml"),
@@ -1318,7 +1318,7 @@ fn test_proc_list_columns() {
 #[test]
 fn test_proc_transpose_consistency() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/transpose-consistency.xml"),
@@ -1344,7 +1344,7 @@ fn test_proc_transpose_consistency() {
 #[test]
 fn test_proc_compare_str() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/compare-str.xml"),
@@ -1413,7 +1413,7 @@ fn test_proc_compare_str() {
 #[test]
 fn test_proc_new_min_max() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/new-min-max.xml"),
@@ -1442,7 +1442,7 @@ fn test_proc_new_min_max() {
 #[test]
 fn test_proc_flatten() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/flatten.xml"),
@@ -1463,7 +1463,7 @@ fn test_proc_flatten() {
 #[test]
 fn test_proc_list_len_rank_dims() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-len-rank-dims.xml"),
@@ -1489,7 +1489,7 @@ fn test_proc_list_len_rank_dims() {
 #[test]
 fn test_proc_string_index() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/string-index.xml"),
@@ -1512,7 +1512,7 @@ fn test_proc_string_index() {
 #[test]
 fn test_proc_type_query() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/type-query.xml"),
@@ -1541,7 +1541,7 @@ fn test_proc_type_query() {
 #[test]
 fn test_proc_variadic_strcat() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/variadic-strcat.xml"),
@@ -1562,7 +1562,7 @@ fn test_proc_variadic_strcat() {
 #[test]
 fn test_proc_list_lines() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-lines.xml"),
@@ -1583,7 +1583,7 @@ fn test_proc_list_lines() {
 #[test]
 fn test_proc_whitespace_in_numbers() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/whitespace-in-numbers.xml"),
@@ -1608,7 +1608,7 @@ fn test_proc_whitespace_in_numbers() {
 #[test]
 fn test_proc_binary_make_range() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/binary-make-range.xml"),
@@ -1643,7 +1643,7 @@ fn test_proc_binary_make_range() {
 #[test]
 fn test_proc_identical_to() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/identical-to.xml"),
@@ -1664,7 +1664,7 @@ fn test_proc_identical_to() {
 #[test]
 fn test_proc_variadic_list_ctors() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/variadic-list-ctors.xml"),
@@ -1692,7 +1692,7 @@ fn test_proc_variadic_list_ctors() {
 #[test]
 fn test_proc_list_rev() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-rev.xml"),
@@ -1712,7 +1712,7 @@ fn test_proc_list_rev() {
 #[test]
 fn test_proc_list_reshape() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-reshape.xml"),
@@ -1748,7 +1748,7 @@ fn test_proc_list_reshape() {
 #[test]
 fn test_proc_list_json() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-json.xml"),
@@ -1771,7 +1771,7 @@ fn test_proc_list_json() {
 #[test]
 fn test_proc_explicit_to_string_cvt() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/explicit-to-string-cvt.xml"),
@@ -1797,7 +1797,7 @@ fn test_proc_explicit_to_string_cvt() {
 #[test]
 fn test_proc_empty_variadic_no_auto_insert() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/empty-variadic-no-auto-insert.xml"),
@@ -1819,7 +1819,7 @@ fn test_proc_empty_variadic_no_auto_insert() {
 #[test]
 fn test_proc_c_ring_no_auto_insert() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/c-ring-no-auto-insert.xml"),
@@ -1841,7 +1841,7 @@ fn test_proc_c_ring_no_auto_insert() {
 #[test]
 fn test_proc_signed_zero() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/signed-zero.xml"),
@@ -1866,7 +1866,7 @@ fn test_proc_signed_zero() {
 #[test]
 fn test_proc_singleton_sum_product() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/singleton-sum-product.xml"),
@@ -1885,7 +1885,7 @@ fn test_proc_singleton_sum_product() {
 #[test]
 fn test_proc_list_combinations() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/list-combinations.xml"),
@@ -1929,7 +1929,7 @@ fn test_proc_list_combinations() {
 #[test]
 fn test_proc_unevaluated_inputs() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/unevaluated-inputs.xml"),
@@ -1947,7 +1947,7 @@ fn test_proc_unevaluated_inputs() {
 #[test]
 fn test_proc_index_over_bounds() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, ins_locs) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, ins_locs) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/index-over-bounds.xml"),
@@ -1970,7 +1970,7 @@ fn test_proc_index_over_bounds() {
 #[test]
 fn test_proc_neg_collab_ids() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, ins_locs) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, ins_locs) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/neg-collab-ids.xml"),
@@ -2044,7 +2044,7 @@ fn test_proc_basic_motion() {
     };
 
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/basic-motion.xml"),
@@ -2073,7 +2073,7 @@ fn test_proc_basic_motion() {
 #[test]
 fn test_proc_string_cmp() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/string-cmp.xml"),
@@ -2094,7 +2094,7 @@ fn test_proc_string_cmp() {
 #[test]
 fn test_proc_stack_overflow() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, locs) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, locs) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = r#"<variable name="g"><l>0</l></variable>"#,
         fields = r#"<variable name="f"><l>0</l></variable>"#,
         funcs = "",
@@ -2133,7 +2133,7 @@ fn test_proc_stack_overflow() {
 #[test]
 fn test_proc_variadic_params() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/variadic-params.xml"),
@@ -2164,7 +2164,7 @@ fn test_proc_variadic_params() {
 #[test]
 fn test_proc_rand_str_char_cache() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/rand-str-char-cache.xml"),
@@ -2191,7 +2191,7 @@ fn test_proc_rand_str_char_cache() {
 #[test]
 fn test_proc_noop_upvars() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/noop-upvars.xml"),
@@ -2207,7 +2207,7 @@ fn test_proc_noop_upvars() {
 #[test]
 fn test_proc_try_catch_throw() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/try-catch-throw.xml"),
@@ -2223,7 +2223,7 @@ fn test_proc_try_catch_throw() {
 #[test]
 fn test_proc_exception_unregister() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/exception-unregister.xml"),
@@ -2239,7 +2239,7 @@ fn test_proc_exception_unregister() {
 #[test]
 fn test_proc_exception_rethrow() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/exception-rethrow.xml"),
@@ -2255,7 +2255,7 @@ fn test_proc_exception_rethrow() {
 #[test]
 fn test_proc_rpc_error() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/rpc-error.xml"),
@@ -2277,7 +2277,7 @@ fn test_proc_rpc_error() {
 #[test]
 fn test_proc_c_rings() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/c-rings.xml"),
@@ -2301,7 +2301,7 @@ fn test_proc_c_rings() {
 fn test_proc_wall_time() {
     let utc_offset = UtcOffset::from_hms(5, 14, 20).unwrap();
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(utc_offset, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/wall-time.xml"),
@@ -2328,7 +2328,7 @@ fn test_proc_wall_time() {
 #[test]
 fn test_proc_to_csv() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/to-csv.xml"),
@@ -2354,7 +2354,7 @@ fn test_proc_to_csv() {
 #[test]
 fn test_proc_from_csv() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/from-csv.xml"),
@@ -2388,7 +2388,7 @@ fn test_proc_from_csv() {
 #[test]
 fn test_proc_extra_cmp_tests() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/extra-cmp-tests.xml"),
@@ -2422,7 +2422,7 @@ fn test_proc_extra_cmp_tests() {
 #[test]
 fn test_proc_stop_fn() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/stop-fn.xml"),
@@ -2451,6 +2451,144 @@ fn test_proc_stop_fn() {
             "",
         ])).unwrap());
         assert_values_eq(&res.unwrap().0, &expect, 1e-5, "stop fn");
+    });
+}
+
+#[test]
+fn test_proc_ext_raii() {
+    let config = Config::<C, StdSystem<C>> {
+        request: Some(Rc::new(move |_, key, request, proc| match &request {
+            Request::UnknownBlock { name, args } => {
+                match name.as_str() {
+                    "scopeBlock::enter" => {
+                        assert_eq!(args.len(), 1);
+                        proc.state.tokens.push(args[0].as_string().unwrap().into_owned());
+                        key.complete(Ok(SimpleValue::Number(Number::new(0.0).unwrap())));
+                        return RequestStatus::Handled;
+                    }
+                    "scopeBlock::exit" => {
+                        assert_eq!(args.len(), 0);
+                        proc.state.tokens.pop().unwrap();
+                        key.complete(Ok(SimpleValue::Number(Number::new(0.0).unwrap())));
+                        return RequestStatus::Handled;
+                    }
+                    "getSomething" => {
+                        assert_eq!(args.len(), 0);
+                        key.complete(Ok(proc.state.tokens.join_compact(",").into()));
+                        return RequestStatus::Handled;
+                    }
+                    _ => return RequestStatus::UseDefault { key, request },
+                }
+            }
+            _ => RequestStatus::UseDefault { key, request },
+        })),
+        command: None,
+    };
+    let parser = ast::Parser {
+        stmt_replacements: vec![
+            ("scopeBlock".into(), Box::new(|mut args, info, _| {
+                assert_eq!(args.len(), 2);
+                let f = Box::new(args.pop().unwrap());
+                let v = args.pop().unwrap();
+                Ok(vec![
+                    ast::Stmt { kind: ast::StmtKind::UnknownBlock { name: "scopeBlock::enter".into(), args: vec![v] }, info },
+                    ast::Stmt { kind: ast::StmtKind::CallClosure { closure: f, args: vec![], new_entity: None }, info: ast::BlockInfo::none() },
+                    ast::Stmt { kind: ast::StmtKind::UnknownBlock { name: "scopeBlock::exit".into(), args: vec![] }, info: ast::BlockInfo::none() },
+                ])
+            })),
+        ],
+        ..Default::default()
+    };
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let (mut env, _) = get_running_proc(parser, &format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/ext-raii.xml"),
+        methods = "",
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
+            "",
+            "",
+            "end",
+            "end,my",
+            "end,my,suffering",
+            "end,my",
+            "end",
+            "",
+            "",
+
+            "help",
+            "help",
+            "help,end",
+            "help,end,my",
+            "help,end,my,suffering",
+            "help,end,my",
+            "help,end",
+            "help",
+            "help",
+
+            "help,me",
+            "help,me",
+            "help,me,end",
+            "help,me,end,my",
+            "help,me,end,my,suffering",
+            "help,me,end,my",
+            "help,me,end",
+            "help,me",
+            "help,me",
+
+            "help,me,please",
+            "help,me,please",
+            "help,me,please,end",
+            "help,me,please,end,my",
+            "help,me,please,end,my,suffering",
+            "help,me,please,end,my",
+            "help,me,please,end",
+            "help,me,please",
+            "help,me,please",
+
+            "help,me",
+            "help",
+            "",
+
+            "halp",
+            "halp,mi",
+            "halp,mi",
+            "halp,mi,end",
+            "halp,mi,end,my",
+            "catch 1",
+            "",
+            "",
+
+            "hlp,m,pl",
+            "hlp,m,pl",
+            "hlp,m,pl,end",
+            "hlp,m,pl,end,my",
+            "catch 2",
+            "hlp,m",
+            "",
+
+            "hl",
+            "hl,mee",
+            "hl,mee,plz",
+            "catch 3",
+            "hl,mee",
+            "hl,mee",
+            "hl",
+            "",
+
+            "heelp,miii,plox",
+            "heelp,miii,plox",
+            "heelp,miii,plox,end",
+            "heelp,miii,plox,end,my",
+            "heelp,miii,plox,end",
+            "heelp,miii,plox",
+            "heelp,miii,plox",
+            "",
+        ])).unwrap());
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "call frame state");
     });
 }
 
@@ -2516,7 +2654,7 @@ fn test_proc_extra_blocks() {
     };
 
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/extra-blocks.xml"),
@@ -2559,7 +2697,7 @@ fn test_proc_play_notes() {
         })),
     };
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, config, Arc::new(Clock::new(UtcOffset::UTC, None))));
-    let (mut env, _) = get_running_proc(&format!(include_str!("templates/generic-static.xml"),
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
         globals = "",
         fields = "",
         funcs = include_str!("blocks/play-notes.xml"),

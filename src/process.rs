@@ -156,19 +156,20 @@ pub struct CallFrame<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)]     return_to: usize,
                                pub entity: Gc<'gc, RefLock<Entity<'gc, C, S>>>,
                                pub locals: SymbolTable<'gc, C, S>,
-    #[collect(require_static)] pub state: C::CallFrameState,
 
-    #[collect(require_static)]     warp_counter: usize,
-    #[collect(require_static)]     value_stack_size: usize,
-    #[collect(require_static)]     handler_stack_size: usize,
+    #[collect(require_static)] warp_counter: usize,
+    #[collect(require_static)] value_stack_size: usize,
+    #[collect(require_static)] handler_stack_size: usize,
+    #[collect(require_static)] unwind_point: <C::ProcessState as Unwindable>::UnwindPoint,
 }
 
-struct Handler {
+struct Handler<C: CustomTypes<S>, S: System<C>> {
     pos: usize,
     var: CompactString,
     warp_counter: usize,
     call_stack_size: usize,
     value_stack_size: usize,
+    unwind_point: <C::ProcessState as Unwindable>::UnwindPoint,
 }
 
 enum Defer<C: CustomTypes<S>, S: System<C>> {
@@ -212,7 +213,7 @@ pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)]     warp_counter: usize,
                                    call_stack: Vec<CallFrame<'gc, C, S>>,
                                    value_stack: Vec<Value<'gc, C, S>>,
-    #[collect(require_static)]     handler_stack: Vec<Handler>,
+    #[collect(require_static)]     handler_stack: Vec<Handler<C, S>>,
     #[collect(require_static)]     defer: Option<Defer<C, S>>,
                                    last_syscall_error: Option<Value<'gc, C, S>>,
                                    last_rpc_error: Option<Value<'gc, C, S>>,
@@ -222,14 +223,24 @@ pub struct Process<'gc, C: CustomTypes<S>, S: System<C>> {
 impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
     /// Creates a new [`Process`] with the given starting context.
     pub fn new(context: ProcContext<'gc, C, S>) -> Self {
-        let mut res = Self {
+        let unwind_point = context.state.get_unwind_point();
+        Self {
             global_context: context.global_context,
             barrier: context.barrier,
             reply_key: context.reply_key,
             pos: context.start_pos,
             warp_counter: 0,
             state: context.state,
-            call_stack: vec![],
+            call_stack: vec![CallFrame {
+                called_from: usize::MAX,
+                return_to: usize::MAX,
+                warp_counter: 0,
+                value_stack_size: 0,
+                handler_stack_size: 0,
+                unwind_point,
+                locals: context.locals,
+                entity: context.entity,
+            }],
             value_stack: vec![],
             handler_stack: vec![],
             defer: None,
@@ -237,21 +248,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             last_rpc_error: None,
             last_answer: None,
             last_message: context.local_message.map(|x| Rc::new(x).into()),
-        };
-        res.call_stack.push(CallFrame {
-            called_from: usize::MAX,
-            return_to: usize::MAX,
-            warp_counter: 0,
-            value_stack_size: 0,
-            handler_stack_size: 0,
-            locals: context.locals,
-            entity: context.entity,
-            state: C::CallFrameState::from(CallFrameKind {
-                entity: context.entity,
-                proc: &res,
-            }),
-        });
-        res
+        }
     }
     /// Checks if the process is currently running.
     /// Note that the process will not run on its own (see [`Process::step`]).
@@ -278,12 +275,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
         let mut res = self.step_impl(mc).map_err(|cause| ExecError { cause, pos: self.pos });
         if let Err(err) = &res {
-            if let Some(Handler { pos, var, warp_counter, call_stack_size, value_stack_size }) = self.handler_stack.last() {
+            if let Some(Handler { pos, var, warp_counter, call_stack_size, value_stack_size, unwind_point }) = self.handler_stack.last() {
                 self.warp_counter = *warp_counter;
                 self.call_stack.drain(*call_stack_size..);
                 self.value_stack.drain(*value_stack_size..);
                 debug_assert_eq!(self.call_stack.len(), *call_stack_size);
                 debug_assert_eq!(self.value_stack.len(), *value_stack_size);
+                self.state.unwind_to(unwind_point);
 
                 let msg = match &err.cause {
                     ErrorCause::Custom { msg } => msg.clone(),
@@ -940,12 +938,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     warp_counter: self.warp_counter,
                     value_stack_size: self.value_stack.len(),
                     handler_stack_size: self.handler_stack.len(),
+                    unwind_point: self.state.get_unwind_point(),
                     entity,
                     locals,
-                    state: C::CallFrameState::from(CallFrameKind {
-                        entity,
-                        proc: self,
-                    }),
                 });
                 self.pos = pos;
             }
@@ -974,12 +969,9 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     warp_counter: self.warp_counter,
                     value_stack_size: self.value_stack.len(),
                     handler_stack_size: self.handler_stack.len(),
+                    unwind_point: self.state.get_unwind_point(),
                     locals,
                     entity,
-                    state: C::CallFrameState::from(CallFrameKind {
-                        entity,
-                        proc: self,
-                    }),
                 });
                 self.pos = closure_pos;
             }
@@ -989,7 +981,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 return Ok(ProcessStep::Fork { pos: closure_pos, locals, entity: self.call_stack.last().unwrap().entity });
             }
             Instruction::Return => {
-                let CallFrame { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, .. } = self.call_stack.last().unwrap();
+                let CallFrame { called_from, return_to, warp_counter, value_stack_size, handler_stack_size, unwind_point, entity: _, locals: _ } = self.call_stack.last().unwrap();
                 let return_value = self.value_stack.pop().unwrap();
 
                 self.pos = *return_to;
@@ -998,6 +990,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.handler_stack.drain(handler_stack_size..);
                 debug_assert_eq!(self.value_stack.len(), *value_stack_size);
                 debug_assert_eq!(self.handler_stack.len(), *handler_stack_size);
+                self.state.unwind_to(unwind_point);
 
                 if self.call_stack.len() > 1 {
                     self.call_stack.pop();
@@ -1026,6 +1019,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     warp_counter: self.warp_counter,
                     call_stack_size: self.call_stack.len(),
                     value_stack_size: self.value_stack.len(),
+                    unwind_point: self.state.get_unwind_point(),
                 });
                 self.pos = aft_pos;
             }
