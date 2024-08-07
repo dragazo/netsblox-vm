@@ -88,7 +88,7 @@ time = { version = "0.3.36", default-features = false }
 typed-arena = { version = "2.0.2", default-features = false }
 xmlparser = { version = "0.13.6", default-features = false }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
-compact_str = { version = "0.8.0-beta", default-features = false, features = ["serde"] }
+compact_str = { version = "0.8.0", default-features = false, features = ["serde"] }
 ryu = { version = "1.0", default-features = false }
 
 # std deps
