@@ -2455,6 +2455,24 @@ fn test_proc_stop_fn() {
 }
 
 #[test]
+fn test_proc_unicode_strings() {
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/unicode-strings.xml"),
+        methods = "",
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
+            
+        ])).unwrap());
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "unicode strings");
+    });
+}
+
+#[test]
 fn test_proc_ext_raii() {
     let config = Config::<C, StdSystem<C>> {
         request: Some(Rc::new(move |_, key, request, proc| match &request {
