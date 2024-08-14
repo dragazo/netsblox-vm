@@ -90,6 +90,7 @@ xmlparser = { version = "0.13.6", default-features = false }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 compact_str = { version = "0.8.0", default-features = false, features = ["serde"] }
 ryu = { version = "1.0", default-features = false }
+unicode-segmentation = { version = "1.11.0", default-features = false }
 
 # std deps
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"], optional = true }

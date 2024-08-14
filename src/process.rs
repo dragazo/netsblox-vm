@@ -14,6 +14,7 @@ use alloc::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDeq
 use core::iter::{self, Cycle};
 use core::cmp::Ordering;
 
+use unicode_segmentation::UnicodeSegmentation;
 use unicase::UniCase;
 
 #[cfg(feature = "serde")]
@@ -1830,8 +1831,8 @@ mod ops {
 
             BinaryOp::StrGet => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
                 let string = b.as_string()?;
-                let index = prep_index(a, string.chars().count())?;
-                Ok(Rc::new(string.chars().nth(index).unwrap().to_compact_string()).into())
+                let index = prep_index(a, string.graphemes(true).count())?;
+                Ok(Rc::new(CompactString::new(string.graphemes(true).nth(index).unwrap())).into())
             }),
 
             BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
@@ -1916,23 +1917,23 @@ mod ops {
             UnaryOp::Asin     => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(libm::asin(x.as_number()?.get()).to_degrees())?.into())),
             UnaryOp::Acos     => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(libm::acos(x.as_number()?.get()).to_degrees())?.into())),
             UnaryOp::Atan     => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(libm::atan(x.as_number()?.get()).to_degrees())?.into())),
-            UnaryOp::StrLen   => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(x.as_string()?.chars().count() as f64)?.into())),
+            UnaryOp::StrLen   => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(x.as_string()?.graphemes(true).count() as f64)?.into())),
 
-            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| match x.as_string()?.chars().next_back() {
-                Some(ch) => Ok(Rc::new(ch.to_compact_string()).into()),
+            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| match x.as_string()?.graphemes(true).next_back() {
+                Some(ch) => Ok(Rc::new(CompactString::new(ch)).into()),
                 None => Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }),
             }),
             UnaryOp::StrGetRandom => unary_op_impl(mc, system, x, &mut cache, OpType::Nondeterministic, &|_, system, x| {
                 let x = x.as_string()?;
-                let i = prep_rand_index(system, x.chars().count())?;
-                Ok(Rc::new(x.chars().nth(i).unwrap().to_compact_string()).into())
+                let i = prep_rand_index(system, x.graphemes(true).count())?;
+                Ok(Rc::new(CompactString::new(x.graphemes(true).nth(i).unwrap())).into())
             }),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.chars().map(|x| Rc::new(x.to_compact_string()).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.graphemes(true).map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitWord => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split_whitespace().map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_string()?.unicode_words().map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitTab => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
                 Ok(Gc::new(mc, RefLock::new(x.as_string()?.split('\t').map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
