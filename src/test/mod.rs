@@ -130,6 +130,13 @@ fn assert_values_eq<'gc>(got: &Value<'gc, C, StdSystem<C>>, expected: &Value<'gc
 }
 
 #[test]
+fn test_sizes() {
+    if core::mem::size_of::<Value<C, StdSystem<C>>>() > 16 {
+        panic!("values are too large!");
+    }
+}
+
+#[test]
 fn test_note() {
     for i in 0..=127 {
         assert_eq!(Note::from_midi(i).unwrap().get_midi(), i);
