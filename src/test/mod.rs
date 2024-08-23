@@ -134,6 +134,12 @@ fn test_sizes() {
     if core::mem::size_of::<Value<C, StdSystem<C>>>() > 16 {
         panic!("values are too large!");
     }
+    if core::mem::size_of::<Option<Value<C, StdSystem<C>>>>() > 16 {
+        panic!("optional values are too large!");
+    }
+    if core::mem::size_of::<Shared<'static, Value<'static, C, StdSystem<C>>>>() > 16 {
+        panic!("shared values are too large!");
+    }
 }
 
 #[test]
