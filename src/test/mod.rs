@@ -131,14 +131,20 @@ fn assert_values_eq<'gc>(got: &Value<'gc, C, StdSystem<C>>, expected: &Value<'gc
 
 #[test]
 fn test_sizes() {
-    if core::mem::size_of::<Value<C, StdSystem<C>>>() > 16 {
-        panic!("values are too large!");
+    macro_rules! match_pointer_size {
+        ($($size:literal => $val:expr),*$(,)?) => {{
+            $(#[cfg(target_pointer_width = $size)] { $val })*
+        }};
     }
-    if core::mem::size_of::<Option<Value<C, StdSystem<C>>>>() > 16 {
-        panic!("optional values are too large!");
+
+    if core::mem::size_of::<Value<C, StdSystem<C>>>() != match_pointer_size!("64" => 16, "32" => 12) {
+        panic!("values wrong size: {}", core::mem::size_of::<Value<C, StdSystem<C>>>());
     }
-    if core::mem::size_of::<Shared<'static, Value<'static, C, StdSystem<C>>>>() > 16 {
-        panic!("shared values are too large!");
+    if core::mem::size_of::<Option<Value<C, StdSystem<C>>>>() != match_pointer_size!("64" => 16, "32" => 12) {
+        panic!("optional values wrong size: {}", core::mem::size_of::<Option<Value<C, StdSystem<C>>>>());
+    }
+    if core::mem::size_of::<Shared<'static, Value<'static, C, StdSystem<C>>>>() != match_pointer_size!("64" => 16, "32" => 12) {
+        panic!("shared values wrong size: {}", core::mem::size_of::<Shared<'static, Value<'static, C, StdSystem<C>>>>());
     }
 }
 

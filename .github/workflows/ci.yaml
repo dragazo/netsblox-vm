@@ -22,8 +22,8 @@ jobs:
           command: doc
           args: --no-deps
 
-  test:
-    name: test
+  test-64:
+    name: test-64
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -39,6 +39,25 @@ jobs:
         with:
           command: test
           args: --lib ${{ matrix.opt }}
+
+  test-32:
+    name: test-32
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        opt: ["", "--release"]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: test
+          args: --lib ${{ matrix.opt }} --target i686-unknown-linux-gnu --features native-tls-vendored
 
   audit:
     name: audit
