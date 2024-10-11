@@ -40,7 +40,7 @@ impl From<EntityKind<'_, '_, C, StdSystem<C>>> for EntityState {
 }
 
 struct ProcessState {
-    tokens: Vec<CompactString>,
+    tokens: Vec<Text>,
 }
 impl From<ProcessKind<'_, '_, C, StdSystem<C>>> for ProcessState {
     fn from(_: ProcessKind<'_, '_, C, StdSystem<C>>) -> Self {
@@ -112,7 +112,7 @@ fn assert_values_eq<'gc>(got: &Value<'gc, C, StdSystem<C>>, expected: &Value<'gc
             };
             if !good { panic!("{} - number error - got {} expected {}", path, got, expected) }
         }
-        (Value::String(got), Value::String(expected)) => {
+        (Value::Text(got), Value::Text(expected)) => {
             if got.as_str() != expected.as_str() { panic!("{} - string error - got {:?} expected {:?}", path, got.as_str(), expected.as_str()) }
         }
         (Value::List(got), Value::List(expected)) => {

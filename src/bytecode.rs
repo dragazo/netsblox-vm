@@ -137,13 +137,13 @@ impl BinaryWrite for VariadicLen {
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 #[repr(u8)]
 pub(crate) enum BasicType {
-    Number, String, Bool, List, Entity, Image, Audio,
+    Number, Text, Bool, List, Entity, Image, Audio,
 }
 impl BasicType {
     pub fn to_type<C: CustomTypes<S>, S: System<C>>(self) -> Type<C, S> {
         match self {
             BasicType::Number => Type::Number,
-            BasicType::String => Type::String,
+            BasicType::Text => Type::Text,
             BasicType::Bool => Type::Bool,
             BasicType::List => Type::List,
             BasicType::Entity => Type::Entity,
@@ -1143,7 +1143,7 @@ pub(crate) enum RefValue {
     List(Vec<InitValue>),
     Image(Vec<u8>, Option<(Number, Number)>, CompactString),
     Audio(Vec<u8>, CompactString),
-    String(CompactString),
+    Text(CompactString),
 }
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct EntityInitInfo {
@@ -1610,7 +1610,7 @@ impl<'a: 'b, 'b> ByteCodeBuilder<'a, 'b> {
                 self.append_expr(value, entity)?;
                 let ty = match ty {
                     ast::ValueType::Number => BasicType::Number,
-                    ast::ValueType::Text => BasicType::String,
+                    ast::ValueType::Text => BasicType::Text,
                     ast::ValueType::Bool => BasicType::Bool,
                     ast::ValueType::List => BasicType::List,
                     ast::ValueType::Sprite => BasicType::Entity,
@@ -2562,7 +2562,7 @@ impl ByteCode {
                 }
                 ast::Value::String(x) => {
                     let idx = *string_refs.entry(x).or_insert_with(|| {
-                        ref_values.push((Some(RefValue::String(x.clone())), value));
+                        ref_values.push((Some(RefValue::Text(x.clone())), value));
                         ref_values.len() - 1
                     });
                     InitValue::Ref(idx)

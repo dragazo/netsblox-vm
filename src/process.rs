@@ -8,7 +8,7 @@
 
 use alloc::rc::Rc;
 use alloc::vec::Vec;
-use alloc::string::ToString;
+use alloc::borrow::ToOwned;
 use alloc::collections::{BTreeMap, BTreeSet, VecDeque, vec_deque::Iter as VecDequeIter};
 
 use core::iter::{self, Cycle};
@@ -27,20 +27,6 @@ use crate::runtime::*;
 use crate::bytecode::*;
 use crate::util::*;
 use crate::compact_str::*;
-
-fn empty_string() -> Rc<CompactString> {
-    #[cfg(feature = "std")]
-    {
-        std::thread_local! {
-            static VALUE: Rc<CompactString> = Rc::new(CompactString::default());
-        }
-        VALUE.with(Clone::clone)
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        Rc::new(CompactString::default())
-    }
-}
 
 /// A variable entry in the structure expected by the standard js extension.
 #[cfg_attr(feature = "serde", derive(Serialize))]
@@ -126,7 +112,7 @@ pub enum ProcessStep<'gc, C: CustomTypes<S>, S: System<C>> {
     /// For other processes, it is up to the receiver/scheduler to respect this abort request.
     Abort { mode: AbortMode },
     /// The process has requested to broadcast a message to all entities (if `target` is `None`) or to a specific `target`, which may trigger other code to execute.
-    Broadcast { msg_type: CompactString, barrier: Option<Barrier>, targets: Option<Vec<Gc<'gc, RefLock<Entity<'gc, C, S>>>>> },
+    Broadcast { msg_type: Text, barrier: Option<Barrier>, targets: Option<Vec<Gc<'gc, RefLock<Entity<'gc, C, S>>>>> },
     /// The process has requested to create or destroy a new watcher for a variable.
     /// If `create` is true, the process is requesting to register the given watcher.
     /// If `create` if false, the process is requesting to remove a watcher which is equivalent to the given watcher.
@@ -196,7 +182,7 @@ pub struct ProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub start_pos: usize,
     #[collect(require_static)] pub barrier: Option<Barrier>,
     #[collect(require_static)] pub reply_key: Option<InternReplyKey>,
-    #[collect(require_static)] pub local_message: Option<CompactString>,
+    #[collect(require_static)] pub local_message: Option<Text>,
 }
 
 /// A [`ByteCode`] execution primitive.
@@ -248,7 +234,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             last_syscall_error: None,
             last_rpc_error: None,
             last_answer: None,
-            last_message: context.local_message.map(|x| Rc::new(x).into()),
+            last_message: context.local_message.map(|x| Text::from(x.as_str()).into()),
         }
     }
     /// Checks if the process is currently running.
@@ -288,7 +274,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     ErrorCause::Custom { msg } => msg.clone(),
                     x => format_compact!("{x:?}"),
                 };
-                self.call_stack.last_mut().unwrap().locals.define_or_redefine(var, Shared::Unique(Value::String(Rc::new(msg))));
+                self.call_stack.last_mut().unwrap().locals.define_or_redefine(var, Shared::Unique(Text::from(msg.as_str()).into()));
                 self.pos = *pos;
                 res = Ok(ProcessStep::Normal);
             }
@@ -323,7 +309,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 }
                 Err(x) => match error_scheme {
                     ErrorScheme::Soft => {
-                        let x = Value::String(Rc::new(x));
+                        let x = Value::Text(x.as_str().into());
 
                         if let Some(last_ok) = last_ok { *last_ok = None }
                         match (last_err, stack) {
@@ -395,7 +381,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 AsyncResult::Completed(x) => {
                     let value = match x {
                         Some(x) => Value::from_simple(mc, SimpleValue::from_netsblox_json(x)?),
-                        None => empty_string().into(),
+                        None => Text::default().into(),
                     };
                     self.value_stack.push(value);
                     self.pos = aft_pos;
@@ -466,7 +452,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::PushIntString { value } => {
-                self.value_stack.push(Rc::new(value.to_compact_string()).into());
+                self.value_stack.push(format_text!("{value}").into());
                 self.pos = aft_pos;
             }
             Instruction::PushNumber { value } => {
@@ -479,7 +465,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::PushString { value } => {
-                self.value_stack.push(Value::String(Rc::new(CompactString::new(value))));
+                self.value_stack.push(Text::from(value).into());
                 self.pos = aft_pos;
             }
             Instruction::PushVariable { var } => {
@@ -624,12 +610,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
             Instruction::ListJson => {
                 let value = self.value_stack.pop().unwrap().to_simple()?.into_json()?;
-                self.value_stack.push(Value::String(Rc::new(value.to_string().into())));
+                self.value_stack.push(format_text!("{value}").into());
                 self.pos = aft_pos;
             }
             Instruction::ListCsv => {
                 let value = self.value_stack.pop().unwrap();
-                self.value_stack.push(Rc::new(ops::to_csv(&value)?).into());
+                self.value_stack.push(ops::to_csv(&value)?.into());
                 self.pos = aft_pos;
             }
             Instruction::ListColumns => {
@@ -644,14 +630,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let mut values = value.iter();
                 let res = match values.next() {
                     Some(x) => {
-                        let mut res = x.as_string()?.into_owned();
+                        let mut res = x.as_text()?.as_str().to_owned();
                         for x in values {
                             res.push('\n');
-                            res.push_str(x.as_string()?.as_ref());
+                            res.push_str(&x.as_text()?);
                         }
-                        Rc::new(res)
+                        res.as_str().into()
                     }
-                    None => empty_string(),
+                    None => Text::default(),
                 };
 
                 self.value_stack.push(res.into());
@@ -819,7 +805,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                         for item in values {
                             core::fmt::write(&mut acc, format_args!("{item}")).unwrap();
                         }
-                        Ok(Rc::new(acc).into())
+                        Ok(Text::from(acc.as_str()).into())
                     },
                     VariadicOp::MakeList => |mc, _, values| {
                         Ok(Gc::new(mc, RefLock::new(values.cloned().collect::<VecDeque<_>>())).into())
@@ -873,7 +859,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::InitUpvar { var } => {
                 let target = lookup_var!(var).get().clone();
-                let target = target.as_string()?;
+                let target = target.as_text()?;
                 let (parent_scope, current_scope) = match self.call_stack.as_mut_slice() {
                     [] => unreachable!(),
                     [_] => return Err(ErrorCause::UpvarAtRoot),
@@ -1029,8 +1015,8 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::Throw => {
-                let msg = self.value_stack.pop().unwrap().as_string()?.into_owned();
-                return Err(ErrorCause::Custom { msg });
+                let msg = self.value_stack.pop().unwrap().as_text()?;
+                return Err(ErrorCause::Custom { msg: msg.as_str().into() });
             }
             Instruction::CallRpc { tokens } => {
                 let mut tokens = lossless_split(tokens);
@@ -1053,7 +1039,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 });
             }
             Instruction::PushRpcError => {
-                self.value_stack.push(self.last_rpc_error.clone().unwrap_or_else(|| empty_string().into()));
+                self.value_stack.push(self.last_rpc_error.clone().unwrap_or_else(|| Text::default().into()));
                 self.pos = aft_pos;
             }
             Instruction::Syscall { len } => {
@@ -1064,17 +1050,17 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     }
                     VariadicLen::Dynamic => self.value_stack.pop().unwrap().as_list()?.borrow().iter().cloned().collect(),
                 };
-                let name = self.value_stack.pop().unwrap().as_string()?.into_owned();
+                let name = self.value_stack.pop().unwrap().as_text()?;
 
                 drop(global_context_raw);
                 self.defer = Some(Defer::Request {
-                    key: system.perform_request(mc, Request::Syscall { name, args }, self)?,
+                    key: system.perform_request(mc, Request::Syscall { name: name.as_str().into(), args }, self)?,
                     action: RequestAction::Syscall,
                     aft_pos
                 });
             }
             Instruction::PushSyscallError => {
-                self.value_stack.push(self.last_syscall_error.clone().unwrap_or_else(|| empty_string().into()));
+                self.value_stack.push(self.last_syscall_error.clone().unwrap_or_else(|| Text::default().into()));
                 self.pos = aft_pos;
             }
             Instruction::SendLocalMessage { wait, target } => {
@@ -1085,7 +1071,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                         x => vec![x.as_entity()?],
                     }),
                 };
-                let msg_type = self.value_stack.pop().unwrap().as_string()?.into_owned();
+                let msg_type = self.value_stack.pop().unwrap().as_text()?;
                 let barrier = match wait {
                     false => {
                         self.pos = aft_pos;
@@ -1100,12 +1086,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 return Ok(ProcessStep::Broadcast { msg_type, barrier, targets });
             }
             Instruction::PushLocalMessage => {
-                self.value_stack.push(self.last_message.clone().unwrap_or_else(|| empty_string().into()));
+                self.value_stack.push(self.last_message.clone().unwrap_or_else(|| Text::default().into()));
                 self.pos = aft_pos;
             }
             Instruction::Print { style } => {
                 let value = self.value_stack.pop().unwrap();
-                let is_empty = match &value { Value::String(x) => x.is_empty(), _ => false };
+                let is_empty = match &value { Value::Text(x) => x.is_empty(), _ => false };
 
                 drop(global_context_raw);
                 self.defer = Some(Defer::Command {
@@ -1115,7 +1101,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::Ask => {
                 let prompt = self.value_stack.pop().unwrap();
-                let is_empty = match &prompt { Value::String(x) => x.is_empty(), _ => false };
+                let is_empty = match &prompt { Value::Text(x) => x.is_empty(), _ => false };
 
                 drop(global_context_raw);
                 self.defer = Some(Defer::Request {
@@ -1125,7 +1111,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 });
             }
             Instruction::PushAnswer => {
-                self.value_stack.push(self.last_answer.clone().unwrap_or_else(|| empty_string().into()));
+                self.value_stack.push(self.last_answer.clone().unwrap_or_else(|| Text::default().into()));
                 self.pos = aft_pos;
             }
             Instruction::ResetTimer => {
@@ -1166,19 +1152,19 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let msg_type = tokens.next().unwrap();
 
                 let targets = match self.value_stack.pop().unwrap() {
-                    Value::String(x) => vec![CompactString::new(x.as_str())],
+                    Value::Text(x) => vec![CompactString::new(x.as_str())],
                     Value::List(x) => {
                         let x = x.borrow();
                         let mut res = Vec::with_capacity(x.len());
                         for val in x.iter() {
                             match val {
-                                Value::String(x) => res.push(CompactString::new(x.as_str())),
-                                x => return Err(ErrorCause::VariadicConversionError { got: x.get_type(), expected: Type::String }),
+                                Value::Text(x) => res.push(CompactString::new(x.as_str())),
+                                x => return Err(ErrorCause::VariadicConversionError { got: x.get_type(), expected: Type::Text }),
                             }
                         }
                         res
                     }
-                    x => return Err(ErrorCause::VariadicConversionError { got: x.get_type(), expected: Type::String }),
+                    x => return Err(ErrorCause::VariadicConversionError { got: x.get_type(), expected: Type::Text }),
                 };
 
                 let values = {
@@ -1227,7 +1213,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::PushCostume => {
                 let entity = self.call_stack.last().unwrap().entity.borrow();
-                self.value_stack.push(entity.costume.clone().map(|x| Value::Image(x)).unwrap_or_else(|| Value::String(empty_string())));
+                self.value_stack.push(entity.costume.clone().map(|x| Value::Image(x)).unwrap_or_else(|| Text::default().into()));
                 self.pos = aft_pos;
             }
             Instruction::PushCostumeNumber => {
@@ -1246,7 +1232,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let entity = &mut *entity_raw;
 
                 let costume = match self.value_stack.pop().unwrap() {
-                    Value::String(x) => match x.as_str() {
+                    Value::Text(x) => match x.as_str() {
                         "" => None,
                         x => match entity.costume_list.get(x) {
                             Some(x) => Some(x.clone()),
@@ -1257,7 +1243,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     x => return Err(ErrorCause::ConversionError { got: x.get_type(), expected: Type::Image }),
                 };
                 self.value_stack.push(match prop {
-                    ImageProperty::Name => costume.map(|x| Rc::new(x.name.clone())).unwrap_or_else(empty_string).into(),
+                    ImageProperty::Name => costume.map(|x| Text::from(x.name.as_str())).unwrap_or_default().into(),
                 });
                 self.pos = aft_pos;
             }
@@ -1267,7 +1253,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 let new_costume = match self.value_stack.pop().unwrap() {
                     Value::Image(x) => Some(x),
-                    Value::String(x) => match x.as_str() {
+                    Value::Text(x) => match x.as_str() {
                         "" => None,
                         x => match entity.costume_list.get(x) {
                             Some(c) => Some(c.clone()),
@@ -1325,14 +1311,14 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 let sound = match self.value_stack.pop().unwrap() {
                     Value::Audio(x) => x,
-                    Value::String(x) => match entity.sound_list.get(x.as_str()) {
+                    Value::Text(x) => match entity.sound_list.get(x.as_str()) {
                         Some(x) => x.clone(),
-                        None => return Err(ErrorCause::UndefinedSound { name: x.as_ref().clone() }),
+                        None => return Err(ErrorCause::UndefinedSound { name: x.as_str().into() }),
                     }
                     x => return Err(ErrorCause::ConversionError { got: x.get_type(), expected: Type::Audio }),
                 };
                 self.value_stack.push(match prop {
-                    AudioProperty::Name => Rc::new(sound.name.clone()).into(),
+                    AudioProperty::Name => Text::from(sound.name.as_str()).into(),
                 });
                 self.pos = aft_pos;
             }
@@ -1342,7 +1328,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 let sound = match self.value_stack.pop().unwrap() {
                     Value::Audio(x) => Some(x),
-                    Value::String(x) => match x.as_str() {
+                    Value::Text(x) => match x.as_str() {
                         "" => None,
                         x => match entity.sound_list.get(x) {
                             Some(x) => Some(x.clone()),
@@ -1545,8 +1531,8 @@ mod ops {
             if vv < 0 || res.is_none() { return Err(ErrorCause::NoteNotMidi { note: vv.to_compact_string() }); }
             return Ok(res.unwrap());
         }
-        let s = value.as_string()?;
-        Note::from_name(&s).ok_or_else(|| ErrorCause::NoteNotMidi { note: s.into_owned() })
+        let s = value.as_text()?;
+        Note::from_name(&s).ok_or_else(|| ErrorCause::NoteNotMidi { note: s.as_str().into() })
     }
 
     pub(super) fn prep_index<C: CustomTypes<S>, S: System<C>>(index: &Value<'_, C, S>, len: usize) -> Result<usize, ErrorCause<C, S>> {
@@ -1654,7 +1640,7 @@ mod ops {
             let mut inner = VecDeque::with_capacity(src.len());
             for row in src.iter() {
                 inner.push_back(match row {
-                    Value::List(x) => x.borrow().get(column).cloned().unwrap_or_else(|| Value::String(empty_string())),
+                    Value::List(x) => x.borrow().get(column).cloned().unwrap_or_else(|| Text::default().into()),
                     _ => row.clone(),
                 });
             }
@@ -1696,16 +1682,16 @@ mod ops {
                 loop {
                     macro_rules! finish {
                         (scalar) => {{
-                            vector.push_back(Value::String(Rc::new(scalar)));
+                            vector.push_back(Text::from(scalar.as_str()).into());
                             continue 'next_scalar;
                         }};
                         (vector) => {{
-                            vector.push_back(Rc::new(scalar).into());
+                            vector.push_back(Text::from(scalar.as_str()).into());
                             table.push_back(Gc::new(mc, RefLock::new(vector)).into());
                             continue 'next_vector;
                         }};
                         (table) => {{
-                            vector.push_back(Rc::new(scalar).into());
+                            vector.push_back(Text::from(scalar.as_str()).into());
                             table.push_back(Gc::new(mc, RefLock::new(vector)).into());
                             return Ok(table);
                         }}
@@ -1735,7 +1721,7 @@ mod ops {
             }
         }
     }
-    pub(super) fn to_csv<C: CustomTypes<S>, S: System<C>>(value: &Value<C, S>) -> Result<CompactString, ErrorCause<C, S>> {
+    pub(super) fn to_csv<C: CustomTypes<S>, S: System<C>>(value: &Value<C, S>) -> Result<Text, ErrorCause<C, S>> {
         let value = value.as_list()?;
         let value = value.borrow();
 
@@ -1754,7 +1740,7 @@ mod ops {
         fn process_vector<C: CustomTypes<S>, S: System<C>>(res: &mut CompactString, value: &VecDeque<Value<C, S>>) -> Result<(), ErrorCause<C, S>> {
             for (i, x) in value.iter().enumerate() {
                 if i != 0 { res.push(','); }
-                process_scalar(res, x.as_string()?.as_ref())
+                process_scalar(res, x.as_text()?.as_ref())
             }
             Ok(())
         }
@@ -1770,7 +1756,7 @@ mod ops {
         let table_mode = value.iter().any(|x| matches!(x, Value::List(..)));
         let f = if table_mode { process_table } else { process_vector };
         f(&mut res, &*value)?;
-        Ok(res)
+        Ok(res.as_str().into())
     }
 
     fn binary_op_impl<'gc, C: CustomTypes<S>, S: System<C>>(mc: &Mutation<'gc>, system: &S, a: &Value<'gc, C, S>, b: &Value<'gc, C, S>, matrix_mode: bool, cache: &mut BTreeMap<(Identity<'gc, C, S>, Identity<'gc, C, S>, bool), Value<'gc, C, S>>, scalar_op: fn(&Mutation<'gc>, &S, &Value<'gc, C, S>, &Value<'gc, C, S>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>>) -> Result<Value<'gc, C, S>, ErrorCause<C, S>> {
@@ -1830,9 +1816,9 @@ mod ops {
             BinaryOp::Atan2     => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| Ok(a.as_number()?.atan2(b.as_number()?)?.to_degrees()?.into())),
 
             BinaryOp::StrGet => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
-                let string = b.as_string()?;
+                let string = b.as_text()?;
                 let index = prep_index(a, string.graphemes(true).count())?;
-                Ok(Rc::new(CompactString::new(string.graphemes(true).nth(index).unwrap())).into())
+                Ok(Text::from(string.graphemes(true).nth(index).unwrap()).into())
             }),
 
             BinaryOp::Mod => binary_op_impl(mc, system, a, b, true, &mut cache, |_, _, a, b| {
@@ -1840,8 +1826,8 @@ mod ops {
                 Ok(Number::new(util::modulus(a, b))?.into())
             }),
             BinaryOp::SplitBy => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
-                let (text, pattern) = (a.as_string()?, b.as_string()?);
-                Ok(Gc::new(mc, RefLock::new(text.split(pattern.as_ref()).map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
+                let (text, pattern) = (a.as_text()?, b.as_text()?);
+                Ok(Gc::new(mc, RefLock::new(text.split(pattern.as_ref()).map(|x| Text::from(x).into()).collect::<VecDeque<_>>())).into())
             }),
 
             BinaryOp::Range => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
@@ -1917,42 +1903,42 @@ mod ops {
             UnaryOp::Asin     => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(libm::asin(x.as_number()?.get()).to_degrees())?.into())),
             UnaryOp::Acos     => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(libm::acos(x.as_number()?.get()).to_degrees())?.into())),
             UnaryOp::Atan     => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(libm::atan(x.as_number()?.get()).to_degrees())?.into())),
-            UnaryOp::StrLen   => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(x.as_string()?.graphemes(true).count() as f64)?.into())),
+            UnaryOp::StrLen   => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| Ok(Number::new(x.as_text()?.graphemes(true).count() as f64)?.into())),
 
-            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| match x.as_string()?.graphemes(true).next_back() {
-                Some(ch) => Ok(Rc::new(CompactString::new(ch)).into()),
+            UnaryOp::StrGetLast => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|_, _, x| match x.as_text()?.graphemes(true).next_back() {
+                Some(ch) => Ok(Text::from(ch).into()),
                 None => Err(ErrorCause::IndexOutOfBounds { index: 1, len: 0 }),
             }),
             UnaryOp::StrGetRandom => unary_op_impl(mc, system, x, &mut cache, OpType::Nondeterministic, &|_, system, x| {
-                let x = x.as_string()?;
+                let x = x.as_text()?;
                 let i = prep_rand_index(system, x.graphemes(true).count())?;
-                Ok(Rc::new(CompactString::new(x.graphemes(true).nth(i).unwrap())).into())
+                Ok(Text::from(x.graphemes(true).nth(i).unwrap()).into())
             }),
 
             UnaryOp::SplitLetter => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.graphemes(true).map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_text()?.graphemes(true).map(|x| Text::from(x).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitWord => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.unicode_words().map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_text()?.unicode_words().map(|x| Text::from(x).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitTab => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split('\t').map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_text()?.split('\t').map(|x| Text::from(x).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitCR => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.split('\r').map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_text()?.split('\r').map(|x| Text::from(x).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitLF => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                Ok(Gc::new(mc, RefLock::new(x.as_string()?.lines().map(|x| Rc::new(CompactString::new(x)).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(x.as_text()?.lines().map(|x| Text::from(x).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitCsv => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                let value = from_csv(mc, x.as_string()?.as_ref())?;
+                let value = from_csv(mc, x.as_text()?.as_ref())?;
                 Ok(Gc::new(mc, RefLock::new(value)).into())
             }),
             UnaryOp::SplitJson => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                let value = x.as_string()?;
+                let value = x.as_text()?;
                 match parse_json::<Json>(&value) {
                     Ok(json) => Ok(Value::from_simple(mc, SimpleValue::from_json(json)?)),
-                    Err(_) => Err(ErrorCause::NotJson { value: value.into_owned() }),
+                    Err(_) => Err(ErrorCause::NotJson { value: value.as_str().into() }),
                 }
             }),
 
@@ -1962,12 +1948,12 @@ mod ops {
                 let num = fnum as u32;
                 if num as f64 != fnum { return Err(ErrorCause::InvalidUnicode { value: fnum }) }
                 match char::from_u32(num) {
-                    Some(ch) => Ok(Rc::new(ch.to_compact_string()).into()),
+                    Some(ch) => Ok(format_text!("{ch}").into()),
                     None => Err(ErrorCause::InvalidUnicode { value: fnum }),
                 }
             }),
             UnaryOp::CharToUnicode => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                let src = x.as_string()?;
+                let src = x.as_text()?;
                 let values: VecDeque<_> = src.chars().map(|ch| Ok(Number::new(ch as u32 as f64)?.into())).collect::<Result<_, NumberError>>()?;
                 Ok(match values.len() {
                     1 => values.into_iter().next().unwrap(),
@@ -1995,20 +1981,20 @@ mod ops {
             (Value::Bool(_), _) | (_, Value::Bool(_)) => None,
 
             (Value::Number(a), Value::Number(b)) => a.cmp(b).into(),
-            (Value::String(a), Value::String(b)) => match SimpleValue::parse_number(a).and_then(|a| SimpleValue::parse_number(b).map(|b| (a, b))) {
+            (Value::Text(a), Value::Text(b)) => match SimpleValue::parse_number(a).and_then(|a| SimpleValue::parse_number(b).map(|b| (a, b))) {
                 Some((a, b)) => a.cmp(&b).into(),
                 None => UniCase::new(a.as_str()).cmp(&UniCase::new(b.as_str())).into(),
             }
-            (Value::Number(a), Value::String(b)) => match SimpleValue::parse_number(b) {
+            (Value::Number(a), Value::Text(b)) => match SimpleValue::parse_number(b) {
                 Some(b) => a.cmp(&b).into(),
                 None => UniCase::new(SimpleValue::stringify_number(*a).as_str()).cmp(&UniCase::new(b.as_str())).into(),
             }
-            (Value::String(a), Value::Number(b)) => match SimpleValue::parse_number(a) {
+            (Value::Text(a), Value::Number(b)) => match SimpleValue::parse_number(a) {
                 Some(a) => a.cmp(b).into(),
                 None => UniCase::new(a.as_str()).cmp(&UniCase::new(&SimpleValue::stringify_number(*b).as_str())).into(),
             }
             (Value::Number(_), _) | (_, Value::Number(_)) => None,
-            (Value::String(_), _) | (_, Value::String(_)) => None,
+            (Value::Text(_), _) | (_, Value::Text(_)) => None,
 
             (Value::List(a), Value::List(b)) => {
                 let (a, b) = (a.borrow(), b.borrow());
@@ -2076,8 +2062,8 @@ mod ops {
             (Value::Number(a), Value::Number(b)) => a.get().to_bits() == b.get().to_bits(),
             (Value::Number(_), _) | (_, Value::Number(_)) => false,
 
-            (Value::String(a), Value::String(b)) => a == b,
-            (Value::String(_), _) | (_, Value::String(_)) => false,
+            (Value::Text(a), Value::Text(b)) => a == b,
+            (Value::Text(_), _) | (_, Value::Text(_)) => false,
 
             (Value::Image(a), Value::Image(b)) => Rc::ptr_eq(a, b),
             (Value::Image(_), _) | (_, Value::Image(_)) => false,

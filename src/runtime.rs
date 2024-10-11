@@ -46,6 +46,16 @@ impl FloatChecker<f64> for NumberChecker {
 /// The type used to represent numbers in the runtime.
 pub type Number = CheckedFloat<f64, NumberChecker>;
 
+const INLINE_SIZE: usize = {
+    #[cfg(target_pointer_width = "64")] { 14 }
+    #[cfg(not(target_pointer_width = "64"))] { 10 }
+};
+
+/// The type used to represent text in the runtime.
+///
+/// `Text` values are shared reference types and are cheap to clone.
+pub type Text = our_string::OurString<our_string::comrades::RcBytes, INLINE_SIZE>;
+
 #[derive(Debug)]
 pub enum FromAstError<'a> {
     BadNumber { error: NumberError },
@@ -60,7 +70,7 @@ impl<'a> From<CompileError<'a>> for FromAstError<'a> { fn from(error: CompileErr
 #[derive(Educe)]
 #[educe(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type<C: CustomTypes<S>, S: System<C>> {
-    Bool, Number, String, Image, Audio, List, Closure, Entity, Native(<C::NativeValue as GetType>::Output),
+    Bool, Number, Text, Image, Audio, List, Closure, Entity, Native(<C::NativeValue as GetType>::Output),
 }
 
 /// A type conversion error on a [`Value`].
@@ -701,7 +711,7 @@ pub enum FromNetsBloxJsonError {
 pub enum SimpleValue {
     Bool(bool),
     Number(Number),
-    String(CompactString),
+    Text(CompactString),
     Image(Image),
     Audio(Audio),
     List(Vec<SimpleValue>),
@@ -709,8 +719,8 @@ pub enum SimpleValue {
 
 impl From<bool> for SimpleValue { fn from(x: bool) -> Self { Self::Bool(x) } }
 impl From<Number> for SimpleValue { fn from(x: Number) -> Self { Self::Number(x) } }
-impl From<CompactString> for SimpleValue { fn from(x: CompactString) -> Self { Self::String(x) } }
-impl From<alloc::string::String> for SimpleValue { fn from(x: alloc::string::String) -> Self { Self::String(x.into()) } }
+impl From<CompactString> for SimpleValue { fn from(x: CompactString) -> Self { Self::Text(x) } }
+impl From<alloc::string::String> for SimpleValue { fn from(x: alloc::string::String) -> Self { Self::Text(x.into()) } }
 impl From<Image> for SimpleValue { fn from(x: Image) -> Self { Self::Image(x) } }
 impl From<Audio> for SimpleValue { fn from(x: Audio) -> Self { Self::Audio(x) } }
 impl From<Vec<SimpleValue>> for SimpleValue { fn from(x: Vec<SimpleValue>) -> Self { Self::List(x) } }
@@ -723,7 +733,7 @@ impl SimpleValue {
         Ok(match self {
             SimpleValue::Bool(x) => Json::Bool(x),
             SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
-            SimpleValue::String(x) => Json::String(x.as_str().to_owned()),
+            SimpleValue::Text(x) => Json::String(x.as_str().to_owned()),
             SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_json).collect::<Result<_,_>>()?),
             SimpleValue::Image(_) => return Err(IntoJsonError::ComplexType(Type::Image)),
             SimpleValue::Audio(_) => return Err(IntoJsonError::ComplexType(Type::Audio)),
@@ -737,10 +747,10 @@ impl SimpleValue {
             Json::Null => return Err(FromJsonError::Null),
             Json::Bool(x) => SimpleValue::Bool(x),
             Json::Number(x) => SimpleValue::Number(Number::new(x.as_f64().unwrap()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
-            Json::String(x) => SimpleValue::String(x.into()),
+            Json::String(x) => SimpleValue::Text(x.into()),
             Json::Array(x) => SimpleValue::List(x.into_iter().map(SimpleValue::from_json).collect::<Result<_,_>>()?),
             Json::Object(x) => SimpleValue::List(x.into_iter().map(|(k, v)| {
-                Ok(SimpleValue::List(vec![SimpleValue::String(k.into()), SimpleValue::from_json(v)?]))
+                Ok(SimpleValue::List(vec![SimpleValue::Text(k.into()), SimpleValue::from_json(v)?]))
             }).collect::<Result<_,_>>()?),
         })
     }
@@ -750,7 +760,7 @@ impl SimpleValue {
         match self {
             SimpleValue::Bool(x) => Json::Bool(x),
             SimpleValue::Number(x) => Json::Number(JsonNumber::from_f64(x.get()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
-            SimpleValue::String(x) => Json::String(x.into()),
+            SimpleValue::Text(x) => Json::String(x.into()),
             SimpleValue::List(x) => Json::Array(x.into_iter().map(SimpleValue::into_netsblox_json).collect()),
             SimpleValue::Image(img) => {
                 let center_attrs = img.center.map(|(x, y)| format!(" center-x=\"{x}\" center-y=\"{y}\"")).unwrap_or_default();
@@ -767,7 +777,7 @@ impl SimpleValue {
             Json::Number(x) => SimpleValue::Number(Number::new(x.as_f64().unwrap()).unwrap()), // Json and Number forbid NaN and Infinity, so this is infallible
             Json::Array(x) => SimpleValue::List(x.into_iter().map(SimpleValue::from_netsblox_json).collect::<Result<_,_>>()?),
             Json::Object(x) => SimpleValue::List(x.into_iter().map(|(k, v)| {
-                Ok(SimpleValue::List(vec![SimpleValue::String(k.into()), SimpleValue::from_netsblox_json(v)?]))
+                Ok(SimpleValue::List(vec![SimpleValue::Text(k.into()), SimpleValue::from_netsblox_json(v)?]))
             }).collect::<Result<_,_>>()?),
             Json::String(x) => {
                 let mut tokenizer = xmlparser::Tokenizer::from(x.as_str());
@@ -792,10 +802,10 @@ impl SimpleValue {
                                     }
                                     Some(Ok(xmlparser::Token::ElementEnd { .. })) => match content {
                                         Some(content) => return Ok(SimpleValue::Image(Image { content, center: center_x.zip(center_y), name })),
-                                        None => return Ok(SimpleValue::String(x.into())),
+                                        None => return Ok(SimpleValue::Text(x.into())),
                                     }
                                     Some(Ok(_)) => (),
-                                    None | Some(Err(_)) => return Ok(SimpleValue::String(x.into())),
+                                    None | Some(Err(_)) => return Ok(SimpleValue::Text(x.into())),
                                 }
                             }
                         }
@@ -814,16 +824,16 @@ impl SimpleValue {
                                     }
                                     Some(Ok(xmlparser::Token::ElementEnd { .. })) => match content {
                                         Some(content) => return Ok(SimpleValue::Audio(Audio { content, name })),
-                                        None => return Ok(SimpleValue::String(x.into())),
+                                        None => return Ok(SimpleValue::Text(x.into())),
                                     }
                                     Some(Ok(_)) => (),
-                                    None | Some(Err(_)) => return Ok(SimpleValue::String(x.into())),
+                                    None | Some(Err(_)) => return Ok(SimpleValue::Text(x.into())),
                                 }
                             }
                         }
-                        _ => SimpleValue::String(x.into()),
+                        _ => SimpleValue::Text(x.into()),
                     }
-                    _ => SimpleValue::String(x.into()),
+                    _ => SimpleValue::Text(x.into()),
                 }
             }
         })
@@ -841,11 +851,11 @@ impl SimpleValue {
         parsed.and_then(|x| Number::new(x).ok())
     }
     /// Stringifies a number just as the runtime would do natively.
-    pub fn stringify_number(v: Number) -> CompactString {
+    pub fn stringify_number(v: Number) -> Text {
         debug_assert!(v.get().is_finite());
         let mut buf = ryu::Buffer::new();
         let res = buf.format_finite(v.get());
-        CompactString::new(res.strip_suffix(".0").unwrap_or(res))
+        Text::from(res.strip_suffix(".0").unwrap_or(res))
     }
 }
 
@@ -872,14 +882,14 @@ fn test_netsblox_json() {
         SimpleValue::Number(Number::new(0.0).unwrap()),
         SimpleValue::Number(Number::new(12.5).unwrap()),
         SimpleValue::Number(Number::new(-6.0).unwrap()),
-        SimpleValue::String("".into()),
-        SimpleValue::String("hello world".into()),
-        SimpleValue::String("<sound>".into()),
-        SimpleValue::String("<sound/>".into()),
-        SimpleValue::String("<sound />".into()),
-        SimpleValue::String("<costume>".into()),
-        SimpleValue::String("<costume/>".into()),
-        SimpleValue::String("<costume />".into()),
+        SimpleValue::Text("".into()),
+        SimpleValue::Text("hello world".into()),
+        SimpleValue::Text("<sound>".into()),
+        SimpleValue::Text("<sound/>".into()),
+        SimpleValue::Text("<sound />".into()),
+        SimpleValue::Text("<costume>".into()),
+        SimpleValue::Text("<costume/>".into()),
+        SimpleValue::Text("<costume />".into()),
         SimpleValue::Image(Image { content: vec![], center: None, name: "test".into() }),
         SimpleValue::Image(Image { content: vec![], center: Some((Number::new(0.0).unwrap(), Number::new(4.5).unwrap())), name: "another one".into() }),
         SimpleValue::Image(Image { content: vec![0, 1, 2, 255, 254, 253, 127, 128], center: None, name: "untitled".into() }),
@@ -902,8 +912,8 @@ pub enum Value<'gc, C: CustomTypes<S>, S: System<C>> {
     Bool(#[collect(require_static)] bool),
     /// A primitive numeric value. Snap! and NetsBlox use 64-bit floating point values for all numbers.
     Number(#[collect(require_static)] Number),
-    /// A primitive string value, which is an immutable reference type.
-    String(#[collect(require_static)] Rc<CompactString>),
+    /// A primitive text value, which is an immutable reference type.
+    Text(#[collect(require_static)] Text),
     /// An image stored as a binary buffer.
     Image(#[collect(require_static)] Rc<Image>),
     /// An audio clip stored as as a binary buffer.
@@ -924,41 +934,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GetType for Value<'gc, C, S> {
         match self {
             Value::Bool(_) => Type::Bool,
             Value::Number(_) => Type::Number,
-            Value::String(_) => Type::String,
+            Value::Text(_) => Type::Text,
             Value::Image(_) => Type::Image,
             Value::Audio(_) => Type::Audio,
             Value::List(_) => Type::List,
             Value::Closure(_) => Type::Closure,
             Value::Entity(_) => Type::Entity,
             Value::Native(x) => Type::Native(x.get_type()),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum CompactCow<'a> {
-    Borrowed(&'a str),
-    Owned(CompactString),
-}
-impl Deref for CompactCow<'_> {
-    type Target = str;
-    fn deref(&self) -> &Self::Target {
-        match self {
-            Self::Borrowed(x) => x,
-            Self::Owned(x) => &x,
-        }
-    }
-}
-impl AsRef<str> for CompactCow<'_> {
-    fn as_ref(&self) -> &str {
-        &**self
-    }
-}
-impl CompactCow<'_> {
-    pub fn into_owned(self) -> CompactString {
-        match self {
-            Self::Borrowed(x) => CompactString::new(x),
-            Self::Owned(x) => x,
         }
     }
 }
@@ -982,7 +964,7 @@ fn format_value<C: CustomTypes<S>, S: System<C>>(value: &Value<'_, C, S>, f: &mu
         match value {
             Value::Bool(x) => write!(f, "{x}"),
             Value::Number(x) => write!(f, "{x}"),
-            Value::String(x) => match style {
+            Value::Text(x) => match style {
                 FormatStyle::Debug => write!(f, "{:?}", x.as_str()),
                 FormatStyle::Display => write!(f, "{}", x.as_str()),
             }
@@ -1017,7 +999,7 @@ fn format_value<C: CustomTypes<S>, S: System<C>>(value: &Value<'_, C, S>, f: &mu
 
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<bool> for Value<'gc, C, S> { fn from(v: bool) -> Self { Value::Bool(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Number> for Value<'gc, C, S> { fn from(v: Number) -> Self { Value::Number(v) } }
-impl<'gc, C: CustomTypes<S>, S: System<C>> From<Rc<CompactString>> for Value<'gc, C, S> { fn from(v: Rc<CompactString>) -> Self { Value::String(v) } }
+impl<'gc, C: CustomTypes<S>, S: System<C>> From<Text> for Value<'gc, C, S> { fn from(v: Text) -> Self { Value::Text(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<VecDeque<Value<'gc, C, S>>>>) -> Self { Value::List(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<Closure<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<Closure<'gc, C, S>>>) -> Self { Value::Closure(v) } }
 impl<'gc, C: CustomTypes<S>, S: System<C>> From<Gc<'gc, RefLock<Entity<'gc, C, S>>>> for Value<'gc, C, S> { fn from(v: Gc<'gc, RefLock<Entity<'gc, C, S>>>) -> Self { Value::Entity(v) } }
@@ -1028,7 +1010,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
             Ok(match value {
                 Value::Bool(x) => SimpleValue::Bool(*x),
                 Value::Number(x) => SimpleValue::Number(*x),
-                Value::String(x) => SimpleValue::String((**x).clone()),
+                Value::Text(x) => SimpleValue::Text((**x).into()),
                 Value::Image(x) => SimpleValue::Image((**x).clone()),
                 Value::Audio(x) => SimpleValue::Audio((**x).clone()),
                 Value::List(x) => {
@@ -1052,7 +1034,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         match value {
             SimpleValue::Bool(x) => Value::Bool(x),
             SimpleValue::Number(x) => Value::Number(x),
-            SimpleValue::String(x) => Value::String(Rc::new(x)),
+            SimpleValue::Text(x) => Value::Text(x.as_str().into()),
             SimpleValue::Audio(x) => Value::Audio(Rc::new(x)),
             SimpleValue::Image(x) => Value::Image(Rc::new(x)),
             SimpleValue::List(x) => Value::List(Gc::new(mc, RefLock::new(x.into_iter().map(|x| Value::from_simple(mc, x)).collect()))),
@@ -1066,7 +1048,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
         match self {
             Value::Bool(x) => Identity(x as *const bool as *const (), PhantomData),
             Value::Number(x) => Identity(x as *const Number as *const (), PhantomData),
-            Value::String(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
+            Value::Text(x) => Identity(x.as_ptr() as *const (), PhantomData),
             Value::Image(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
             Value::Audio(x) => Identity(Rc::as_ptr(x) as *const (), PhantomData),
             Value::List(x) => Identity(Gc::as_ptr(*x) as *const (), PhantomData),
@@ -1087,16 +1069,16 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Value<'gc, C, S> {
     pub fn as_number(&self) -> Result<Number, ConversionError<C, S>> {
         match self {
             Value::Number(x) => Ok(*x),
-            Value::String(x) => SimpleValue::parse_number(x).ok_or(ConversionError { got: Type::String, expected: Type::Number }),
+            Value::Text(x) => SimpleValue::parse_number(x).ok_or(ConversionError { got: Type::Text, expected: Type::Number }),
             x => Err(ConversionError { got: x.get_type(), expected: Type::Number }),
         }
     }
     /// Attempts to interpret this value as a string.
-    pub fn as_string(&self) -> Result<CompactCow, ConversionError<C, S>> {
+    pub fn as_text(&self) -> Result<Text, ConversionError<C, S>> {
         Ok(match self {
-            Value::String(x) => CompactCow::Borrowed(&**x),
-            Value::Number(x) => CompactCow::Owned(SimpleValue::stringify_number(*x)),
-            x => return Err(ConversionError { got: x.get_type(), expected: Type::String }),
+            Value::Text(x) => x.clone(),
+            Value::Number(x) => SimpleValue::stringify_number(*x),
+            x => return Err(ConversionError { got: x.get_type(), expected: Type::Text }),
         })
     }
     /// Attempts to interpret this value as an image.
@@ -1393,7 +1375,7 @@ pub struct GlobalContext<'gc, C: CustomTypes<S>, S: System<C>> {
 impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
     pub fn from_init(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
         let allocated_refs = init_info.ref_values.iter().map(|ref_value| match ref_value {
-            RefValue::String(value) => Value::String(Rc::new(value.clone())),
+            RefValue::Text(value) => Value::Text(value.as_str().into()),
             RefValue::Image(content, center, name) => Value::Image(Rc::new(Image {content: content.clone(), center: *center, name: name.clone() })),
             RefValue::Audio(content, name) => Value::Audio(Rc::new(Audio { content: content.clone(), name: name.clone() })),
             RefValue::List(_) => Value::List(Gc::new(mc, Default::default())),
@@ -1409,7 +1391,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
 
         for (allocated_ref, ref_value) in iter::zip(&allocated_refs, &init_info.ref_values) {
             match ref_value {
-                RefValue::String(_) | RefValue::Image(_, _, _) | RefValue::Audio(_, _) => continue, // we already populated these values in the first pass
+                RefValue::Text(_) | RefValue::Image(_, _, _) | RefValue::Audio(_, _) => continue, // we already populated these values in the first pass
                 RefValue::List(values) => {
                     let allocated_ref = match allocated_ref {
                         Value::List(x) => x,

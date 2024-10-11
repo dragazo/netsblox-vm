@@ -103,7 +103,7 @@ pub struct PartialProcContext<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub state: C::ProcessState,
     #[collect(require_static)] pub barrier: Option<Barrier>,
     #[collect(require_static)] pub reply_key: Option<InternReplyKey>,
-    #[collect(require_static)] pub local_message: Option<CompactString>,
+    #[collect(require_static)] pub local_message: Option<Text>,
 }
 
 #[derive(Collect)]

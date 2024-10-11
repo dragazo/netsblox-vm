@@ -699,7 +699,7 @@ fn test_proj_costumes() {
                             let x = x.borrow();
                             assert_eq!(x.len(), 2);
                             match &x[0] {
-                                Value::String(x) => assert_eq!(x.as_str(), ""),
+                                Value::Text(x) => assert_eq!(x.as_str(), ""),
                                 x => panic!("{x:?}"),
                             }
                             match &x[1] {

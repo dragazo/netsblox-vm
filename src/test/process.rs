@@ -102,7 +102,7 @@ fn test_proc_ret() {
     ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, res| match res.unwrap().0 {
-        Value::String(x) => assert_eq!(&**x, ""),
+        Value::Text(x) => assert_eq!(x, ""),
         x => panic!("{:?}", x),
     });
 }
@@ -640,7 +640,7 @@ fn test_proc_rpc_call_basic() {
             locals
         });
         run_till_term(&mut env, |_, _, res| match res.unwrap().0 {
-            Value::String(ret) => assert_eq!(&**ret, city),
+            Value::Text(ret) => assert_eq!(ret, city),
             x => panic!("{:?}", x),
         });
     }
@@ -733,7 +733,7 @@ fn test_proc_syscall() {
                     false => {
                         let mut buffer = buffer_cpy.borrow_mut();
                         for value in args {
-                            buffer.push_str(value.as_string().unwrap().as_ref());
+                            buffer.push_str(value.as_text().unwrap().as_ref());
                         }
                         key.complete(Ok(SimpleValue::Number(Number::new(buffer.len() as f64).unwrap()).into()));
                         RequestStatus::Handled
@@ -745,7 +745,7 @@ fn test_proc_syscall() {
                 }
                 "foo" => {
                     let content = buffer_cpy.borrow().clone();
-                    key.complete(Ok(SimpleValue::String(content).into()));
+                    key.complete(Ok(SimpleValue::Text(content).into()));
                     RequestStatus::Handled
                 }
                 _ => RequestStatus::UseDefault { key, request },
@@ -1086,11 +1086,11 @@ fn test_proc_tensor_list_idx() {
                 let x = &*x.borrow();
                 assert_eq!(x.len(), 5);
                 match &x[0] {
-                    Value::String(x) => assert_eq!(x.as_str(), "help"),
+                    Value::Text(x) => assert_eq!(x.as_str(), "help"),
                     x => panic!("{x:?}"),
                 }
                 match &x[1] {
-                    Value::String(x) => assert_eq!(x.as_str(), "11"),
+                    Value::Text(x) => assert_eq!(x.as_str(), "11"),
                     x => panic!("{x:?}"),
                 }
                 match &x[2] {
@@ -1102,11 +1102,11 @@ fn test_proc_tensor_list_idx() {
                             x => panic!("{x:?}"),
                         }
                         match &x[1] {
-                            Value::String(x) => assert_eq!(x.as_str(), "11"),
+                            Value::Text(x) => assert_eq!(x.as_str(), "11"),
                             x => panic!("{x:?}"),
                         }
                         match &x[2] {
-                            Value::String(x) => assert_eq!(x.as_str(), "help"),
+                            Value::Text(x) => assert_eq!(x.as_str(), "help"),
                             x => panic!("{x:?}"),
                         }
                     }
@@ -1139,10 +1139,10 @@ fn test_proc_rand_list_ops() {
 
     run_till_term(&mut env, |_, _, res| {
         let (results, last) = {
-            fn extract_value(val: &Value<'_, C, StdSystem<C>>) -> CompactString {
+            fn extract_value(val: &Value<'_, C, StdSystem<C>>) -> Text {
                 match val {
                     Value::Number(x) => SimpleValue::stringify_number(*x),
-                    Value::String(x) if matches!(x.as_str(), "hello" | "goodbye") => (**x).clone(),
+                    Value::Text(x) if matches!(x.as_str(), "hello" | "goodbye") => x.clone(),
                     x => panic!("{x:?}"),
                 }
             }
@@ -2172,7 +2172,7 @@ fn test_proc_rand_str_char_cache() {
     ), Settings::default(), system, |_| SymbolTable::default());
 
     run_till_term(&mut env, |_, _, res| {
-        let res = res.unwrap().0.as_string().unwrap().into_owned();
+        let res = res.unwrap().0.as_text().unwrap();
         assert_eq!(res.len(), 8192);
         let mut counts: BTreeMap<char, usize> = BTreeMap::new();
         for ch in res.chars() {
@@ -2526,7 +2526,7 @@ fn test_proc_ext_raii() {
                 match name.as_str() {
                     "scopeBlock::enter" => {
                         assert_eq!(args.len(), 1);
-                        proc.state.tokens.push(args[0].as_string().unwrap().into_owned());
+                        proc.state.tokens.push(args[0].as_text().unwrap());
                         key.complete(Ok(SimpleValue::Number(Number::new(0.0).unwrap())));
                         return RequestStatus::Handled;
                     }
@@ -2658,7 +2658,7 @@ fn test_proc_ext_raii() {
 
 #[test]
 fn test_proc_extra_blocks() {
-    let actions: Rc<RefCell<Vec<Vec<CompactString>>>> = Rc::new(RefCell::new(vec![]));
+    let actions: Rc<RefCell<Vec<Vec<Text>>>> = Rc::new(RefCell::new(vec![]));
     let actions_clone = actions.clone();
     let config = Config::<C, StdSystem<C>> {
         request: Some(Rc::new(move |_, key, request, _| match &request {
@@ -2666,46 +2666,46 @@ fn test_proc_extra_blocks() {
                 match name.as_str() {
                     "tuneScopeSetInstrument" => {
                         assert_eq!(args.len(), 1);
-                        let ins = args[0].as_string().unwrap();
-                        actions_clone.borrow_mut().push(vec![CompactString::new("set ins"), ins.into_owned()]);
-                        key.complete(Ok(SimpleValue::String("OK".into()).into()));
+                        let ins = args[0].as_text().unwrap();
+                        actions_clone.borrow_mut().push(vec!["set ins".into(), ins]);
+                        key.complete(Ok(SimpleValue::Text("OK".into()).into()));
                     }
                     "tuneScopeSetVolume" => {
                         assert_eq!(args.len(), 1);
                         let vol = args[0].as_number().unwrap();
-                        actions_clone.borrow_mut().push(vec![CompactString::new("set vol"), SimpleValue::stringify_number(vol)]);
-                        key.complete(Ok(SimpleValue::String("OK".into()).into()));
+                        actions_clone.borrow_mut().push(vec!["set vol".into(), SimpleValue::stringify_number(vol)]);
+                        key.complete(Ok(SimpleValue::Text("OK".into()).into()));
                     }
                     "tuneScopePlayChordForDuration" => {
                         assert_eq!(args.len(), 2);
                         let notes = args[0].to_simple().unwrap().into_json::<C, StdSystem<C>>().unwrap();
-                        let duration = args[1].as_string().unwrap();
-                        actions_clone.borrow_mut().push(vec![CompactString::new("play chord"), notes.to_compact_string(), duration.into_owned()]);
-                        key.complete(Ok(SimpleValue::String("OK".into()).into()));
+                        let duration = args[1].as_text().unwrap();
+                        actions_clone.borrow_mut().push(vec!["play chord".into(), format_text!("{notes}"), duration]);
+                        key.complete(Ok(SimpleValue::Text("OK".into()).into()));
                     }
                     "tuneScopePlayTracks" => {
                         assert_eq!(args.len(), 2);
-                        let time = args[0].as_string().unwrap();
+                        let time = args[0].as_text().unwrap();
                         let tracks = args[1].to_simple().unwrap().into_json::<C, StdSystem<C>>().unwrap();
-                        actions_clone.borrow_mut().push(vec![CompactString::new("play tracks"), time.into_owned(), tracks.to_compact_string()]);
-                        key.complete(Ok(SimpleValue::String("OK".into()).into()));
+                        actions_clone.borrow_mut().push(vec!["play tracks".into(), time, format_text!("{tracks}")]);
+                        key.complete(Ok(SimpleValue::Text("OK".into()).into()));
                     }
                     "tuneScopeNote" => {
                         assert_eq!(args.len(), 1);
-                        let note = args[0].as_string().unwrap();
-                        actions_clone.borrow_mut().push(vec![CompactString::new("get note"), note.clone().into_owned()]);
-                        key.complete(Ok(SimpleValue::String(format_compact!("nte {}", note.as_ref())).into()));
+                        let note = args[0].as_text().unwrap();
+                        actions_clone.borrow_mut().push(vec!["get note".into(), note.clone()]);
+                        key.complete(Ok(SimpleValue::Text(format_compact!("nte {note}")).into()));
                     }
                     "tuneScopeDuration" => {
                         assert_eq!(args.len(), 1);
-                        let duration = args[0].as_string().unwrap();
-                        actions_clone.borrow_mut().push(vec![CompactString::new("get duration"), duration.clone().into_owned()]);
-                        key.complete(Ok(SimpleValue::String(format_compact!("drt {}", duration.as_ref())).into()));
+                        let duration = args[0].as_text().unwrap();
+                        actions_clone.borrow_mut().push(vec!["get duration".into(), duration.clone()]);
+                        key.complete(Ok(SimpleValue::Text(format_compact!("drt {duration}")).into()));
                     }
                     "tuneScopeSection" => {
                         assert_eq!(args.len(), 1);
                         let items = args[0].to_simple().unwrap().into_json::<C, StdSystem<C>>().unwrap();
-                        actions_clone.borrow_mut().push(vec![CompactString::new("make section"), items.to_compact_string()]);
+                        actions_clone.borrow_mut().push(vec!["make section".into(), format_text!("{items}")]);
                         key.complete(Ok(SimpleValue::from_json(items).unwrap().into()));
                     }
                     _ => return RequestStatus::UseDefault { key, request },

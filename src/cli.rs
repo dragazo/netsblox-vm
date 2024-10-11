@@ -252,7 +252,7 @@ fn run_proj_tty<C: CustomTypes<StdSystem<C>>>(project_name: &str, server: Compac
                     }
                     RawKeyCode::Backspace => if in_input_mode() && input_value.pop().is_some() { update_flag.set(true) }
                     RawKeyCode::Enter => if let Some((_, res_key)) = input_queries.borrow_mut().pop_front() {
-                        res_key.complete(Ok(SimpleValue::String(mem::take(&mut input_value)).into()));
+                        res_key.complete(Ok(SimpleValue::Text(mem::take(&mut input_value)).into()));
                         update_flag.set(true);
                     }
                     RawKeyCode::Up => if !in_input_mode() { input_sequence.push(Input::KeyDown { key: KeyCode::Up }) }

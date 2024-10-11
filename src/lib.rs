@@ -37,6 +37,12 @@ pub mod compact_str {
 /// The re-exported version of the `netsblox-ast` crate.
 pub use netsblox_ast as ast;
 
+macro_rules! format_text {
+    ($($t:tt)*) => {{
+        $crate::runtime::Text::from(format!($($t)*).as_str())
+    }};
+}
+
 pub mod bytecode;
 pub mod slotmap;
 pub mod vecmap;

@@ -61,7 +61,7 @@ async fn call_rpc_async<C: CustomTypes<S>, S: System<C>>(context: &NetsBloxConte
     } else if let Some(x) = parse_json_slice::<Json>(&res).ok() {
         SimpleValue::from_netsblox_json(x).map_err(|e| format_compact!("Received ill-formed success value: {e:?}"))
     } else if let Ok(x) = CompactString::from_utf8(res) {
-        Ok(SimpleValue::String(x))
+        Ok(SimpleValue::Text(x))
     } else {
         Err("Received ill-formed success value".into())
     }
@@ -278,7 +278,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                 match request {
                     Request::Rpc { host, service, rpc, args } => match (host.as_deref(), service.as_str(), rpc.as_str(), args.as_slice()) {
                         (_, "PublicRoles", "getPublicRoleId", []) => {
-                            key.complete(Ok(SimpleValue::String(format_compact!("{}@{}#vm", context_clone.project_name, context_clone.client_id)).into()));
+                            key.complete(Ok(SimpleValue::Text(format_compact!("{}@{}#vm", context_clone.project_name, context_clone.client_id)).into()));
                             RequestStatus::Handled
                         }
                         _ => {
@@ -324,7 +324,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
         fn check_symbols<'gc, C: CustomTypes<StdSystem<C>>>(mc: &Mutation<'gc>, symbols: &SymbolTable<'gc, C, StdSystem<C>>) {
             for symbol in symbols.iter() {
                 match &*symbol.1.get() {
-                    Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Audio(_) | Value::Image(_) | Value::Native(_) => (),
+                    Value::Bool(_) | Value::Number(_) | Value::Text(_) | Value::Audio(_) | Value::Image(_) | Value::Native(_) => (),
                     Value::List(x) => { x.borrow_mut(mc); }
                     Value::Closure(x) => { x.borrow_mut(mc); }
                     Value::Entity(x) => { x.borrow_mut(mc); }

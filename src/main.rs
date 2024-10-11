@@ -108,7 +108,7 @@ fn main() {
                 Request::Syscall { name, args } => match name.as_str() {
                     "open" => {
                         let (path, mode) = match args.as_slice() {
-                            [path, mode] => match (path.as_string(), mode.as_string()) {
+                            [path, mode] => match (path.as_text(), mode.as_text()) {
                                 (Ok(path), Ok(mode)) => (path, mode),
                                 _ => {
                                     key.complete(Err(format_compact!("syscall open - expected 2 string args, received {:?} and {:?}", path.get_type(), mode.get_type())));
@@ -156,7 +156,7 @@ fn main() {
                                     NativeValue::InputFile { handle } => *handle.borrow_mut() = None,
                                     NativeValue::OutputFile { handle } => *handle.borrow_mut() = None,
                                 }
-                                key.complete(Ok(SimpleValue::String("OK".into()).into()));
+                                key.complete(Ok(SimpleValue::Text("OK".into()).into()));
                                 RequestStatus::Handled
                             }
                             _ => {
@@ -180,7 +180,7 @@ fn main() {
                                             return RequestStatus::Handled;
                                         }
 
-                                        key.complete(Ok(SimpleValue::String(res.into()).into()));
+                                        key.complete(Ok(SimpleValue::Text(res.into()).into()));
                                         RequestStatus::Handled
                                     }
                                     None => {
@@ -209,7 +209,7 @@ fn main() {
                                 NativeValue::OutputFile { handle } => match handle.borrow_mut().as_mut() {
                                     Some(handle) => match writeln!(*handle, "{content}") {
                                         Ok(_) => {
-                                            key.complete(Ok(SimpleValue::String("OK".into()).into()));
+                                            key.complete(Ok(SimpleValue::Text("OK".into()).into()));
                                             RequestStatus::Handled
                                         }
                                         Err(e) => {
@@ -223,12 +223,12 @@ fn main() {
                                     }
                                 }
                                 _ => {
-                                    key.complete(Err(format_compact!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::String, file.get_type(), Type::<C, StdSystem<C>>::String)));
+                                    key.complete(Err(format_compact!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::Text, file.get_type(), Type::<C, StdSystem<C>>::Text)));
                                     RequestStatus::Handled
                                 }
                             }
                             _ => {
-                                key.complete(Err(format_compact!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::String, file.get_type(), content.get_type())));
+                                key.complete(Err(format_compact!("syscall writeLine - expected types {:?} and {:?}. received types {:?} and {:?}", NativeType::OutputFile, Type::<C, StdSystem<C>>::Text, file.get_type(), content.get_type())));
                                 RequestStatus::Handled
                             }
                         }
