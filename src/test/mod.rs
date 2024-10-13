@@ -149,6 +149,14 @@ fn test_sizes() {
 }
 
 #[test]
+fn test_send() {
+    fn assert_send<T: Send>() {}
+    assert_send::<SimpleValue>();
+    assert_send::<OutgoingMessage>();
+    assert_send::<IncomingMessage>();
+}
+
+#[test]
 fn test_note() {
     for i in 0..=127 {
         assert_eq!(Note::from_midi(i).unwrap().get_midi(), i);

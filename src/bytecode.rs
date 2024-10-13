@@ -156,7 +156,7 @@ impl BasicType {
 enum InternalInstruction<'a> {
     /// Triggers an error when encountered.
     /// This is an internal value that is only used to denote incomplete linking results for better testing.
-    /// Properly-linked byte code should not contain this value.
+    /// Successfully-linked byte code cannot contain this value.
     Illegal,
     /// A valid instruction that will be present in the resulting binary.
     Valid(Instruction<'a>),

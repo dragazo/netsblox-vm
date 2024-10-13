@@ -122,7 +122,7 @@ fn main() {
                         };
 
                         let mut opts = OpenOptions::new();
-                        match mode.as_ref() {
+                        match mode.as_str() {
                             "r" => { opts.read(true); }
                             "w" => { opts.write(true).create(true).truncate(true); }
                             "a" => { opts.write(true).create(true).append(true); }
@@ -132,7 +132,7 @@ fn main() {
                             }
                         }
 
-                        let file = match opts.open(path.as_ref()) {
+                        let file = match opts.open(path.as_str()) {
                             Ok(x) => x,
                             Err(e) => {
                                 key.complete(Err(format_compact!("syscall open - file open error: {e:?}")));
@@ -140,7 +140,7 @@ fn main() {
                             }
                         };
 
-                        let res = match mode.as_ref() {
+                        let res = match mode.as_str() {
                             "r" => NativeValue::InputFile { handle: RefCell::new(Some(BufReader::new(file))) },
                             "w" | "a" => NativeValue::OutputFile { handle: RefCell::new(Some(BufWriter::new(file))) },
                             _ => unreachable!(),

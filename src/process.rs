@@ -55,7 +55,7 @@ pub struct ErrorSummary {
 impl ErrorSummary {
     pub fn extract<C: CustomTypes<S>, S: System<C>>(error: &ExecError<C, S>, process: &Process<C, S>, locations: &Locations) -> Self {
         let raw_entity = process.call_stack.last().unwrap().entity;
-        let entity = raw_entity.borrow().name.as_ref().clone();
+        let entity = raw_entity.borrow().name.as_str().into();
         let cause = format_compact!("{:?}", error.cause);
 
         fn summarize_symbols<C: CustomTypes<S>, S: System<C>>(symbols: &SymbolTable<'_, C, S>) -> Vec<VarEntry> {
@@ -865,7 +865,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                     [_] => return Err(ErrorCause::UpvarAtRoot),
                     [.., x, y] => (x, y),
                 };
-                let parent_def = match parent_scope.locals.lookup_mut(target.as_ref()) {
+                let parent_def = match parent_scope.locals.lookup_mut(target.as_str()) {
                     Some(x) => x,
                     None => return Err(ErrorCause::UndefinedVariable { name: var.into() }),
                 };
@@ -1740,7 +1740,7 @@ mod ops {
         fn process_vector<C: CustomTypes<S>, S: System<C>>(res: &mut CompactString, value: &VecDeque<Value<C, S>>) -> Result<(), ErrorCause<C, S>> {
             for (i, x) in value.iter().enumerate() {
                 if i != 0 { res.push(','); }
-                process_scalar(res, x.as_text()?.as_ref())
+                process_scalar(res, x.as_text()?.as_str())
             }
             Ok(())
         }
@@ -1827,7 +1827,7 @@ mod ops {
             }),
             BinaryOp::SplitBy => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
                 let (text, pattern) = (a.as_text()?, b.as_text()?);
-                Ok(Gc::new(mc, RefLock::new(text.split(pattern.as_ref()).map(|x| Text::from(x).into()).collect::<VecDeque<_>>())).into())
+                Ok(Gc::new(mc, RefLock::new(text.split(pattern.as_str()).map(|x| Text::from(x).into()).collect::<VecDeque<_>>())).into())
             }),
 
             BinaryOp::Range => binary_op_impl(mc, system, a, b, true, &mut cache, |mc, _, a, b| {
@@ -1931,7 +1931,7 @@ mod ops {
                 Ok(Gc::new(mc, RefLock::new(x.as_text()?.lines().map(|x| Text::from(x).into()).collect::<VecDeque<_>>())).into())
             }),
             UnaryOp::SplitCsv => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {
-                let value = from_csv(mc, x.as_text()?.as_ref())?;
+                let value = from_csv(mc, x.as_text()?.as_str())?;
                 Ok(Gc::new(mc, RefLock::new(value)).into())
             }),
             UnaryOp::SplitJson => unary_op_impl(mc, system, x, &mut cache, OpType::Deterministic, &|mc, _, x| {

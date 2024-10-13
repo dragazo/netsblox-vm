@@ -183,7 +183,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
         let mut project = Self::new(Gc::new(mc, RefLock::new(global_context)));
 
         for entity_info in init_info.entities.iter() {
-            let entity = *project.state.global_context.borrow().entities.get(&entity_info.name).unwrap();
+            let entity = *project.state.global_context.borrow().entities.get(entity_info.name.as_str()).unwrap();
             for (event, pos) in entity_info.scripts.iter() {
                 project.add_script(*pos, entity, event.clone());
             }
@@ -362,7 +362,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Project<'gc, C, S> {
                 ProcessStep::Broadcast { msg_type, barrier, targets } => {
                     for i in 0..self.scripts.len() {
                         if let Event::LocalMessage { msg_type: recv_type } = &self.scripts[i].event.0 {
-                            if recv_type.as_ref().map(|x| *x == msg_type).unwrap_or(true) {
+                            if recv_type.as_deref().map(|x| x == msg_type).unwrap_or(true) {
                                 if let Some(targets) = &targets {
                                     if !targets.iter().any(|&target| Gc::ptr_eq(self.scripts[i].entity, target)) {
                                         continue

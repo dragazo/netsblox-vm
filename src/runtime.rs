@@ -1150,7 +1150,7 @@ pub struct ProcessKind<'gc, 'a, C: CustomTypes<S>, S: System<C>> {
 #[derive(Collect)]
 #[collect(no_drop, bound = "")]
 pub struct Entity<'gc, C: CustomTypes<S>, S: System<C>> {
-    #[collect(require_static)] pub name: Rc<CompactString>,
+    #[collect(require_static)] pub name: Text,
     #[collect(require_static)] pub sound_list: Rc<VecMap<CompactString, Rc<Audio>, false>>,
     #[collect(require_static)] pub costume_list: Rc<VecMap<CompactString, Rc<Image>, false>>,
     #[collect(require_static)] pub costume: Option<Rc<Image>>,
@@ -1368,9 +1368,9 @@ pub struct GlobalContext<'gc, C: CustomTypes<S>, S: System<C>> {
     #[collect(require_static)] pub settings: Settings,
     #[collect(require_static)] pub system: Rc<S>,
     #[collect(require_static)] pub timer_start: u64,
-    #[collect(require_static)] pub proj_name: CompactString,
+    #[collect(require_static)] pub proj_name: Text,
                                pub globals: SymbolTable<'gc, C, S>,
-                               pub entities: VecMap<CompactString, Gc<'gc, RefLock<Entity<'gc, C, S>>>, false>,
+                               pub entities: VecMap<Text, Gc<'gc, RefLock<Entity<'gc, C, S>>>, false>,
 }
 impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
     pub fn from_init(mc: &Mutation<'gc>, init_info: &InitInfo, bytecode: Rc<ByteCode>, settings: Settings, system: Rc<S>) -> Self {
@@ -1457,12 +1457,12 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> GlobalContext<'gc, C, S> {
             props.pen_color_t = Number::new((1.0 - a as f64) * 100.0).unwrap();
 
             let state = C::EntityState::from(if i == 0 { EntityKind::Stage { props } } else { EntityKind::Sprite { props } });
-            let name = Rc::new(entity_info.name.clone());
+            let name = Text::from(entity_info.name.as_str());
 
-            entities.insert((*name).clone(), Gc::new(mc, RefLock::new(Entity { original: None, name, fields, sound_list, costume_list, costume, state })));
+            entities.insert(name.clone(), Gc::new(mc, RefLock::new(Entity { original: None, name, fields, sound_list, costume_list, costume, state })));
         }
 
-        let proj_name = init_info.proj_name.clone();
+        let proj_name = init_info.proj_name.as_str().into();
         let timer_start = system.time(Precision::Medium).to_arbitrary_ms::<C, S>().unwrap_or(0);
 
         Self { proj_name, globals, entities, timer_start, system, settings, bytecode }
