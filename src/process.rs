@@ -1527,7 +1527,7 @@ mod ops {
         if let Ok(v) = value.as_number().map(Number::get) {
             let vv = v as i64;
             if v != vv as f64 { return Err(ErrorCause::NoteNotInteger { note: v }); }
-            let res = Note::from_midi(vv as u8);
+            let res = Note::from_midi(vv as u8, false);
             if vv < 0 || res.is_none() { return Err(ErrorCause::NoteNotMidi { note: vv.to_compact_string() }); }
             return Ok(res.unwrap());
         }

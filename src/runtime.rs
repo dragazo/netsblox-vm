@@ -1848,8 +1848,8 @@ const FLAT_NOTES: &'static str = "A Bb B C Db D Eb E F Gb G Ab";
 pub struct Note(u8);
 impl Note {
     /// Attempts to construct a new note from a raw midi value, failing if the value is out of range.
-    pub fn from_midi(val: u8) -> Option<Self> {
-        if val < 128 { Some(Self(val)) } else { None }
+    pub fn from_midi(val: u8, natural: bool) -> Option<Self> {
+        if val < 0x80 { Some(Self(if natural { 0x80 } else { 0 } | val)) } else { None }
     }
     /// Attempts to construct a new note from the name of a note, accepting a range of valid formats.
     pub fn from_name(name: &str) -> Option<Self> {
@@ -1860,6 +1860,7 @@ impl Note {
 
         let mut octave = None;
         let mut delta = 0;
+        let mut natural = false;
         loop {
             match c.next() {
                 Some(ch) => match ch {
@@ -1876,8 +1877,9 @@ impl Note {
                         }
                         octave = Some(v.parse::<i32>().ok()?);
                     }
-                    's' | '#' | '♯' => delta += 1,
-                    'b' | '♭' => delta -= 1,
+                    's' | '#' | '♯' => { delta += 1; natural = true; }
+                    'b' | '♭' => { delta -= 1; natural = true; }
+                    'n' | '♮' => natural = true,
                     _ => return None,
                 }
                 None => break,
@@ -1889,11 +1891,11 @@ impl Note {
         }
 
         let value = 21 + note + 12 * octave + delta;
-        if value >= 0 { Self::from_midi(value as u8) } else { None }
+        if value >= 0 { Self::from_midi(value as u8, natural) } else { None }
     }
     /// Gets the stored midi value.
-    pub fn get_midi(self) -> u8 {
-        self.0
+    pub fn get_midi(self) -> (u8, bool) {
+        (self.0 & 0x7f, self.0 & 0x80 != 0)
     }
     /// Computes the frequency of the note in Hz.
     pub fn get_frequency(self) -> Number {

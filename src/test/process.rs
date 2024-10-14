@@ -2776,15 +2776,15 @@ fn test_proc_play_notes() {
     let sound_events = &*sound_events.borrow();
     assert_eq!(sound_events.len(), 13);
 
-    assert!(sound_events[0].0 == [Note::from_midi(60).unwrap()] && (sound_events[0].1.get() - 0.5).abs() < 1e-10 && sound_events[0].2);
-    assert!(sound_events[1].0 == [Note::from_midi(51).unwrap()] && (sound_events[1].1.get() - 1.0).abs() < 1e-10 && sound_events[1].2);
-    assert!(sound_events[2].0 == [Note::from_midi(82).unwrap()] && (sound_events[2].1.get() - 2.333).abs() < 1e-10 && sound_events[2].2);
-    assert!(sound_events[3].0 == [Note::from_midi(86).unwrap()] && (sound_events[3].1.get() - 0.5).abs() < 1e-10 && sound_events[3].2);
-    assert!(sound_events[4].0 == [Note::from_midi(58).unwrap()] && (sound_events[4].1.get() - 4.0).abs() < 1e-10 && sound_events[4].2);
-    assert!(sound_events[5].0 == [Note::from_midi(76).unwrap()] && (sound_events[5].1.get() - 1.5).abs() < 1e-10 && sound_events[5].2);
-    assert!(sound_events[6].0 == [Note::from_midi(104).unwrap()] && (sound_events[6].1.get() - 0.5).abs() < 1e-10 && sound_events[6].2);
-    assert!(sound_events[7].0 == [Note::from_midi(45).unwrap(), Note::from_midi(58).unwrap()] && (sound_events[7].1.get() - 0.9).abs() < 1e-10 && sound_events[7].2);
-    assert!(sound_events[8].0 == [Note::from_midi(45).unwrap(), Note::from_midi(57).unwrap(), Note::from_midi(69).unwrap(), Note::from_midi(73).unwrap()] && (sound_events[8].1.get() - 0.1).abs() < 1e-10 && sound_events[8].2);
+    assert!(sound_events[0].0 == [Note::from_midi(60, false).unwrap()] && (sound_events[0].1.get() - 0.5).abs() < 1e-10 && sound_events[0].2);
+    assert!(sound_events[1].0 == [Note::from_midi(51, false).unwrap()] && (sound_events[1].1.get() - 1.0).abs() < 1e-10 && sound_events[1].2);
+    assert!(sound_events[2].0 == [Note::from_midi(82, false).unwrap()] && (sound_events[2].1.get() - 2.333).abs() < 1e-10 && sound_events[2].2);
+    assert!(sound_events[3].0 == [Note::from_midi(86, true).unwrap()] && (sound_events[3].1.get() - 0.5).abs() < 1e-10 && sound_events[3].2);
+    assert!(sound_events[4].0 == [Note::from_midi(58, true).unwrap()] && (sound_events[4].1.get() - 4.0).abs() < 1e-10 && sound_events[4].2);
+    assert!(sound_events[5].0 == [Note::from_midi(76, false).unwrap()] && (sound_events[5].1.get() - 1.5).abs() < 1e-10 && sound_events[5].2);
+    assert!(sound_events[6].0 == [Note::from_midi(104, true).unwrap()] && (sound_events[6].1.get() - 0.5).abs() < 1e-10 && sound_events[6].2);
+    assert!(sound_events[7].0 == [Note::from_midi(45, false).unwrap(), Note::from_midi(58, true).unwrap()] && (sound_events[7].1.get() - 0.9).abs() < 1e-10 && sound_events[7].2);
+    assert!(sound_events[8].0 == [Note::from_midi(45, false).unwrap(), Note::from_midi(57, false).unwrap(), Note::from_midi(69, false).unwrap(), Note::from_midi(73, true).unwrap()] && (sound_events[8].1.get() - 0.1).abs() < 1e-10 && sound_events[8].2);
     assert!(sound_events[9].0 == [] && (sound_events[9].1.get() - 0.2).abs() < 1e-10 && sound_events[9].2);
     assert!(sound_events[10].0 == [] && (sound_events[10].1.get() - 1.75).abs() < 1e-10 && sound_events[10].2);
     assert!(sound_events[11].0 == [] && (sound_events[11].1.get() - 2.4).abs() < 1e-10 && sound_events[11].2);
