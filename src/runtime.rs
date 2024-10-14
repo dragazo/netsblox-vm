@@ -1332,7 +1332,7 @@ impl<'gc, 'a, 'b, C: CustomTypes<S>, S: System<C>> LookupGroup<'gc, 'a, 'b, C, S
 /// The error promotion paradigm to use for certain types of runtime errors.
 #[derive(Clone, Copy)]
 pub enum ErrorScheme {
-    /// Emit errors as soft errors. This causes the error message to be returned as a [`Value::String`] object,
+    /// Emit errors as soft errors. This causes the error message to be returned as a [`Value::Text`] object,
     /// as well as being stored in a corresponding last-error process-local variable.
     Soft,
     /// Emit errors as hard errors. This treats certain classes of typically soft errors as hard errors that
