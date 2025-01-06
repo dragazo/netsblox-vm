@@ -8,6 +8,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 
+use core::fmt::Write as _;
 use core::mem;
 
 #[cfg(feature = "serde")]
@@ -1376,7 +1377,7 @@ impl Locations {
                 res.push_str(&self.separator);
             }
             first = false;
-            res.push_str(&(v as isize - 1 + self.base_token).to_string());
+            write!(res, "{}", v as isize - 1 + self.base_token).unwrap();
         }
         res.push_str(&self.suffix);
         Some(res)
