@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::thread;
 
-use rand::distributions::uniform::{SampleUniform, SampleRange};
+use rand::distr::uniform::{SampleUniform, SampleRange};
 use rand_chacha::ChaChaRng;
 use rand::{Rng, SeedableRng};
 use tokio_tungstenite::tungstenite::Message;
@@ -148,7 +148,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                                 _ => return,
                             };
                             match msg.get("type").and_then(|x| x.as_str()).unwrap_or("unknown") {
-                                "ping" => ws_sender_sender_clone.send(Message::Text(json!({ "type": "pong" }).to_string())).await.unwrap(),
+                                "ping" => ws_sender_sender_clone.send(Message::Text(json!({ "type": "pong" }).to_string().into())).await.unwrap(),
                                 "message" => {
                                     let (msg_type, values) = match (msg.remove("msgType"), msg.remove("content")) {
                                         (Some(Json::String(msg_type)), Some(Json::Object(values))) => (msg_type.into(), values),
@@ -182,7 +182,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                     }).await;
                 });
 
-                ws_sender_sender.send(Message::Text(json!({ "type": "set-uuid", "clientId": client_id }).to_string())).await.unwrap();
+                ws_sender_sender.send(Message::Text(json!({ "type": "set-uuid", "clientId": client_id }).to_string().into())).await.unwrap();
                 drop(finish_flag);
 
                 let src_id = format_compact!("{project_name}@{client_id}#vm");
@@ -219,7 +219,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
                             "content": { "body": value },
                         }),
                     };
-                    ws_sender_sender.send(Message::Text(msg.to_string())).await.unwrap();
+                    ws_sender_sender.send(Message::Text(msg.to_string().into())).await.unwrap();
                 }
             }
             let in_sender_clone = in_sender.clone();
@@ -270,7 +270,7 @@ impl<C: CustomTypes<StdSystem<C>>> StdSystem<C> {
         };
 
         let mut seed: <ChaChaRng as SeedableRng>::Seed = Default::default();
-        getrandom::getrandom(&mut seed).expect("failed to generate random seed");
+        getrandom::fill(&mut seed).expect("failed to generate random seed");
 
         let context_clone = context.clone();
         let config = config.fallback(&Config {
@@ -354,7 +354,7 @@ impl<C: CustomTypes<StdSystem<C>>> System<C> for StdSystem<C> {
     type CommandKey = AsyncKey<Result<(), CompactString>>;
 
     fn rand<T: SampleUniform, R: SampleRange<T>>(&self, range: R) -> T {
-        self.rng.lock().unwrap().gen_range(range)
+        self.rng.lock().unwrap().random_range(range)
     }
 
     fn time(&self, precision: Precision) -> SysTime {

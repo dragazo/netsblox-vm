@@ -416,16 +416,15 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
         let global_context = &mut *global_context_raw;
 
         macro_rules! lookup_var {
-            ($var:expr => $m:ident) => {{
-                let var = $var;
+            (@impl $var:ident :: $m:ident :: $f:expr) => {{
                 let local_frame = self.call_stack.last_mut().unwrap();
-                match LookupGroup::new(&mut [&mut global_context.globals, &mut local_frame.entity.borrow_mut(mc).fields, &mut local_frame.locals]).$m(var) {
-                    Some(x) => x,
-                    None => return Err(ErrorCause::UndefinedVariable { name: var.into() }),
+                match LookupGroup::new(&mut [&mut global_context.globals, &mut local_frame.entity.borrow_mut(mc).fields, &mut local_frame.locals]).$m($var) {
+                    Some($var) => $f,
+                    None => return Err(ErrorCause::UndefinedVariable { name: $var.into() }),
                 }
             }};
-            ($var:expr) => {lookup_var!($var => lookup)};
-            (mut $var:expr) => {lookup_var!($var => lookup_mut)};
+            ($var:ident => $f:expr) => {lookup_var!(@impl $var :: lookup :: $f)};
+            (mut $var:ident => $f:expr) => {lookup_var!(@impl $var :: lookup_mut :: $f)};
         }
 
         let (ins, aft_pos) = Instruction::read(&global_context.bytecode.code, &global_context.bytecode.data, self.pos);
@@ -469,7 +468,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::PushVariable { var } => {
-                self.value_stack.push(lookup_var!(var).get().clone());
+                self.value_stack.push(lookup_var!(var => var.get().clone()));
                 self.pos = aft_pos;
             }
             Instruction::PushEntity { name } => match global_context.entities.get(name).copied() {
@@ -858,7 +857,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 self.pos = aft_pos;
             }
             Instruction::InitUpvar { var } => {
-                let target = lookup_var!(var).get().clone();
+                let target = lookup_var!(var => var.get().clone());
                 let target = target.as_text()?;
                 let (parent_scope, current_scope) = match self.call_stack.as_mut_slice() {
                     [] => unreachable!(),
@@ -874,13 +873,13 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
             }
             Instruction::Assign { var } => {
                 let value = self.value_stack.pop().unwrap();
-                lookup_var!(mut var).set(mc, value);
+                lookup_var!(mut var => var.set(mc, value));
                 self.pos = aft_pos;
             }
             Instruction::BinaryOpAssign { var, op } => {
                 let b = self.value_stack.pop().unwrap();
-                let a = lookup_var!(var).get().clone();
-                lookup_var!(mut var).set(mc, ops::binary_op(mc, &*system, &a, &b, op)?);
+                let a = lookup_var!(var => var.get().clone());
+                lookup_var!(mut var => var.set(mc, ops::binary_op(mc, &*system, &a, &b, op)?));
                 self.pos = aft_pos;
             }
 
@@ -888,7 +887,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
                 let watcher = Watcher {
                     entity: Gc::downgrade(self.call_stack.last().unwrap().entity),
                     name: CompactString::new(var),
-                    value: Gc::downgrade(lookup_var!(mut var).alias_inner(mc)),
+                    value: Gc::downgrade(lookup_var!(mut var => var.alias_inner(mc))),
                 };
                 self.pos = aft_pos;
                 return Ok(ProcessStep::Watcher { create, watcher });
@@ -938,7 +937,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> Process<'gc, C, S> {
 
                 let mut caps = SymbolTable::default();
                 for &var in captures.iter() {
-                    caps.define_or_redefine(var, lookup_var!(mut var).alias(mc));
+                    caps.define_or_redefine(var, lookup_var!(mut var => var.alias(mc)));
                 }
                 self.value_stack.push(Gc::new(mc, RefLock::new(Closure { pos, params, captures: caps })).into());
                 self.pos = aft_pos;

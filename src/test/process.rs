@@ -2455,6 +2455,26 @@ fn test_proc_stop_fn() {
 }
 
 #[test]
+fn test_proc_diverse_ring_report() {
+    let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
+    let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
+        globals = "",
+        fields = "",
+        funcs = include_str!("blocks/diverse-ring-report.xml"),
+        methods = "",
+    ), Settings { rpc_error_scheme: ErrorScheme::Soft, ..Default::default() }, system, |_| SymbolTable::default());
+
+    run_till_term(&mut env, |mc, _, res| {
+        let expect = Value::from_simple(mc, SimpleValue::from_json(json!([
+            ["0.25", 1.1, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1],
+            ["1.25", "1.25", 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1],
+            ["2.25", "2.25", "2.25", 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1],
+        ])).unwrap());
+        assert_values_eq(&res.unwrap().0, &expect, 1e-5, "diverse ring report");
+    });
+}
+
+#[test]
 fn test_proc_unicode_strings() {
     let system = Rc::new(StdSystem::new_sync(CompactString::new(BASE_URL), None, Config::default(), Arc::new(Clock::new(UtcOffset::UTC, None))));
     let (mut env, _) = get_running_proc(Default::default(), &format!(include_str!("templates/generic-static.xml"),
@@ -2538,7 +2558,7 @@ fn test_proc_ext_raii() {
                     }
                     "getSomething" => {
                         assert_eq!(args.len(), 0);
-                        key.complete(Ok(proc.state.tokens.join_compact(",").into()));
+                        key.complete(Ok(proc.state.tokens.as_slice().join_compact(",").into()));
                         return RequestStatus::Handled;
                     }
                     _ => return RequestStatus::UseDefault { key, request },

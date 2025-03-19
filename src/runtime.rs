@@ -10,7 +10,7 @@ use core::{iter, fmt, mem};
 use core::ops::Deref;
 use core::cell::Ref;
 
-use rand::distributions::uniform::{SampleUniform, SampleRange};
+use rand::distr::uniform::{SampleUniform, SampleRange};
 use checked_float::{FloatChecker, CheckedFloat};
 
 #[cfg(feature = "serde")]
@@ -1273,11 +1273,11 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> SymbolTable<'gc, C, S> {
     }
     /// Looks up the given variable in the symbol table.
     /// If a variable with the given name does not exist, returns [`None`].
-    pub fn lookup(&self, var: &str) -> Option<&Shared<'gc, Value<'gc, C, S>>> {
+    pub fn lookup<'a>(&'a self, var: &str) -> Option<&'a Shared<'gc, Value<'gc, C, S>>> {
         self.0.get(var)
     }
     /// Equivalent to [`SymbolTable::lookup`] except that it returns a mutable reference.
-    pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Shared<'gc, Value<'gc, C, S>>> {
+    pub fn lookup_mut<'a>(&'a mut self, var: &str) -> Option<&'a mut Shared<'gc, Value<'gc, C, S>>> {
         self.0.get_mut(var)
     }
     /// Gets the number of symbols currently stored in the symbol table.
@@ -1300,7 +1300,7 @@ impl<'gc, C: CustomTypes<S>, S: System<C>> SymbolTable<'gc, C, S> {
 
 /// A collection of symbol tables with hierarchical context searching.
 pub(crate) struct LookupGroup<'gc, 'a, 'b, C: CustomTypes<S>, S: System<C>>(&'a mut [&'b mut SymbolTable<'gc, C, S>]);
-impl<'gc, 'a, 'b, C: CustomTypes<S>, S: System<C>> LookupGroup<'gc, 'a, 'b, C, S> {
+impl<'gc, 'a: 'b, 'b, C: CustomTypes<S>, S: System<C>> LookupGroup<'gc, 'a, 'b, C, S> {
     /// Creates a new lookup group.
     /// The first symbol table is intended to be the most-global, and subsequent tables are increasingly more-local.
     pub fn new(tables: &'a mut [&'b mut SymbolTable<'gc, C, S>]) -> Self {
@@ -1310,7 +1310,7 @@ impl<'gc, 'a, 'b, C: CustomTypes<S>, S: System<C>> LookupGroup<'gc, 'a, 'b, C, S
     /// Searches for the given variable in this group of lookup tables,
     /// starting with the last (most-local) table and working towards the first (most-global) table.
     /// Returns a reference to the value if it is found, otherwise returns [`None`].
-    pub fn lookup(&self, var: &str) -> Option<&Shared<'gc, Value<'gc, C, S>>> {
+    pub fn lookup<'s: 'a>(&'s self, var: &str) -> Option<&'b Shared<'gc, Value<'gc, C, S>>> {
         for src in self.0.iter().rev() {
             if let Some(val) = src.lookup(var) {
                 return Some(val);
@@ -1319,7 +1319,7 @@ impl<'gc, 'a, 'b, C: CustomTypes<S>, S: System<C>> LookupGroup<'gc, 'a, 'b, C, S
         None
     }
     /// As [`LookupGroup::lookup`], but returns a mutable reference.
-    pub fn lookup_mut(&mut self, var: &str) -> Option<&mut Shared<'gc, Value<'gc, C, S>>> {
+    pub fn lookup_mut<'s: 'a>(&'s mut self, var: &str) -> Option<&'b mut Shared<'gc, Value<'gc, C, S>>> {
         for src in self.0.iter_mut().rev() {
             if let Some(val) = src.lookup_mut(var) {
                 return Some(val);
